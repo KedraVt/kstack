@@ -299,9 +299,17 @@ export function unfreeze(state: WorkflowState): WorkflowState {
  * anomaly): clear the pause and continue. For loop exhaustion the gate phase's
  * result is already recorded, so the index moves PAST it — linear continuation
  * without re-running the gate.
+ *
+ * The attempt counter of the gate's loop TARGET is reset: the ceiling is
+ * documented as CONSECUTIVE reruns per review gate (config.ts), and the next
+ * gate (e.g. qa-verdict after an accepted devsecops-review) must get a fresh
+ * budget instead of parking on its first rejection with zero rework.
  */
-export function forceContinuePastGate(state: WorkflowState): WorkflowState {
-  return { ...state, status: "active", phaseIndex: state.phaseIndex + 1, pendingVerdict: undefined, pausedReason: undefined };
+export function forceContinuePastGate(state: WorkflowState, phases?: WorkflowPhase[]): WorkflowState {
+  const gate = phases?.[state.phaseIndex];
+  const attempts = { ...(state.attempts ?? {}) };
+  if (gate?.loopBackTo) delete attempts[gate.loopBackTo];
+  return { ...state, status: "active", phaseIndex: state.phaseIndex + 1, pendingVerdict: undefined, pausedReason: undefined, attempts };
 }
 
 /**

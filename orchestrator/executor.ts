@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { WorkflowState, WorkflowContext, GitContext } from "./types.ts";
+import type { WorkflowState, WorkflowContext, GitContext, WorkflowPhase } from "./types.ts";
 import { getWorkflow } from "./workflows.ts";
 import { saveState, advancePhase, gateForApproval, gateOptionalPhase, parkForUnreadableVerdict, loadActiveState, type AdvanceOptions } from "./state.ts";
 import { buildPhaseInstructions, buildDeterministicPlan } from "./templates.ts";
@@ -198,6 +198,21 @@ export function advanceBlockReason(state: WorkflowState): string | null {
   if (state.status === "awaiting_approval") {
     return `the workflow is PARKED awaiting user approval (manual decision gate) — only /gstack next or the /gstack panel may continue it`;
   }
+  // Fail-closed parks (F1 fix): EVERY paused state is a human decision point
+  // (security freeze, loop exhaustion, numbering anomaly, unreadable verdict,
+  // failed phase). A repeat gstack_advance call must never advance past one —
+  // pendingVerdict is cleared by then, so verdict routing would be skipped and
+  // the park bypassed on the model's say-so.
+  if (state.status === "paused") {
+    const reason = state.pausedReason ?? "";
+    if (state.frozenUntilHuman || reason.startsWith("security-freeze:")) {
+      return `the sprint is FROZEN by a critical/high security rejection — only the /gstack panel (with the exact confirmation phrase) may unfreeze it`;
+    }
+    if (state.verdictPark) {
+      return `the phase's verdict was unreadable — only the /gstack panel may continue, return or abort (no attempt was burned)`;
+    }
+    return `the workflow is PAUSED${reason ? ` (${reason})` : ""} — a human decision is pending; only /gstack may resume, re-run or abort it`;
+  }
   if (isPhaseInFlight(state.workflowId, state.phaseIndex)) {
     return `the subagent delegation for phase ${state.phaseIndex + 1} of "${state.workflowId}" is still running — wait for its results before calling gstack_advance`;
   }
@@ -292,7 +307,7 @@ export async function executeCurrentPhase(
     if (discovery.anomaly) {
       const parked = { ...state, status: "paused" as const, pausedReason: `anomaly:${discovery.anomaly}` };
       saveState(pi, parked);
-      notify(`gstack sprint: sprint numbering anomaly — ${discovery.anomaly}. Resolve manually, then resume via /gstack next.`, "warning");
+      notify(`gstack sprint: sprint numbering anomaly — ${discovery.anomaly}. Resolve manually, then resume via /gstack (the panel re-checks the numbering).`, "warning");
       return;
     }
     const numbered = { ...state, sprintNumber: discovery.next };
@@ -709,6 +724,46 @@ function formatDelegationResults(
   return parts.join("\n");
 }
 
+/**
+ * Binding constraints in force RIGHT NOW (Q4 fix): the resume prefix is the
+ * last thing the model reads before the user's message, so it must re-anchor
+ * not only WHERE the workflow is but WHICH rules still bind this turn —
+ * freezes, unreadable verdicts, report-only posture and manual gates would
+ * otherwise drift out of effective attention across a long phase.
+ */
+export function activeConstraintLines(state: WorkflowState, phase?: WorkflowPhase): string[] {
+  const lines: string[] = [];
+  if (state.frozenUntilHuman || (state.pausedReason ?? "").startsWith("security-freeze:")) {
+    lines.push(
+      "CONSTRAINT: a review gate is FROZEN by a critical/high security rejection. Do NOT work around it and do NOT call gstack_advance — the user must unfreeze via /gstack (exact confirmation phrase).",
+    );
+  }
+  if (state.verdictPark) {
+    lines.push(
+      "CONSTRAINT: the phase's verdict was UNREADABLE. Do not start new work and do NOT call gstack_advance — the user decides via /gstack (continue / return / abort).",
+    );
+  }
+  if (state.status === "paused" && state.pausedReason && lines.length === 0) {
+    lines.push(
+      `CONSTRAINT: the workflow is PAUSED (${state.pausedReason}) — a human decision is pending via /gstack. Do NOT call gstack_advance.`,
+    );
+  }
+  if (state.status === "paused" && !state.pausedReason && lines.length === 0) {
+    lines.push(
+      "CONSTRAINT: the previous phase FAILED — the user decides how to proceed via /gstack (resume re-runs the phase). Do NOT call gstack_advance.",
+    );
+  }
+  if (phase?.variant === "report-only") {
+    lines.push("CONSTRAINT: this phase is REPORT-ONLY — test and classify, do NOT fix, do NOT commit.");
+  }
+  if (phase?.advance === "manual") {
+    lines.push(
+      "CONSTRAINT: this is a DECISION phase — after calling gstack_advance the workflow pauses for user review; do not start the next phase yourself.",
+    );
+  }
+  return lines;
+}
+
 export function buildResumeContext(state: WorkflowState): string {
   const workflow = getWorkflow(state.workflowId);
   if (!workflow) return "";
@@ -722,6 +777,13 @@ export function buildResumeContext(state: WorkflowState): string {
   const completed = Object.entries(state.results).filter(([, r]) => r.status === "completed");
   if (completed.length > 0) {
     parts.push(`Completed: ${completed.map(([id]) => id).join(", ")}`);
+  }
+
+  // Re-anchor the binding rules, not just the position (Q4 fix).
+  const constraints = activeConstraintLines(state, phase);
+  if (constraints.length > 0) {
+    parts.push("");
+    parts.push(...constraints);
   }
 
   if (state.pendingOptional) {

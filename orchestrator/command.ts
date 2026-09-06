@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { getAllWorkflows, getWorkflow, getWorkflowIds } from "./workflows.ts";
 import { loadActiveState, createState, saveState, abortState, resumeState, reissueGate, approveNext, approveOptionalPhase, skipPendingOptional, isSecurityFrozen, unfreeze, forceApproveParked, returnParkedWithContext, forceContinuePastGate } from "./state.ts";
 import { detectGitContext } from "./git.ts";
+import { deterministicSubagents } from "./config.ts";
 import { launchPhase, executeCurrentPhase, releasePhaseInFlight } from "./executor.ts";
 import { writeRunReport } from "./telemetry.ts";
 import type { GitContext, WorkflowState } from "./types.ts";
@@ -185,7 +186,7 @@ export async function handleGstackCommand(args: string, ctx: ExtensionCommandCon
     return;
   }
 
-  const sorted = getAllWorkflows().sort((a, b) => menuScore(b, git) - menuScore(a, git));
+  const sorted = [...getAllWorkflows()].sort((a, b) => menuScore(b, git) - menuScore(a, git));
   const options = sorted.map((w) => `${w.id} — ${w.description}`);
 
   const selected = await ctx.ui.select("gstack: What would you like to do?", options);
@@ -198,6 +199,17 @@ export async function handleGstackCommand(args: string, ctx: ExtensionCommandCon
 async function startWorkflow(workflowId: string, ctx: ExtensionCommandContext, pi: ExtensionAPI, git: GitContext): Promise<void> {
   const workflow = getWorkflow(workflowId);
   if (!workflow) return;
+
+  // The sprint loop engine routes ONLY on pendingVerdict, which is produced
+  // exclusively by the executor's deterministic delegation. Without delegation
+  // the gates would silently degrade to model-say-so advancement (Q2 fix).
+  if (workflow.id === "sprint" && !deterministicSubagents()) {
+    ctx.ui.notify(
+      `The "sprint" workflow requires deterministic subagent delegation (GSTACK_PI_DETERMINISTIC). It is currently disabled: the review gates would be inert. Re-enable it or pick another workflow.`,
+      "warning",
+    );
+    return;
+  }
 
   const goal = await ctx.ui.input("Describe your goal", `e.g. "Add dark mode to the settings page"`);
   if (!goal) return;
@@ -308,8 +320,35 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
     return true; // handled either way — never fall through while parked
   }
 
-  // Loop exhaustion / numbering anomaly: paused for a HUMAN decision.
   const reason = state.pausedReason ?? "";
+  // Kill-switch parks (F2 fix): with GSTACK_PI_VERDICTS/_LOOPBACKS off, a
+  // completed verdict-bearing gate pauses with verdicts-disabled:/
+  // loopback-disabled:. Without a decision surface the only exits were Abort
+  // or an endless Resume→re-run→pause loop — the documented "human decides"
+  // contract had no decision UI. Offer the same choices as loop exhaustion.
+  if (state.status === "paused" && (reason.startsWith("verdicts-disabled:") || reason.startsWith("loopback-disabled:"))) {
+    const choice = await ctx.ui.select(`Sprint paused — ${reason}`, [
+      "Accept result — continue past the gate",
+      "Re-run the gated phase",
+      "Abort workflow",
+    ]);
+    if (choice === "Accept result — continue past the gate") {
+      const next = forceContinuePastGate(state, phases);
+      saveState(pi, next);
+      launchPhase(pi, ctx, next);
+    } else if (choice === "Re-run the gated phase") {
+      const resumed = resumeState(state);
+      saveState(pi, resumed);
+      launchPhase(pi, ctx, resumed);
+    } else if (choice === "Abort workflow") {
+      if (await ctx.ui.confirm("Abort workflow?", `Stop "sprint" at phase ${state.phaseIndex + 1}?`)) {
+        abortWorkflow(pi, ctx, state, "Workflow aborted.");
+      }
+    }
+    return true;
+  }
+
+  // Loop exhaustion / numbering anomaly: paused for a HUMAN decision.
   if (state.status === "paused" && (reason.startsWith("loop-exhausted:") || reason.startsWith("anomaly:"))) {
     const exhausted = reason.startsWith("loop-exhausted:");
     const choices = exhausted
@@ -328,7 +367,7 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
       saveState(pi, reissued);
       launchPhase(pi, ctx, reissued);
     } else if (exhausted && choice === "Accept result — continue past the gate") {
-      const next = forceContinuePastGate(state);
+      const next = forceContinuePastGate(state, phases);
       saveState(pi, next);
       launchPhase(pi, ctx, next);
     } else if (choice === "Abort workflow") {

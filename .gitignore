@@ -9,3 +9,6 @@ node_modules/
 bun.lock
 .gstack/
 runtime/
+
+# mindrun QA artifacts (temporary, never committed)
+mindrun-*.md

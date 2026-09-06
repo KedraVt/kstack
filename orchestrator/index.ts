@@ -6,7 +6,7 @@ import { loadActiveState, saveState, advancePhase, gateForApproval, createState 
 import type { AdvanceOptions } from "./state.ts";
 import { getWorkflow, getWorkflowIds } from "./workflows.ts";
 import { launchPhase, invalidateRuntime, advanceBlockReason } from "./executor.ts";
-import { manualGates, autoGateValidated, optionalPhases } from "./config.ts";
+import { manualGates, autoGateValidated, optionalPhases, deterministicSubagents } from "./config.ts";
 import { isValidatedStrategy } from "./skip.ts";
 import { ensureRun, writeRunReport } from "./telemetry.ts";
 import { SECURITY_SECTION } from "../lib/content-security.ts";
@@ -245,6 +245,17 @@ export function initOrchestrator(pi: ExtensionAPI): void {
           content: [{
             type: "text" as const,
             text: `Unknown workflow "${params.workflow}". Available: ${getWorkflowIds().join(", ")}.`,
+          }],
+          isError: true,
+        };
+      }
+      // Sprint gates route ONLY on pendingVerdict (executor delegation output);
+      // without deterministic delegation they would be inert (Q2 fix).
+      if (workflow.id === "sprint" && !deterministicSubagents()) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `The "sprint" workflow requires deterministic subagent delegation (GSTACK_PI_DETERMINISTIC). It is currently disabled: the review gates would be inert. Re-enable it or use a different workflow.`,
           }],
           isError: true,
         };

@@ -22,14 +22,18 @@ type InputEventResult =
 export function createInputRouter(_pi: ExtensionAPI) {
   return (event: InputEvent, ctx: ExtensionContext): InputEventResult => {
     if (event.source !== "interactive") return { action: "continue" };
-    if (event.text.length < MIN_INPUT_LENGTH) return { action: "continue" };
     if (event.text.startsWith("/")) return { action: "continue" };
 
     const activeState = loadActiveState(ctx);
     if (activeState) {
+      // Q4 fix: during an ACTIVE workflow even short inputs ("ok", "vai") mean
+      // "proceed" and need the re-anchoring prefix — the phase instructions may
+      // be many turns back. MIN_INPUT_LENGTH only guards intent matching below.
       const contextPrefix = buildResumeContext(activeState);
       return { action: "transform", text: `${contextPrefix}\n\n${event.text}` };
     }
+
+    if (event.text.length < MIN_INPUT_LENGTH) return { action: "continue" };
 
     const scores = scoreIntents(event.text);
     if (scores.length === 0 || scores[0].confidence < CONFIDENCE_THRESHOLD) {

@@ -14,7 +14,8 @@ import { parseHandoffVerdicts, verifyArtifactVerdicts, extractBlockers, buildRet
 import { computeNextSprintNumber, pad2, sprintArchiveDir, archivedSprintDirs } from "../orchestrator/sprint.ts";
 import { buildPhaseInstructions, buildDeterministicPlan, retryContextBlock, conditionalSkillIds, glossaryTable, MASTER_DOD } from "../orchestrator/templates.ts";
 import { modelTierFor, sprintMaxAttempts, sprintArchMaxAttempts, timeoutClassFor } from "../orchestrator/config.ts";
-import { retryTimeoutMs, shouldReopenFullChain } from "../orchestrator/executor.ts";
+import { retryTimeoutMs, shouldReopenFullChain, advanceBlockReason, buildResumeContext, activeConstraintLines } from "../orchestrator/executor.ts";
+import { createInputRouter } from "../orchestrator/router.ts";
 
 const SPRINT = getWorkflow("sprint")!;
 
@@ -979,4 +980,205 @@ describe("code-review pass-1 fixes", () => {
     assert.equal(after2.status, "paused");
     assert.match(after2.pausedReason ?? "", /loop-exhausted:implement/);
   });
+
+// --- mindrun fix guards (F1 / F3) ----------------------------------------------
+
+describe("advanceBlockReason (F1): every parked state is code-enforced", () => {
+  test("an active state is not blocked", () => {
+    assert.equal(advanceBlockReason(sprintState(7, { status: "active" })), null);
+  });
+
+  test("awaiting_approval (manual decision gate) is blocked", () => {
+    const blocked = advanceBlockReason(sprintState(4, { status: "awaiting_approval" }));
+    assert.ok(blocked, "manual gate must refuse gstack_advance");
+  });
+
+  test("security freeze is blocked — a repeat gstack_advance cannot bypass it (F1 core)", () => {
+    const frozen = sprintState(7, {
+      status: "paused",
+      frozenUntilHuman: true,
+      pausedReason: "security-freeze:devsecops-review",
+    });
+    const blocked = advanceBlockReason(frozen);
+    assert.ok(blocked, "the second advance on a frozen sprint must be refused");
+    assert.match(blocked!, /FROZEN/i);
+  });
+
+  test("pausedReason-only freeze (no flag) is also blocked", () => {
+    const frozen = sprintState(7, { status: "paused", pausedReason: "security-freeze:devsecops-review" });
+    assert.match(advanceBlockReason(frozen)!, /FROZEN/i);
+  });
+
+  test("unreadable-verdict park is blocked", () => {
+    const parked = parkForUnreadableVerdict(sprintState(8, { status: "paused" }), "qa-verdict");
+    const blocked = advanceBlockReason(parked);
+    assert.ok(blocked, "D4 park must refuse gstack_advance");
+    assert.match(blocked!, /unreadable/i);
+  });
+
+  test("loop exhaustion, anomaly and kill-switch parks are all blocked", () => {
+    const reasons = [
+      "loop-exhausted:implement after 4 runs",
+      "anomaly:sprint number 02 exists both in root and archive",
+      "verdicts-disabled:qa-verdict",
+      "loopback-disabled:devsecops-review",
+    ];
+    for (const reason of reasons) {
+      const blocked = advanceBlockReason(sprintState(7, { status: "paused", pausedReason: reason }));
+      assert.ok(blocked, `expected a block reason for "${reason}"`);
+    }
+  });
+
+  test("failed-phase pause (no reason string) is blocked too", () => {
+    const blocked = advanceBlockReason(sprintState(8, { status: "paused" }));
+    assert.ok(blocked, "a failed phase must not be re-advanced to completed by the model");
+  });
+
+  test("F1 end-to-end: freeze consumes the verdict, second advance is refused", () => {
+    // 1st advance: critical security rejection ⇒ freeze parks (routing runs).
+    const state = sprintState(7, {
+      sprintNumber: 7,
+      pendingVerdict: {
+        phaseId: "devsecops-review",
+        parsed: { verdicts: { "security-review": "rejected" }, severity: "critical" },
+        excerpt: "",
+      },
+    });
+    const frozen = advancePhase(state, "devsecops-review", { status: "completed", summary: "severe finding" }, SPRINT.phases.length, {
+      phases: SPRINT.phases,
+      cwd: process.cwd(),
+    });
+    assert.ok(isSecurityFrozen(frozen), "first advance freezes");
+    assert.equal(frozen.phaseIndex, 7, "phaseIndex held at the gate");
+    assert.equal(frozen.pendingVerdict, undefined, "verdict consumed — routing can never re-trigger");
+
+    // 2nd advance: the tool-level guard must refuse BEFORE advancePhase runs
+    // (with pendingVerdict gone, advancePhase routing would silently skip).
+    const blocked = advanceBlockReason(frozen);
+    assert.ok(blocked, "second gstack_advance on the frozen state must be blocked");
+    assert.match(blocked!, /FROZEN/i);
+  });
+});
+
+describe("forceContinuePastGate (F3): the next gate gets a fresh loop budget", () => {
+  test("accepting an exhausted gate resets the target counter", () => {
+    const ceiling = sprintMaxAttempts();
+    const state = sprintState(7, {
+      attempts: { implement: ceiling },
+      pausedReason: `loop-exhausted:implement after ${ceiling} runs`,
+    });
+    const next = forceContinuePastGate(state, SPRINT.phases);
+    assert.equal(next.phaseIndex, 8, "moves past the accepted gate");
+    assert.equal(next.status, "active");
+    assert.equal(next.attempts.implement, undefined, "loop budget reset");
+    assert.equal(next.pausedReason, undefined);
+  });
+
+  test("after acceptance, qa-verdict's FIRST rejection loops back instead of parking (F3 regression)", () => {
+    const ceiling = sprintMaxAttempts();
+    const next = forceContinuePastGate(
+      sprintState(7, { attempts: { implement: ceiling }, pausedReason: `loop-exhausted:implement after ${ceiling} runs` }),
+      SPRINT.phases,
+    );
+    const rejected = advancePhase(
+      { ...next, phaseIndex: 8, pendingVerdict: { phaseId: "qa-verdict", parsed: { verdicts: { status: "red" } }, excerpt: "" } },
+      "qa-verdict",
+      { status: "completed", summary: "red" },
+      SPRINT.phases.length,
+      { phases: SPRINT.phases, cwd: process.cwd() },
+    );
+    assert.equal(rejected.phaseIndex, 6, "loops back to implement with zero prior reruns");
+    assert.equal(rejected.status, "active", "must NOT park on the first QA rejection");
+    assert.equal(rejected.attempts.implement, 1, "budget starts fresh: this is rerun 1");
+    assert.equal(rejected.retryContext?.targetPhaseId, "implement");
+  });
+
+  test("single-arg call stays compatible and leaves attempts untouched", () => {
+    const state = sprintState(7, { attempts: { implement: 4 }, pausedReason: "loop-exhausted:implement after 4 runs" });
+    const next = forceContinuePastGate(state);
+    assert.equal(next.attempts.implement, 4);
+    assert.equal(next.phaseIndex, 8);
+  });
+});
+
+// --- mindrun fix guards (Q4): resume context re-anchors binding rules ---------
+
+describe("buildResumeContext / activeConstraintLines (Q4)", () => {
+  test("plain active state: no constraint lines, standard resume body", () => {
+    const text = buildResumeContext(sprintState(7, { status: "active" }));
+    assert.match(text, /\[gstack workflow active:/);
+    assert.match(text, /\(8\/10\)/);
+    assert.ok(!text.includes("CONSTRAINT:"), "a plain review phase carries no extra constraints");
+  });
+
+  test("frozen state re-anchors the freeze constraint", () => {
+    const text = buildResumeContext(
+      sprintState(7, { status: "paused", frozenUntilHuman: true, pausedReason: "security-freeze:devsecops-review" }),
+    );
+    assert.match(text, /CONSTRAINT: a review gate is FROZEN/);
+  });
+
+  test("unreadable-verdict park re-anchors the park constraint", () => {
+    const parked = parkForUnreadableVerdict(sprintState(8, { status: "paused" }), "qa-verdict");
+    assert.match(buildResumeContext(parked), /CONSTRAINT: the phase's verdict was UNREADABLE/);
+  });
+
+  test("generic pause and failed-phase pause re-anchor constraints", () => {
+    const paused = buildResumeContext(sprintState(7, { status: "paused", pausedReason: "loop-exhausted:implement after 4 runs" }));
+    assert.match(paused, /CONSTRAINT: the workflow is PAUSED \(loop-exhausted:/);
+    const failed = buildResumeContext(sprintState(8, { status: "paused" }));
+    assert.match(failed, /CONSTRAINT: the previous phase FAILED/);
+  });
+
+  test("report-only and manual-decision phases re-anchor their posture", () => {
+    const qa = SPRINT.phases.find((p) => p.id === "qa-verdict")!;
+    assert.ok(activeConstraintLines(sprintState(8, { status: "active" }), qa).some((l) => l.includes("REPORT-ONLY")));
+    const commit = SPRINT.phases.find((p) => p.id === "commit-archive")!;
+    assert.ok(activeConstraintLines(sprintState(9, { status: "active" }), commit).some((l) => l.includes("DECISION phase")));
+    assert.deepEqual(activeConstraintLines(sprintState(7, { status: "active" }), SPRINT.phases[7]), []);
+  });
+});
+
+describe("input router (Q4): short inputs still re-anchor during an active workflow", () => {
+  function fakeRouterCtx(state: any): any {
+    const entries = state ? [{ type: "custom", customType: "gstack-wf-state", data: state }] : [];
+    return { sessionManager: { getEntries: () => entries } };
+  }
+
+  test('"ok" gets the resume prefix while a workflow is active (threshold bypassed)', () => {
+    const handler = createInputRouter({} as any);
+    const out = handler({ text: "ok", source: "interactive" }, fakeRouterCtx(sprintState(7, { status: "active" }))) as any;
+    assert.equal(out.action, "transform");
+    assert.ok(out.text.startsWith("[gstack workflow active:"));
+    assert.ok(out.text.endsWith("ok"));
+  });
+
+  test("parked/frozen workflows also re-anchor short inputs (constraints included)", () => {
+    const handler = createInputRouter({} as any);
+    const out = handler(
+      { text: "ok", source: "interactive" },
+      fakeRouterCtx(sprintState(7, { status: "paused", frozenUntilHuman: true, pausedReason: "security-freeze:devsecops-review" })),
+    ) as any;
+    assert.equal(out.action, "transform");
+    assert.match(out.text, /CONSTRAINT: a review gate is FROZEN/);
+  });
+
+  test("non-interactive and slash inputs are never transformed", () => {
+    const handler = createInputRouter({} as any);
+    assert.equal(handler({ text: "ok", source: "rpc" }, fakeRouterCtx(sprintState(7, { status: "active" }))).action, "continue");
+    assert.equal(handler({ text: "/gstack", source: "interactive" }, fakeRouterCtx(sprintState(7, { status: "active" }))).action, "continue");
+  });
+
+  test("without an active workflow, short inputs still skip intent matching (unchanged threshold)", () => {
+    const handler = createInputRouter({} as any);
+    assert.equal(handler({ text: "ok", source: "interactive" }, fakeRouterCtx(null)).action, "continue");
+  });
+
+  test("intent suggestions still fire for long input without a workflow", () => {
+    const handler = createInputRouter({} as any);
+    const out = handler({ text: "investigate the failing login request", source: "interactive" }, fakeRouterCtx(null)) as any;
+    assert.equal(out.action, "transform");
+    assert.match(out.text, /gstack-orchestrator/);
+  });
+});
 });

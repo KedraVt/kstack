@@ -20,10 +20,12 @@ One extension, two layers:
 
 - **`sprint` workflow (opt-in)** — a 10-phase agile delivery pipeline distilled from `.agents-clean` methodology: understand → user-story → capability → system-design → ⏸ architect gate → backlog → implement → devsecops review → QA verdict → commit/archive. Planning artifacts (`user-story_XX.md`, `system-design_XX.md`, `tasks_XX.md`, …) live in the project root and archive to `.gstack/sprints/sprint_XX/` when the sprint goes green.
 - **Deterministic verdict routing** — review gates emit machine-parseable verdict lines (`status == red|green|orange`, `security-review == approved|rejected`) inside a `## HANDOFF` section. The orchestrator parses them fail-closed (whitelist-only values, containment-checked), cross-verifies them against the artifact files on disk (dual channel: chat + disk must agree), and routes deterministically — never on the model's say-so.
+- **Parks are code-enforced** — every parked state (security freeze, unreadable verdict, loop exhaustion, numbering anomaly, failed phase) is refused by the `gstack_advance` tool itself, not just discouraged in prose: a repeat call cannot advance past a park on the model's say-so. Only the `/gstack` panel (or `/gstack next` where applicable) can resume, re-run, accept or abort.
 - **Security freeze** — a critical/high security rejection parks the whole sprint until a human types the confirmation phrase in the panel; medium/low rejections loop back to implement normally.
 - **Trust boundary note** — dual-channel verification trusts files in the repo root: a malicious repo can pre-plant both channels against a predictable next sprint number. Sprint stamping, anomaly guards, and the hard commit-archive gate raise the bar but do not close within-sprint planting — review gate artifacts before approving.
-- **Bounded loop-backs** — rejected reviews return work to the implementing phase with extracted blocker feedback; after N attempts (configurable) the sprint parks for human decision instead of looping forever.
+- **Bounded loop-backs** — rejected reviews return work to the implementing phase with extracted blocker feedback; after N attempts (configurable) the sprint parks for human decision instead of looping forever. Accepting an exhausted gate ("Accept result — continue past the gate") resets the loop budget, so the next review gate gets a fresh ceiling instead of parking on its first rejection.
 - **Unreadable-verdict park** — if a gate's output can't be parsed into a known verdict, the sprint parks WITHOUT burning an attempt; the panel shows only the failing lines so you can approve/loop/inspect deliberately.
+- **Sprint requires deterministic delegation** — the sprint gates route exclusively on executor-produced verdicts, so the workflow refuses to start while `GSTACK_PI_DETERMINISTIC=off` (both `/gstack sprint` and the `gstack_start` tool explain this). Kill-switch parks (`GSTACK_PI_VERDICTS=off` / `_LOOPBACKS=off`) likewise land in a decision panel offering **Accept / Re-run / Abort**.
 - **Strict BE→FE chain** — implementation runs backend-developer then frontend-developer sequentially per task wave; model tiers (`GSTACK_PI_MODEL_STRONG/FAST`) let judgment phases run on stronger models while mechanical phases stay cheap.
 - **Fixed**: phase instructions are now delivered with `followUp` streaming behavior — eliminates the "Agent is already processing" error that silently dropped phase handoffs.
 - **Raw skill library split** — the bundled skill surface is organized in two folders: `skills/gstack/` (23 cherry-picked gstack skills, manual `/skill:gstack-*` invocation) and `skills/kedra/` (18 full `.agents-clean` methodology skills, verbatim, manual `/skill:<name>` invocation — the whole source library except `acceptance-criteria-backend/-frontend`, which live inside the sub-agent bodies). The orchestrator's digest injection is unchanged.
@@ -81,7 +83,9 @@ The menu adapts to your git context:
 
 ⏸ = decision phase: the workflow pauses in `awaiting_approval` until you run `/gstack next`.
 
-Each phase runs either in the main agent context (analysis, verification, planning) or is delegated deterministically to a spawned specialist subagent — scout / planner / worker / reviewer (implementation, exploration, heavy testing). The orchestrator injects structured instructions and advances when the model calls `gstack_advance`; it can never bypass a manual gate.
+Each phase runs either in the main agent context (analysis, verification, planning) or is delegated deterministically to a spawned specialist subagent — scout / planner / worker / reviewer (implementation, exploration, heavy testing). The orchestrator injects structured instructions and advances when the model calls `gstack_advance`; it can never bypass a manual gate or a parked state — the advance tool refuses `paused`/`awaiting_approval` states outright, so only you can resume, re-run, accept or abort from the `/gstack` panel.
+
+While a workflow is active, every interactive input is prefixed with a resume context that re-anchors the current phase, the goal, and the constraints still binding this turn (frozen gate, unreadable verdict, report-only posture, decision phase) — short acknowledgements like "ok" stay on-workflow instead of drifting back to plain chat.
 
 ### The interactive plan cycle (`develop`)
 
@@ -298,7 +302,8 @@ input router ─────────────┘         ↑             
 3. Subagent phases are executed by the orchestrator itself: specialists run in isolated `pi` processes and their output is prefixed for review
 4. The LLM calls `gstack_advance` with a summary — this is the only progression mechanism; it must never defer back to the user
 5. Auto phases advance immediately; decision phases (`develop.plan`, `investigate.root-cause`) park in `awaiting_approval` until you run `/gstack next`
-6. Repeat until all phases complete
+6. Sprint parks (security freeze, unreadable verdict, loop exhaustion, numbering anomaly, kill-switch pauses, failed phases) are tool-enforced: a repeat `gstack_advance` is refused and only the `/gstack` panel moves the state machine
+7. Repeat until all phases complete
 
 State persists across session reloads via pi's `appendEntry` (not sent to LLM context).
 
@@ -344,7 +349,7 @@ MIT
 
 ## Injection & efficiency
 
-The orchestrator controls WHAT is injected into subagent prompts and HOW chains are orchestrated. All protocols below apply in **deterministic mode** (`GSTACK_PI_DETERMINISTIC=on`, the default). With `GSTACK_PI_DETERMINISTIC=off`, tasks flow through the advisory `subagent`-tool path where `{previous}` stays literal and handoff extraction is never invoked (documented advisory divergence).
+The orchestrator controls WHAT is injected into subagent prompts and HOW chains are orchestrated. All protocols below apply in **deterministic mode** (`GSTACK_PI_DETERMINISTIC=on`, the default). With `GSTACK_PI_DETERMINISTIC=off`, tasks flow through the advisory `subagent`-tool path where `{previous}` stays literal and handoff extraction is never invoked (documented advisory divergence). The `sprint` workflow refuses to start in this mode: its review gates route exclusively on delegation-produced verdicts.
 
 ### Task contracts (three paths)
 Every delegated task and every main-phase instruction carries a falsifiable pair of blocks in a fixed order:
@@ -388,14 +393,14 @@ the root-cause scout->planner chain collapses to ONE validate-only planner step.
 | variable | default | effect |
 |---|---|---|
 | `GSTACK_PI_SKILLS` | on | skill digest injection |
-| `GSTACK_PI_DETERMINISTIC` | on | executor-spawned subagents |
+| `GSTACK_PI_DETERMINISTIC` | on | executor-spawned subagents; `off` also makes the `sprint` workflow refuse to start (its gates route on delegation verdicts) |
 | `GSTACK_PI_MANUAL_GATES` | on | approval pause after decision phases |
 | `GSTACK_PI_OPTIONAL_PHASES` | ask | `ask` \| `auto` \| `skip` handling of optional phases |
 | `GSTACK_PI_AUTO_GATE_VALIDATED` | off | auto-advance past root-cause gate when validation starts with `VALIDATED:` |
 | `GSTACK_PI_SPRINT` | on | registers the sprint workflow; `off` hides it from menu and router entirely |
-| `GSTACK_PI_LOOPBACKS` | on | sprint loop-back engine; `off` ⇒ negative gate verdicts pause instead of retrying |
-| `GSTACK_PI_VERDICTS` | on | deterministic verdict parsing; `off` ⇒ gates rely on human reading, no auto-routing |
-| `GSTACK_PI_SPRINT_MAX_ATTEMPTS` | 4 | consecutive implement-rerun ceiling per review gate (counter resets on gate approval) |
+| `GSTACK_PI_LOOPBACKS` | on | sprint loop-back engine; `off` ⇒ negative gate verdicts park in a `/gstack` panel (Accept / Re-run / Abort) instead of retrying |
+| `GSTACK_PI_VERDICTS` | on | deterministic verdict parsing; `off` ⇒ no auto-routing; gates park in a `/gstack` panel (Accept / Re-run / Abort) |
+| `GSTACK_PI_SPRINT_MAX_ATTEMPTS` | 4 | consecutive implement-rerun ceiling per review gate (counter resets on gate approval or on "Accept result — continue past the gate") |
 | `GSTACK_PI_ARCH_MAX_ATTEMPTS` | 5 | system-design rerun ceiling after architect rejections (reads `GSTACK_PI_SPRINT_ARCH_MAX_ATTEMPTS` / `GSTACK_PI_ARCH_MAX_ATTEMPTS`) |
 | `GSTACK_PI_MODEL_FAST` / `_STRONG` | unset | model tiers for mechanical vs judgment-heavy phases; unset keeps each agent's own default (inert) |
 | `GSTACK_PI_STRICT_CONTENT` | off | heuristic scan + ASCII-sentinel enveloping of page-content tool output (WP2 defense-in-depth) |
