@@ -4,11 +4,13 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createState, advancePhase, routeVerdict, parkForUnreadableVerdict, forceApproveParked, returnParkedWithContext, isSecurityFrozen, unfreeze, forceContinuePastGate, reissueGate } from "../orchestrator/state.ts";
+import { launchPhase } from "../orchestrator/executor.ts";
+import { decisionBlockedByInFlightChain } from "../orchestrator/command.ts";
 import { getAllWorkflows, getWorkflow } from "../orchestrator/workflows.ts";
 import { parseHandoffVerdicts, verifyArtifactVerdicts, extractBlockers, buildRetryFeedback, mergeParseOutcomes, KNOWN_VARIABLES } from "../orchestrator/verdicts.ts";
 import { computeNextSprintNumber, pad2, sprintArchiveDir, archivedSprintDirs } from "../orchestrator/sprint.ts";
@@ -1174,6 +1176,21 @@ describe("input router (Q4): short inputs still re-anchor during an active workf
     assert.equal(handler({ text: "ok", source: "interactive" }, fakeRouterCtx(null)).action, "continue");
   });
 
+  test("parked manual gate re-anchors as PARKED, never as 'Continue working' (2026-09 fix 3)", () => {
+    // The 2026-09 session bug: a plan tweak typed at the phase-3 decision gate
+    // was prefixed with "Continue working on the current phase…", so the model
+    // resumed and implemented the plan instead of staying parked.
+    const handler = createInputRouter({} as any);
+    const out = handler(
+      { text: "rendi la nav più compatta", source: "interactive" },
+      fakeRouterCtx(sprintState(2, { status: "awaiting_approval" })),
+    ) as any;
+    assert.equal(out.action, "transform");
+    assert.match(out.text, /PARKED for user approval/);
+    assert.ok(!out.text.includes("Continue working on the current phase"));
+    assert.ok(out.text.endsWith("rendi la nav più compatta"));
+  });
+
   test("intent suggestions still fire for long input without a workflow", () => {
     const handler = createInputRouter({} as any);
     const out = handler({ text: "investigate the failing login request", source: "interactive" }, fakeRouterCtx(null)) as any;
@@ -1181,4 +1198,50 @@ describe("input router (Q4): short inputs still re-anchor during an active workf
     assert.match(out.text, /gstack-orchestrator/);
   });
 });
+
+describe("in-flight decision guards (2026-09 fix 4)", () => {
+  function fakeCmdCtx(): any {
+    const notified: string[] = [];
+    return {
+      ctx: {
+        ui: { notify: (msg: string) => notified.push(msg) },
+      },
+      notified,
+    };
+  }
+
+  test("decisionBlockedByInFlightChain refuses decisions while a chain runs", async () => {
+    const { ctx } = fakeCmdCtx();
+    const state = { ...createState("develop", "goal"), phaseIndex: 4, status: "awaiting_approval" as const, pendingOptional: true };
+
+    assert.equal(decisionBlockedByInFlightChain(ctx, state), false, "no chain → decision allowed");
+
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    launchPhase({} as any, ctx, state, async () => { await gate; });
+
+    assert.equal(decisionBlockedByInFlightChain(ctx, state), true, "in-flight chain → decision refused");
+    release();
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(decisionBlockedByInFlightChain(ctx, state), false, "settled chain → decision allowed again");
+  });
+
+  test("the guard is wired into the decision paths that mutate state", () => {
+    // Static wiring check: all three decision mutations (optional Run, optional
+    // Skip, manual-gate Approve via /gstack next) must consult the guard before
+    // touching state — the 2026-09 race (skip ignored, phase advanced twice)
+    // lived exactly in these paths.
+    const source = readFileSync(new URL("../orchestrator/command.ts", import.meta.url), "utf-8");
+    const optionalRun = source.indexOf("choice?.startsWith(\"Run\")");
+    assert.ok(optionalRun > -1);
+    const afterRun = source.slice(optionalRun, optionalRun + 300);
+    assert.match(afterRun, /decisionBlockedByInFlightChain/);
+    const nextPath = source.slice(source.indexOf("argId === \"next\""), source.indexOf("const git = await detectGitContext"));
+    const guardCount = (nextPath.match(/decisionBlockedByInFlightChain/g) ?? []).length;
+    assert.equal(guardCount, 2, "/gstack next must guard both the optional-park and awaiting_approval paths");
+  });
+});
+
+// close the outer "buildResumeContext / activeConstraintLines (Q4)" describe
+// (the input-router describe above is nested inside it, matching the original layout)
 });

@@ -7,9 +7,9 @@ import * as path from "node:path";
 import { createState, advancePhase, abortState, resumeState, pauseState, gateForApproval, approveNext, gateOptionalPhase, approveOptionalPhase, skipPendingOptional } from "../orchestrator/state.ts";
 import { getAllWorkflows, getWorkflow, getWorkflowIds } from "../orchestrator/workflows.ts";
 import { loadSkillDigest, getSkillInfo, buildSkillIndex, getSkillIds } from "../orchestrator/skills.ts";
-import { buildPhaseInstructions, buildDeterministicPlan, planFilePath } from "../orchestrator/templates.ts";
+import { buildPhaseInstructions, buildDeterministicPlan, planFilePath, parsePlanFileMarker, resolvePlanFilePath, carryOverOpenQuestions } from "../orchestrator/templates.ts";
 import type { WorkflowContext, WorkflowPhase } from "../orchestrator/types.ts";
-import { launchPhase, ctxAlive, isPhaseInFlight, advanceBlockReason, releasePhaseInFlight } from "../orchestrator/executor.ts";
+import { launchPhase, ctxAlive, isPhaseInFlight, advanceBlockReason, releasePhaseInFlight, buildResumeContext, activeConstraintLines } from "../orchestrator/executor.ts";
 import { activityLabelFromEvent } from "../orchestrator/spawn.ts";
 import { runSubagent, resolveTimeoutMs } from "../orchestrator/spawn.ts";
 import {
@@ -1387,5 +1387,126 @@ describe("runSubagent real spawn path (crash regression)", () => {
     });
     assert.equal(result.ok, false);
     assert.equal(result.configError, true);
+  });
+});
+
+// --- Parked-gate re-anchor + plan-naming + open-questions carry-over (2026-09 session) ---
+
+describe("buildResumeContext parked manual gate (2026-09 fix 3)", () => {
+  test("awaiting_approval forbids continuing: no 'Continue working' body", () => {
+    // The 2026-09 session bug: the router prefixes every user message with the
+    // resume context; at a parked plan gate it still said "Continue working…",
+    // so a plan tweak read as "resume and implement".
+    const state = { ...createState("develop", "add dark mode"), phaseIndex: 3, status: "awaiting_approval" as const };
+    const text = buildResumeContext(state);
+    assert.ok(!text.includes("Continue working on the current phase"), `leaked resume body: ${text}`);
+    assert.match(text, /PARKED for user approval/);
+    assert.match(text, /do NOT call gstack_advance/);
+    assert.match(text, /only \/gstack next/);
+  });
+
+  test("pendingOptional branch still wins over the generic parked branch", () => {
+    const develop = getWorkflow("develop")!;
+    const shipIndex = develop.phases.findIndex((p) => p.id === "ship");
+    const state = { ...createState("develop", "add dark mode"), phaseIndex: shipIndex, status: "awaiting_approval" as const, pendingOptional: true };
+    const text = buildResumeContext(state);
+    assert.match(text, /This phase is OPTIONAL and the workflow is PARKED/);
+    assert.ok(!text.includes("PARKED for user approval BEFORE"), "generic parked body leaked into optional gate");
+  });
+
+  test("active state keeps the standard resume body", () => {
+    const text = buildResumeContext({ ...createState("develop", "add dark mode"), phaseIndex: 3, status: "active" } as any);
+    assert.match(text, /Continue working on the current phase/);
+    assert.ok(!text.includes("PARKED for user approval"));
+  });
+
+  test("activeConstraintLines re-anchors the parked gate too", () => {
+    const state = { ...createState("develop", "add dark mode"), phaseIndex: 3, status: "awaiting_approval" as const };
+    const lines = activeConstraintLines(state as any);
+    assert.ok(lines.some((l) => l.includes("PARKED at a decision gate")));
+  });
+});
+
+describe("plan file naming (2026-09 fix 2)", () => {
+  test("legacy slug fallback is unchanged", () => {
+    assert.equal(planFilePath("Add dark mode to the settings page"), ".gstack/plans/add-dark-mode-to-the-settings-page.md");
+    assert.equal(planFilePath("???"), ".gstack/plans/plan.md");
+  });
+
+  test("parsePlanFileMarker accepts a valid path and strips punctuation", () => {
+    assert.equal(parsePlanFileMarker("Did the plan. PLAN FILE: .gstack/plans/dark-mode-toggle.md"), ".gstack/plans/dark-mode-toggle.md");
+    assert.equal(parsePlanFileMarker("PLAN FILE: `.gstack/plans/quoted.md`."), ".gstack/plans/quoted.md");
+  });
+
+  test("parsePlanFileMarker skips an echoed template fragment and takes the first VALID match (mindrun F3)", () => {
+    // A model echoing the prompt's own "PLAN FILE: <path>" fragment before the
+    // real marker must not shadow it: iterate all occurrences, first valid wins.
+    const echoed = "As instructed I end with PLAN FILE: <path> — PLAN FILE: .gstack/plans/real-essence.md";
+    assert.equal(parsePlanFileMarker(echoed), ".gstack/plans/real-essence.md");
+    // Still null when every occurrence is invalid.
+    assert.equal(parsePlanFileMarker("PLAN FILE: <path> and PLAN FILE: /etc/passwd"), null);
+  });
+
+  test("parsePlanFileMarker refuses traversal, wrong dir, and garbage", () => {
+    assert.equal(parsePlanFileMarker("PLAN FILE: .gstack/plans/../secrets.md"), null);
+    assert.equal(parsePlanFileMarker("PLAN FILE: /etc/passwd"), null);
+    assert.equal(parsePlanFileMarker("PLAN FILE: .gstack/plans/UPPER_CASE.md"), null);
+    assert.equal(parsePlanFileMarker("no marker at all"), null);
+  });
+
+  test("resolvePlanFilePath prefers the captured planFile over the legacy slug", () => {
+    const ctx = makeCtx("develop", 3);
+    ctx.state.planFile = ".gstack/plans/llm-chosen-name.md";
+    assert.equal(resolvePlanFilePath(ctx), ".gstack/plans/llm-chosen-name.md");
+    const ctx2 = makeCtx("develop", 3);
+    assert.equal(resolvePlanFilePath(ctx2), planFilePath("add dark mode toggle"));
+  });
+
+  test("plan phase instructions let the MODEL choose the name (mindrun F1)", () => {
+    // The orchestrator must NOT pin the path: a pre-resolved deterministic path
+    // makes the model parrot it, so the LLM never actually names anything.
+    const plan = findPhase("develop", "plan");
+    const instructions = buildPhaseInstructions(plan, makeCtx("develop", 2));
+    assert.ok(instructions.includes("YOU choose the filename"), "instructions must hand naming to the model");
+    assert.ok(instructions.includes("PLAN FILE:"), "plan contract must demand the PLAN FILE marker");
+    assert.ok(instructions.includes(".gstack/plans/"));
+    assert.ok(!instructions.includes("PLAN FILE: .gstack/plans/add-dark-mode-toggle.md"), "instructions must not pin the legacy slug as THE path");
+  });
+});
+
+describe("open-questions carry-over (2026-09 fix 1)", () => {
+  test("understand contract demands the OPEN QUESTIONS section", () => {
+    const instructions = buildPhaseInstructions(findPhase("develop", "understand"), makeCtx("develop", 0));
+    assert.ok(instructions.includes("OPEN QUESTIONS:"));
+  });
+
+  test("carryOverOpenQuestions extracts bullets from the understand summary", () => {
+    const ctx = makeCtx("develop", 2);
+    ctx.state.results["understand"] = {
+      status: "completed",
+      summary: "Existing app uses React.\nOPEN QUESTIONS:\n- Where should the toggle live?\n- Persist choice in localStorage or profile?",
+    };
+    const block = carryOverOpenQuestions(ctx);
+    assert.match(block, /Carried-over open questions/);
+    assert.match(block, /Where should the toggle live\?/);
+    assert.match(block, /Persist choice in localStorage or profile\?/);
+  });
+
+  test("carryOverOpenQuestions is empty without the section or for 'none'", () => {
+    const ctx = makeCtx("develop", 2);
+    assert.equal(carryOverOpenQuestions(ctx), "");
+    ctx.state.results["understand"] = { status: "completed", summary: "All settled. OPEN QUESTIONS: none" };
+    assert.equal(carryOverOpenQuestions(ctx), "");
+  });
+
+  test("plan instructions embed the carried questions when present", () => {
+    const ctx = makeCtx("develop", 2);
+    ctx.state.results["understand"] = {
+      status: "completed",
+      summary: "Context.\nOPEN QUESTIONS:\n- Which storage backend?",
+    };
+    const instructions = buildPhaseInstructions(findPhase("develop", "plan"), ctx);
+    assert.match(instructions, /Carried-over open questions/);
+    assert.match(instructions, /Which storage backend\?/);
   });
 });

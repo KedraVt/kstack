@@ -140,6 +140,13 @@ export interface WorkflowState {
    * touch the phase — the model cannot bypass the gate.
    */
   pendingOptional?: boolean;
+  /**
+   * Plan-file path captured from the plan phase's marker (PLAN FILE: …).
+   * Lets the LLM name the plan after its essence instead of the legacy
+   * goal-prefix slug; absent ⇒ planFilePath(goal) fallback keeps old sessions
+   * and untouched runs working.
+   */
+  planFile?: string;
 }
 
 export interface GitContext {

@@ -3,7 +3,7 @@ import { getAllWorkflows, getWorkflow, getWorkflowIds } from "./workflows.ts";
 import { loadActiveState, createState, saveState, abortState, resumeState, reissueGate, approveNext, approveOptionalPhase, skipPendingOptional, isSecurityFrozen, unfreeze, forceApproveParked, returnParkedWithContext, forceContinuePastGate } from "./state.ts";
 import { detectGitContext } from "./git.ts";
 import { deterministicSubagents } from "./config.ts";
-import { launchPhase, executeCurrentPhase, releasePhaseInFlight } from "./executor.ts";
+import { launchPhase, executeCurrentPhase, releasePhaseInFlight, isPhaseInFlight } from "./executor.ts";
 import { writeRunReport } from "./telemetry.ts";
 import type { GitContext, WorkflowState } from "./types.ts";
 
@@ -15,6 +15,27 @@ import type { GitContext, WorkflowState } from "./types.ts";
  */
 function launchApprovedOptional(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: WorkflowState): void {
   launchPhase(pi, ctx, state, (p, c, s) => executeCurrentPhase(p, c, s, { approvedOptional: true }));
+}
+
+/**
+ * Skip/approve decision guard (2026-09 session post-mortem): a decision made
+ * while a delegation chain for the current phase is STILL running double-fires
+ * the pipeline — the 2026-08-31 incident showed a refused phase executing
+ * anyway and the workflow advancing one phase too far (7 instead of 6).
+ * The decision is refused without mutating any state; the chain's results are
+ * then applied normally (or dropped by the B7 staleness check), so exactly one
+ * execution ever counts.
+ */
+export function decisionBlockedByInFlightChain(
+  ctx: ExtensionCommandContext,
+  state: WorkflowState,
+): boolean {
+  if (!isPhaseInFlight(state.workflowId, state.phaseIndex)) return false;
+  ctx.ui.notify(
+    `gstack: a delegation chain for phase ${state.phaseIndex + 1} of "${state.workflowId}" is still running — decision refused. Wait for it to finish, or abort the workflow first.`,
+    "warning",
+  );
+  return true;
 }
 
 /**
@@ -53,6 +74,7 @@ export async function handleGstackCommand(args: string, ctx: ExtensionCommandCon
   // an optional phase means "Run it" — the explicit, foreground twin of the
   // panel choice below. Never a background prompt the user can miss.
   if (activeState?.pendingOptional && activeState.status === "awaiting_approval" && argId === "next") {
+    if (decisionBlockedByInFlightChain(ctx, activeState)) return;
     const approved = approveOptionalPhase(activeState);
     saveState(pi, approved);
     ctx.ui.notify("Approved — running the optional phase.", "info");
@@ -78,6 +100,7 @@ export async function handleGstackCommand(args: string, ctx: ExtensionCommandCon
       ctx.ui.notify(`Workflow is not waiting for approval (currently: ${activeState.status}, phase "${phaseName}").`, "warning");
       return;
     }
+    if (decisionBlockedByInFlightChain(ctx, activeState)) return;
     const approved = approveNext(activeState);
     saveState(pi, approved);
     ctx.ui.notify("Approved — continuing workflow.", "info");
@@ -108,10 +131,12 @@ export async function handleGstackCommand(args: string, ctx: ExtensionCommandCon
         ],
       );
       if (choice?.startsWith("Run")) {
+        if (decisionBlockedByInFlightChain(ctx, activeState)) return;
         const approved = approveOptionalPhase(activeState);
         saveState(pi, approved);
         launchApprovedOptional(pi, ctx, approved);
       } else if (choice?.startsWith("Skip")) {
+        if (decisionBlockedByInFlightChain(ctx, activeState)) return;
         const next = skipPendingOptional(activeState, wf?.phases ?? [], wf?.phases.length ?? 0);
         saveState(pi, next);
         if (next.status === "completed") {
@@ -140,6 +165,7 @@ export async function handleGstackCommand(args: string, ctx: ExtensionCommandCon
         ],
       );
       if (choice?.startsWith("Approve")) {
+        if (decisionBlockedByInFlightChain(ctx, activeState)) return;
         const approved = approveNext(activeState);
         saveState(pi, approved);
         launchPhase(pi, ctx, approved);

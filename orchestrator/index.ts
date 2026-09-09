@@ -7,7 +7,10 @@ import type { AdvanceOptions } from "./state.ts";
 import { getWorkflow, getWorkflowIds } from "./workflows.ts";
 import { launchPhase, invalidateRuntime, advanceBlockReason } from "./executor.ts";
 import { manualGates, autoGateValidated, optionalPhases, deterministicSubagents } from "./config.ts";
+import { parsePlanFileMarker } from "./templates.ts";
 import { isValidatedStrategy } from "./skip.ts";
+import { existsSync } from "node:fs";
+import * as path from "node:path";
 import { ensureRun, writeRunReport } from "./telemetry.ts";
 import { SECURITY_SECTION } from "../lib/content-security.ts";
 
@@ -111,6 +114,30 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         workflow.phases.length,
         advanceOpts,
       );
+      // Plan-naming fix (2026-09 session): plan names are the model's job. The
+      // plan contract makes the summary end with `PLAN FILE: <path>`; capture
+      // and persist it so {plan_file} interpolation points at the file the
+      // planner actually wrote. The path must EXIST on disk (a model reporting
+      // a plausible-but-unwritten path must not hijack the implement phase's
+      // {plan_file}) and be structurally valid (isValidPlanFile inside the
+      // parser). Invalid/absent/unwritten marker ⇒ legacy slug fallback.
+      if (phase.id === "plan" && params.status === "completed") {
+        const planFile = parsePlanFileMarker(params.summary);
+        if (planFile) {
+          try {
+            if (existsSync(path.join(ctx.cwd, planFile))) {
+              newState.planFile = planFile;
+            } else {
+              ctx.ui.notify(
+                `gstack: plan summary reported "${planFile}" but the file does not exist — falling back to the default plan path.`,
+                "warning",
+              );
+            }
+          } catch {
+            /* unreadable cwd — keep the legacy fallback */
+          }
+        }
+      }
       saveState(pi, newState);
 
       // D3 security freeze surfaced to both model and user.

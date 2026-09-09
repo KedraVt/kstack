@@ -753,6 +753,16 @@ export function activeConstraintLines(state: WorkflowState, phase?: WorkflowPhas
       "CONSTRAINT: the previous phase FAILED — the user decides how to proceed via /gstack (resume re-runs the phase). Do NOT call gstack_advance.",
     );
   }
+  // Parked-gate fix (2026-09 session): an awaiting_approval state is a manual
+  // decision gate. The input router prefixes EVERY user message with the
+  // resume context, so a "continue working" body here reads as an instruction
+  // to keep going — the exact mechanic that made a parked plan phase implement
+  // the plan instead of waiting for /gstack next.
+  if (state.status === "awaiting_approval" && !state.pendingOptional) {
+    lines.push(
+      "CONSTRAINT: the workflow is PARKED at a decision gate — the completed phase awaits user approval. Do NOT continue the phase, do NOT implement anything, and do NOT call gstack_advance; the user decides via /gstack next. If the user asks for revisions, apply them to the completed phase's output only.",
+    );
+  }
   if (phase?.variant === "report-only") {
     lines.push("CONSTRAINT: this phase is REPORT-ONLY — test and classify, do NOT fix, do NOT commit.");
   }
@@ -791,6 +801,19 @@ export function buildResumeContext(state: WorkflowState): string {
     // must not start it — the user decides via /gstack (Run / Skip / Abort).
     parts.push(
       `This phase is OPTIONAL and the workflow is PARKED awaiting the user's decision. Do not work on it and do not call gstack_advance — tell the user to run /gstack to Run it, Skip it, or Abort.`,
+    );
+    return parts.join("\n");
+  }
+
+  if (state.status === "awaiting_approval") {
+    // Parked at a manual decision gate: never tell the model to keep working.
+    // phaseIndex already points at the NEXT phase (advancePhase moved it), so
+    // "continue the current phase" here meant "start the next phase without
+    // approval" — and any plan tweak read as "resume and implement".
+    parts.push(
+      `The workflow is PARKED for user approval BEFORE "${phase?.name ?? "the next phase"}" — the previous (decision) phase is complete and awaits the user's review.`,
+      "Do NOT start or continue any phase, do NOT implement the plan, and do NOT call gstack_advance — only /gstack next (the user) continues the workflow.",
+      "If the user asks for revisions in this turn, apply them to the completed phase's output only, then stop and remain parked.",
     );
     return parts.join("\n");
   }

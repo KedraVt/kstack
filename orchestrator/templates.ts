@@ -110,8 +110,65 @@ export function planFileSlug(goal: string): string {
   );
 }
 
+/** Directory every plan file must live in. */
+const PLAN_DIR = ".gstack/plans";
+
+/**
+ * Accept a model-chosen plan file path (plan-naming fix): must stay inside the
+ * plans directory and be a safe single-path-segment kebab-case slug. Anything
+ * else — traversal, subdirectories, wrong casing/characters, wrong extension —
+ * is refused so a sloppy model answer can never write outside .gstack/plans.
+ */
+export function isValidPlanFile(value: string): boolean {
+  return /^\.gstack\/plans\/[a-z0-9][a-z0-9-]*\.md$/.test(value);
+}
+
+/**
+ * Extract the `PLAN FILE: <path>` marker from the plan phase's gstack_advance
+ * summary. Iterates EVERY occurrence and returns the first VALID one — the
+ * first match alone is shadowed by the prompt's own template fragments
+ * (mindrun F3: a summary echoing "end with PLAN FILE: <path>" before the real
+ * marker parsed as `<path>`, rejected, and the real marker was never reached).
+ * No valid occurrence ⇒ null ⇒ callers fall back to the legacy slug.
+ */
+export function parsePlanFileMarker(summary: string): string | null {
+  const re = /PLAN FILE:\s*(\S+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(summary ?? "")) !== null) {
+    const candidate = m[1].replace(/["'`]/g, "").replace(/[.,;]+$/, "");
+    if (isValidPlanFile(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Resolve the plan file for the CURRENT run: the model-named path captured at
+ * plan-phase completion when present, else the legacy deterministic slug.
+ * All {plan_file} interpolations go through this — the implement worker must
+ * read the exact file the planner wrote.
+ */
+export function resolvePlanFilePath(ctx: Pick<WorkflowContext, "state">): string {
+  return ctx.state.planFile ?? planFilePath(ctx.state.goal);
+}
+
+/**
+ * Plan-path block for the plan phase instructions (mindrun F1 fix): the
+ * orchestrator can NOT pin the path up front — resolving it deterministically
+ * names the plan from the goal and the model just parrots it back, so the LLM
+ * never actually names anything. Instead the model CHOOSES a short, meaningful
+ * slug capturing the plan's essence, writes the file there, and reports the
+ * actual path; isValidPlanFile validates the reported marker and the legacy
+ * slug remains the fallback when the marker is missing or invalid.
+ */
+export function planInstructionsFor(_ctx: Pick<WorkflowContext, "state">): string {
+  return [
+    `The plan file lives under \`${PLAN_DIR}/\` — YOU choose the filename: a short kebab-case slug (3-6 words) capturing the plan's essence (e.g. \`${PLAN_DIR}/auth-refresh-rotation.md\`), not a generic echo of the goal.`,
+    `End your gstack_advance summary with the line \`PLAN FILE: ${PLAN_DIR}/<your-slug>.md\` — the exact path of the file you actually wrote.`,
+  ].join(" ");
+}
+
 export function planFilePath(goal: string): string {
-  return `.gstack/plans/${planFileSlug(goal)}.md`;
+  return `${PLAN_DIR}/${planFileSlug(goal)}.md`;
 }
 
 export function buildPhaseInstructions(phase: WorkflowPhase, ctx: WorkflowContext): string {
@@ -288,9 +345,9 @@ const SUPPORT_PREFIX = "Apply the parts useful to the deliverable; nothing more.
  */
 const MAIN_CONTRACTS: Record<string, (ctx: WorkflowContext) => string> = {
   "understand": () =>
-    "## DELIVERABLE\nA shared-understanding summary: what exists today, what must change, and the chosen approach.\n\n## STOP CONDITION\nStop when: ambiguities are resolved with the user or explicitly listed as open questions.",
+    "## DELIVERABLE\nA shared-understanding summary: what exists today, what must change, and the chosen approach. End the summary with a section `OPEN QUESTIONS:` followed by one bullet per unresolved question (or exactly `OPEN QUESTIONS: none` when everything is settled).\n\n## STOP CONDITION\nStop when: ambiguities are resolved with the user or explicitly listed as open questions.",
   "plan": (c) =>
-    `## DELIVERABLE\nA converged plan file at \`${planFilePath(c.state.goal)}\` following the Plan file contract, briefly summarized to the user.\n\n## STOP CONDITION\nStop when: the interview frontier is empty (nothing silently assumed) and the plan file is written. Do NOT start implementing.`,
+    `## DELIVERABLE\nA converged plan file under \`${PLAN_DIR}/\` following the Plan file contract, briefly summarized to the user. ${planInstructionsFor(c)}\n\n## STOP CONDITION\nStop when: the interview frontier is empty (nothing silently assumed) and the plan file is written. Do NOT start implementing.`,
   "reproduce": () =>
     '## DELIVERABLE\nA reliable, deterministic way to trigger the bug + expected vs actual symptoms, ending with the trailing line `CONFIRMED ROOT CAUSE: <one-line cause> | files: <comma-separated file paths>` or `CONFIRMED ROOT CAUSE: none | files: none`.\n\n## STOP CONDITION\nStop when: the bug is reproduced AND the suspected cause is verified against the code (≤3 targeted reads), or a reliable reproduction exists without an obvious cause.',
   "verify": () =>
@@ -335,13 +392,14 @@ function buildMainInstructions(phase: WorkflowPhase, ctx: WorkflowContext): stri
       "### Instructions — Interactive Planning",
       "You are conducting the planning interview. The scout's codebase findings are in your context above.",
       "",
+      ...(carryOverOpenQuestions(c) ? [carryOverOpenQuestions(c), ""] : []),
       "**Interview protocol (grilling)**: map decisions as a design tree; work in rounds over the frontier (questions whose prerequisites are settled). Each round: number the questions, give YOUR recommended answer under each, then STOP and wait for the user's replies.",
       "- Maximum 5 questions per round; only questions that change architecture or scope.",
       "- Never ask the user for a fact you can look up yourself (use the scout output or tools).",
       "- Apply office-hours judgment: challenge vague premises, demand specificity, push for the narrowest shippable scope.",
       "- Apply engineering rigor: blast radius, hidden assumptions, edge cases, test strategy; complexity gate at 8+ files or 2+ new services.",
       "",
-      "**Termination**: when the frontier is empty (or answers are exhausted), write the converged plan to `" + planFilePath(c.state.goal) + "` following the Plan file contract in the skill gates below, summarize it briefly to the user, then call gstack_advance. Do NOT start implementing.",
+      "**Termination**: when the frontier is empty (or answers are exhausted), write the converged plan following the Plan file contract in the skill gates below — " + planInstructionsFor(c) + " Summarize the plan briefly to the user, then call gstack_advance. Do NOT start implementing.",
     ].join("\n"),
 
     "understand": (c) => [
@@ -351,6 +409,8 @@ function buildMainInstructions(phase: WorkflowPhase, ctx: WorkflowContext): stri
       `2. Identify constraints, dependencies, and patterns to follow`,
       `3. Clarify ambiguities by asking the user (if needed)`,
       `4. Summarize: what exists, what needs to change, what's the approach`,
+      "",
+      "5. End the report with a section `OPEN QUESTIONS:` followed by one bullet (`- …`) per unresolved question — or exactly `OPEN QUESTIONS: none` when everything is settled. The planner phase consumes this section; never drop it.",
     ].join("\n"),
 
     "reproduce": (c) => [
@@ -781,6 +841,33 @@ const PHASE_BOUNDARIES: Record<string, string> = {
     "EFFICIENCY DIRECTIVE: Check the completed-phase summaries first. If a confirmed root cause already emerged during reproduction, VALIDATE it quickly against the code (confirm mechanism + affected files) instead of re-investigating from scratch, then report. Only widen the investigation if validation fails.",
 };
 
+/**
+ * Open-questions carry-over (2026-09 session gap): the understand phase may
+ * legitimately close with unresolved ambiguities (its contract says so), but
+ * nothing reinjected them into the planning interview — the planner rebuilt
+ * its own frontier and the questions silently died. Extract the parseable
+ * `OPEN QUESTIONS:` section from the understand summary and surface it to the
+ * plan phase so every carried question is either resolved or folded into a
+ * round explicitly.
+ */
+export function carryOverOpenQuestions(ctx: Pick<WorkflowContext, "state">): string {
+  const summary = ctx.state.results["understand"]?.summary ?? "";
+  const m = /OPEN QUESTIONS:\s*\n?((?:[ \t]*[-*•]\s*[^\n]+\n?)+)/.exec(summary);
+  if (!m) return "";
+  const items = m[1]
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 10);
+  if (items.length === 0) return "";
+  return [
+    "### Carried-over open questions (from the Understand phase)",
+    "The user left these unresolved in phase 1. Resolve them with the user or fold each into an interview round — do not silently assume them away.",
+    "",
+    ...items,
+  ].join("\n");
+}
+
 
 
 export function scopeBoundaryFor(phaseId: string): string {
@@ -860,7 +947,7 @@ function interpolate(template: string, ctx: WorkflowContext): string {
   // $-safe (STEP 2c): untrusted values may contain `$&`, `$'`, `$1` etc.
   let out = replaceExact(template, /\{goal\}/g, ctx.state.goal);
   out = replaceExact(out, /\{branch\}/g, ctx.git.branch);
-  out = replaceExact(out, /\{plan_file\}/g, planFilePath(ctx.state.goal));
+  out = replaceExact(out, /\{plan_file\}/g, resolvePlanFilePath(ctx));
   // Sprint tokens: number + BINDING Ubiquitous Language table.
   out = replaceExact(out, /\{sprint\}/g, ctx.state.sprintNumber !== undefined ? pad2(ctx.state.sprintNumber) : "??");
   out = replaceExact(out, /\{glossary\}/g, glossaryTable(ctx.cwd, ctx.state.sprintNumber));
