@@ -819,5 +819,17 @@ export function buildResumeContext(state: WorkflowState): string {
   }
 
   parts.push("Continue working on the current phase. Call gstack_advance when done.");
+  // F2 mitigation (2026-09 handoff): the router snapshots the state once per
+  // input event and this prefix cannot refresh mid-turn, so a chain that lands
+  // mid-turn (gate resolves, verdict re-parks — possibly FROZEN) is invisible
+  // to the text above. State the precedence rule explicitly: a park that lands
+  // afterwards wins over this message — obey it, never gstack_advance past a
+  // decision gate. When the chain is still in flight at prefix time, warn that
+  // the posture may flip mid-turn.
+  parts.push(
+    isPhaseInFlight(state.workflowId, state.phaseIndex)
+      ? "NOTE: a delegation chain for this phase is STILL RUNNING — its results may land mid-turn and re-park the workflow (PARKED for approval, FROZEN, or otherwise paused for a human decision). If the workflow is parked or frozen by then, that state wins: obey it and do NOT call gstack_advance."
+      : "If the workflow has been re-parked meanwhile (PARKED for approval, FROZEN, or otherwise paused for a human decision), that state wins over everything above: obey it and do NOT call gstack_advance.",
+  );
   return parts.join("\n");
 }

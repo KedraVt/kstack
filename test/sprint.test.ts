@@ -10,7 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createState, advancePhase, routeVerdict, parkForUnreadableVerdict, forceApproveParked, returnParkedWithContext, isSecurityFrozen, unfreeze, forceContinuePastGate, reissueGate } from "../orchestrator/state.ts";
 import { launchPhase } from "../orchestrator/executor.ts";
-import { decisionBlockedByInFlightChain } from "../orchestrator/command.ts";
+import { decisionBlockedByInFlightChain, handleSprintPanel } from "../orchestrator/command.ts";
 import { getAllWorkflows, getWorkflow } from "../orchestrator/workflows.ts";
 import { parseHandoffVerdicts, verifyArtifactVerdicts, extractBlockers, buildRetryFeedback, mergeParseOutcomes, KNOWN_VARIABLES } from "../orchestrator/verdicts.ts";
 import { computeNextSprintNumber, pad2, sprintArchiveDir, archivedSprintDirs } from "../orchestrator/sprint.ts";
@@ -1239,6 +1239,74 @@ describe("in-flight decision guards (2026-09 fix 4)", () => {
     const nextPath = source.slice(source.indexOf("argId === \"next\""), source.indexOf("const git = await detectGitContext"));
     const guardCount = (nextPath.match(/decisionBlockedByInFlightChain/g) ?? []).length;
     assert.equal(guardCount, 2, "/gstack next must guard both the optional-park and awaiting_approval paths");
+  });
+
+  test("every mutating sprint-panel branch is guarded (F4)", () => {
+    // Static wiring check: the 8 mutating/launching choices of handleSprintPanel
+    // (freeze unfreeze; D4 continue + return; gate accept + re-run; kill-switch
+    // accept + re-run; pause resume/re-issue) must consult panelGuard before
+    // touching state. A refused decision still returns true — the user stays
+    // parked, never falling through to the generic resume path.
+    const source = readFileSync(new URL("../orchestrator/command.ts", import.meta.url), "utf-8");
+    const guardCount = (source.match(/if \(panelGuard\(ctx, state\)\) return true;/g) ?? []).length;
+    assert.equal(guardCount, 8, "all 8 mutating sprint-panel branches must be guarded");
+  });
+
+  test("sprint panel refuses a mutating decision while the chain runs, allows it after (F4)", async () => {
+    const parked = parkForUnreadableVerdict(sprintState(8), "qa-verdict");
+
+    const notified: string[] = [];
+    const saved: unknown[] = [];
+    const ui = {
+      notify: (msg: string) => notified.push(msg),
+      setStatus: () => {},
+      input: async () => undefined,
+      select: async () => "Continue as approved",
+      confirm: async () => false,
+    };
+    const cmdCtx: any = { ui };
+    const pi: any = { appendEntry: (type: string, state: unknown) => saved.push({ type, state }) };
+
+    // Race window: a delegation chain for sprint phase 9 (index 8) is in flight.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    launchPhase(pi, cmdCtx, sprintState(8), async () => { await gate; });
+
+    const refused = await handleSprintPanel(parked, cmdCtx, pi);
+    assert.equal(refused, true, "panel still handles the park (never falls through)");
+    assert.match(notified.join("\n"), /still running/, "decision refused with a warning");
+    assert.equal(saved.length, 0, "no state mutation while the chain runs");
+
+    release();
+    await new Promise((r) => setTimeout(r, 10));
+
+    // After the chain settles the same panel is reachable again — verified via
+    // the non-mutating escape (Abort offered, declined).
+    notified.length = 0;
+    const settled = await handleSprintPanel(parked, { ui: { ...ui, select: async () => "Abort workflow" } } as any, pi);
+    assert.equal(settled, true);
+    assert.equal(notified.filter((m) => /still running/.test(m)).length, 0, "guard released after the chain settles");
+    assert.equal(saved.length, 0, "abort declined → still no mutation");
+  });
+
+  test("buildResumeContext re-anchors the park-precedence rule (F2 rider)", async () => {
+    const quiet = buildResumeContext(sprintState(0));
+    assert.match(quiet, /Continue working on the current phase/);
+    assert.match(quiet, /re-parked meanwhile/, "settled state still gets the park-precedence rider");
+
+    // Race window: a chain for sprint phase 1 (index 0) is in flight.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    const ctx: any = { ui: { notify: () => {} } };
+    launchPhase({} as any, ctx, sprintState(0), async () => { await gate; });
+
+    const inFlight = buildResumeContext(sprintState(0));
+    assert.match(inFlight, /STILL RUNNING/, "in-flight chain flips the rider to the mid-turn warning");
+    assert.match(inFlight, /do NOT call gstack_advance/);
+
+    release();
+    await new Promise((r) => setTimeout(r, 10));
+    assert.match(buildResumeContext(sprintState(0)), /re-parked meanwhile/, "rider reverts after the chain settles");
   });
 });
 

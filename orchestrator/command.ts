@@ -273,12 +273,35 @@ function menuScore(w: { id: string }, git: GitContext): number {
 const FREEZE_RESUME_PHRASE = "security remediation approved";
 
 /**
+ * F4 guard (2026-09 handoff): sprint panels can mutate state and relaunch a
+ * phase while a delegation chain for the same phase is still running — the
+ * same racing class fixed for the GENERIC paths via decisionBlockedByInFlightChain.
+ * The executor's B7 staleness check would drop the racing chain's results for
+ * same-process relaunches, so state does not corrupt; the residual exposure is
+ * the double-launch class the guard exists to prevent.
+ *
+ * Panels must never fall through: while parked, a "handled" panel returning
+ * false would expose the generic resume path to exactly the bypass the panels
+ * exist to prevent. So a refused decision still returns true (handled) — the
+ * user stays parked and re-decides after the chain settles.
+ */
+function panelGuard(ctx: ExtensionCommandContext, state: WorkflowState): boolean {
+  if (!decisionBlockedByInFlightChain(ctx, state)) return false;
+  return true; // refused, but the park is still handled — never fall through
+}
+
+/**
  * Interactive resolution of the sprint workflow's human-control states.
  * Returns true when the state was handled (caller must NOT fall through to
  * the generic resume/menu paths — that would let one keystroke bypass a
  * security freeze or an unresolved verdict).
  *
- * Every panel offers an explicit escape; nothing auto-resumes. Headless/RPC:
+ * Every panel offers an explicit escape; nothing auto-resumes. Decision
+ * mutations are guarded by panelGuard (F4): a choice taken while a delegation
+ * chain for the phase is still in flight is refused WITHOUT state mutation,
+ * and the panel still returns true (handled) — never falls through.
+ *
+ * Headless/RPC:
  * ctx.ui is the extension's only UI channel (same as every existing gate) —
  * no separate !hasUI protocol exists to hook into.
  */
@@ -296,6 +319,7 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
         `Type exactly "${FREEZE_RESUME_PHRASE}" to unfreeze and re-run the review gate. Leave empty to keep the freeze; type ABORT to abandon the workflow.`,
     );
     if (answer !== undefined && answer.trim().toLowerCase() === FREEZE_RESUME_PHRASE) {
+      if (panelGuard(ctx, state)) return true;
       const unfrozen = unfreeze(state);
       saveState(pi, unfrozen);
       ctx.ui.notify("Freeze lifted — re-running the devsecops review gate.", "info");
@@ -321,6 +345,7 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
       ["Continue as approved", "Return phase with context", "View report excerpt", "Other…", "Abort workflow"],
     );
     if (choice === "Continue as approved") {
+      if (panelGuard(ctx, state)) return true;
       const next = forceApproveParked(state);
       saveState(pi, next);
       launchPhase(pi, ctx, next);
@@ -329,6 +354,7 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
         "Feedback for the retried phase",
         "Optional custom guidance appended to the RETRY CONTEXT (empty = rely on extracted blockers)",
       );
+      if (panelGuard(ctx, state)) return true;
       const next = returnParkedWithContext(state, phases, extra?.trim() || undefined);
       if (!next) {
         ctx.ui.notify("Cannot loop back: the parked phase has no loopBackTo target.", "error");
@@ -359,10 +385,12 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
       "Abort workflow",
     ]);
     if (choice === "Accept result — continue past the gate") {
+      if (panelGuard(ctx, state)) return true;
       const next = forceContinuePastGate(state, phases);
       saveState(pi, next);
       launchPhase(pi, ctx, next);
     } else if (choice === "Re-run the gated phase") {
+      if (panelGuard(ctx, state)) return true;
       const resumed = resumeState(state);
       saveState(pi, resumed);
       launchPhase(pi, ctx, resumed);
@@ -382,6 +410,7 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
       : ["Resume (re-checks sprint numbering first)", "Abort workflow"];
     const choice = await ctx.ui.select(`Sprint paused — ${reason}`, choices);
     if (choice === "Resume (re-checks sprint numbering first)") {
+      if (panelGuard(ctx, state)) return true;
       const resumed = resumeState(state);
       saveState(pi, resumed);
       launchPhase(pi, ctx, resumed);
@@ -389,10 +418,12 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
       // B9: a bare resume would re-park on the FIRST rejection (the attempt
       // counter is already at the ceiling). reissueGate restores exactly one
       // verified run of the loop target before the loop re-exhausts.
+      if (panelGuard(ctx, state)) return true;
       const reissued = reissueGate(state, phases);
       saveState(pi, reissued);
       launchPhase(pi, ctx, reissued);
     } else if (exhausted && choice === "Accept result — continue past the gate") {
+      if (panelGuard(ctx, state)) return true;
       const next = forceContinuePastGate(state, phases);
       saveState(pi, next);
       launchPhase(pi, ctx, next);
