@@ -273,8 +273,14 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         };
       }
       const git = await detectGitContext(ctx.cwd, pi);
+      // A parked workflow still answers — but the instructions end with "call
+      // gstack_advance", which the park forbids. Lead with the posture.
+      const posture =
+        state.status === "active"
+          ? ""
+          : `[workflow ${state.status}${state.pausedReason ? `: ${state.pausedReason}` : ""} — reference only: do NOT start or continue this phase]\n\n`;
       return {
-        content: [{ type: "text" as const, text: buildPhaseInstructions(phase, { state, git, cwd: ctx.cwd }) }],
+        content: [{ type: "text" as const, text: posture + buildPhaseInstructions(phase, { state, git, cwd: ctx.cwd }) }],
       };
     },
   });

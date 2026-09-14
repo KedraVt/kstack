@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { WorkflowState, WorkflowContext, GitContext, WorkflowPhase } from "./types.ts";
 import { getWorkflow } from "./workflows.ts";
-import { saveState, advancePhase, gateForApproval, gateOptionalPhase, parkForUnreadableVerdict, loadActiveState, type AdvanceOptions } from "./state.ts";
+import { saveState, advancePhase, gateOptionalPhase, parkForUnreadableVerdict, loadActiveState, type AdvanceOptions } from "./state.ts";
 import { buildPhaseInstructions, buildDeterministicPlan, mainContractFor } from "./templates.ts";
 import { detectGitContext } from "./git.ts";
 import { runSubagent, type SpawnRequest, type SpawnResult, resolveTimeoutMs } from "./spawn.ts";
@@ -327,7 +327,7 @@ export async function executeCurrentPhase(
     saveState(pi, parked);
     setGstackStatus(ctx, parked, workflow);
     notify(
-      `gstack sprint: BRANCH VIOLATION — "${phase.id}" audits a task/<slug> diff, but HEAD is "${git.branch}". Move the work onto a task branch, then resume via /gstack.`,
+      `gstack sprint: BRANCH VIOLATION — "${phase.id}" is a verdict gate and MASTER_DOD requires work on task/<slug> branches, but HEAD is "${git.branch}". Move the work onto a task branch, then resume via /gstack.`,
       "warning",
     );
     return;
@@ -877,6 +877,18 @@ export function buildResumeContext(state: WorkflowState): string {
       `The workflow is PARKED for user approval BEFORE "${phase?.name ?? "the next phase"}" — the previous (decision) phase is complete and awaits the user's review.`,
       "Do NOT start or continue any phase, do NOT implement the plan, and do NOT call gstack_advance — only /gstack next (the user) continues the workflow.",
       "If the user asks for revisions in this turn, apply them to the completed phase's output only, then stop and remain parked.",
+    );
+    return parts.join("\n");
+  }
+
+  if (state.status === "paused") {
+    // Paused = human decision pending (freeze, loop exhaustion, anomaly,
+    // branch violation, failed phase). The CONSTRAINT lines above carry the
+    // rules — printing "continue working" after them would invite exactly the
+    // work the park exists to stop (a branch violation forbids work on main,
+    // not just the advance call).
+    parts.push(
+      `The workflow is PAUSED (${state.pausedReason ?? "phase failed"}) — only /gstack resumes, re-runs or aborts it. Do not continue work and do NOT call gstack_advance.`,
     );
     return parts.join("\n");
   }

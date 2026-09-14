@@ -1552,6 +1552,16 @@ describe("compaction guard — resume prefix contract", () => {
     assert.ok(!prefix.includes("gstack_phase"));
   });
 
+  test("paused state: PAUSED, never the contradictory continue-working tail (mindrun F1)", () => {
+    const state = { ...makeCtx("sprint", 7).state, status: "paused" as const, pausedReason: "branch-violation:devsecops-review on main" };
+    const prefix = buildResumeContext(state);
+    assert.ok(prefix.includes("PAUSED (branch-violation:devsecops-review on main)"));
+    assert.ok(prefix.includes("PAUSED"), "paused posture must be stated");
+    assert.ok(!prefix.includes("Continue working"), "paused prefix must not invite continued work");
+    assert.ok(!prefix.includes("## DELIVERABLE"));
+    assert.ok(!prefix.includes("gstack_phase"));
+  });
+
   test("sprint contracts interpolate the assigned sprint number", () => {
     const state = { ...makeCtx("sprint", 3).state, sprintNumber: 7 }; // system-design = main
     const prefix = buildResumeContext(state);

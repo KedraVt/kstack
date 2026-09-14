@@ -379,7 +379,7 @@ export function abortState(state: WorkflowState): WorkflowState {
 }
 
 export function resumeState(state: WorkflowState): WorkflowState {
-  return { ...state, status: "active" };
+  return { ...state, status: "active", pausedReason: undefined };
 }
 
 /**
