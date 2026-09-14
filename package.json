@@ -33,7 +33,7 @@
   "scripts": {
     "gen:tools": "bun run scripts/gen-tools.ts",
     "sync:skills": "bun run scripts/sync-skills.ts",
-    "test": "bun test test/orchestrator.test.ts test/sprint.test.ts test/typecheck.test.ts test/security-boundary.test.ts test/beta-injection.test.ts",
+    "test": "bun test test/orchestrator.test.ts test/sprint.test.ts test/typecheck.test.ts test/security-boundary.test.ts test/beta-injection.test.ts test/executor-delegation.test.ts",
     "typecheck": "bunx tsc --noEmit"
   },
   "devDependencies": {
