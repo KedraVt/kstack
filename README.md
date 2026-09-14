@@ -18,7 +18,7 @@ One extension, two layers:
 
 ## What's new (feat/sprint-workflow branch)
 
-- **`sprint` workflow (opt-in)** — a 10-phase agile delivery pipeline distilled from `.agents-clean` methodology: understand → user-story → capability → system-design → ⏸ architect gate → backlog → implement → devsecops review → QA verdict → commit/archive. Planning artifacts (`user-story_XX.md`, `system-design_XX.md`, `tasks_XX.md`, …) live in the project root and archive to `.gstack/sprints/sprint_XX/` when the sprint goes green.
+- **`sprint` workflow (default-on)** — a 10-phase agile delivery pipeline distilled from `.agents-clean` methodology: understand → user-story → capability → system-design → ⏸ architect gate → backlog → implement → devsecops review → QA verdict → commit/archive. Planning artifacts (`user-story_XX.md`, `system-design_XX.md`, `tasks_XX.md`, …) live in the project root and archive to `.gstack/sprints/sprint_XX/` when the sprint goes green.
 - **Deterministic verdict routing** — review gates emit machine-parseable verdict lines (`status == red|green|orange`, `security-review == approved|rejected`) inside a `## HANDOFF` section. The orchestrator parses them fail-closed (whitelist-only values, containment-checked), cross-verifies them against the artifact files on disk (dual channel: chat + disk must agree), and routes deterministically — never on the model's say-so.
 - **Parks are code-enforced** — every parked state (security freeze, unreadable verdict, loop exhaustion, numbering anomaly, failed phase) is refused by the `gstack_advance` tool itself, not just discouraged in prose: a repeat call cannot advance past a park on the model's say-so. Only the `/gstack` panel (or `/gstack next` where applicable) can resume, re-run, accept or abort.
 - **Security freeze** — a critical/high security rejection parks the whole sprint until a human types the confirmation phrase in the panel; medium/low rejections loop back to implement normally.
@@ -28,7 +28,11 @@ One extension, two layers:
 - **Sprint requires deterministic delegation** — the sprint gates route exclusively on executor-produced verdicts, so the workflow refuses to start while `GSTACK_PI_DETERMINISTIC=off` (both `/gstack sprint` and the `gstack_start` tool explain this). Kill-switch parks (`GSTACK_PI_VERDICTS=off` / `_LOOPBACKS=off`) likewise land in a decision panel offering **Accept / Re-run / Abort**.
 - **Strict BE→FE chain** — implementation runs backend-developer then frontend-developer sequentially per task wave; model tiers (`GSTACK_PI_MODEL_STRONG/FAST`) let judgment phases run on stronger models while mechanical phases stay cheap.
 - **Fixed**: phase instructions are now delivered with `followUp` streaming behavior — eliminates the "Agent is already processing" error that silently dropped phase handoffs.
-- **Raw skill library split** — the bundled skill surface is organized in two folders: `skills/gstack/` (23 cherry-picked gstack skills, manual `/skill:gstack-*` invocation) and `skills/kedra/` (18 full `.agents-clean` methodology skills, verbatim, manual `/skill:<name>` invocation — the whole source library except `acceptance-criteria-backend/-frontend`, which live inside the sub-agent bodies). The orchestrator's digest injection is unchanged.
+- **Raw skill library split** — the bundled skill surface is organized in two folders: `skills/gstack/` (23 cherry-picked gstack skills, manual `/skill:gstack-*` invocation) and `skills/kedra/` (18 full `.agents-clean` methodology skills, verbatim, manual `/skill:<name>` invocation — the whole source library except `acceptance-criteria-backend/-frontend`, which live inside the sub-agent bodies).
+- **Centralized artifact names** — `orchestrator/artifacts.ts` is the single source for every sprint-stamped filename (`qa-artifact_XX.md`, `code-review-artifact_XX.md`, `software-architect-artifact_XX_N.md`, …); verdict verification, task templates and the freeze path all consume it, closing the stamping-drift bug class.
+- **D4 park causes** — an unreadable-verdict park now records *why* in `pausedReason` (`no-verdict` / `artifact-mismatch` / `unroutable`) and the panel names the cause for triage; no attempt is burned either way.
+- **Runtime binaries untracked** — `runtime/` is gitignored and provisioned on demand (session-start download / `update.sh`); ~197MB of browse daemon binaries were dropped from the git index.
+- **Delegation test harness** — `runDeterministicDelegation` accepts an injected `spawnFn`; `test/executor-delegation.test.ts` exercises the real chain engine (HANDOFF threading, retry, budgets, REFUTED reopen, circuit breakers) with fake spawns.
 
 ## Requirements
 
@@ -45,7 +49,7 @@ git clone --recurse-submodules https://github.com/YOUR_USER/gstack-pi ~/.pi/agen
 
 Pi auto-discovers extensions in `~/.pi/agent/extensions/`. No settings.json changes needed.
 
-The browse binary is pre-built and included in `runtime/`. The extension works immediately after cloning.
+The browse binary is not committed (`runtime/` is gitignored): it downloads automatically at the first `session_start` (`lib/download.ts`) or is provisioned by `update.sh`.
 
 The `source/` submodule (~69MB) contains the gstack repo. It's only needed for updates — you can skip it on first clone with `--no-recurse-submodules` and fetch it later when you want to update.
 
@@ -99,10 +103,10 @@ While a workflow is active, every interactive input is prefixed with a resume co
 
 The workflow decides when skill knowledge applies — the model never has to guess:
 
-- Every mapped phase carries a **distilled digest** (~2K tokens) extracted from the corresponding gstack SKILL.md (`skills-distilled/`)
-- Main phases embed the full digest; subagent phases receive it inside their task string while orchestrator instructions carry only the compact **DoD + best-practices gate**
+- Every mapped phase injects the **full sprint-beta SKILL.md** (`skills/sprint-beta/`) — `GSTACK_PI_SKILL_INJECTION=full` is the default. `=digest` restores the legacy distilled digests (~2K tokens) from `skills-distilled/`; a missing catalog file always degrades to the digest so a run never breaks.
+- Main phases embed the methodology; subagent phases receive it inside their task string while orchestrator instructions carry only the compact **DoD + best-practices gate**
 - Repeated deliveries within one run degrade to the DoD gate (~40% skill-token savings)
-- Wired skills: investigate, qa, review, ship, office-hours, plan-eng-review, document-release (+generate), grilling. All 41 bundled skills stay manually invocable via `/skill:` (23 under the `gstack-` prefix, 18 kedra skills under their own name).
+- Wired skills: investigate, qa, review, ship, office-hours, plan-eng-review, document-release (+generate), grilling, plus the sprint family (capability, system-design, adr, tasks, tdd, verification, appsec, docker, qa, pipeline). All 41 bundled skills stay manually invocable via `/skill:` (23 under the `gstack-` prefix, 18 kedra skills under their own name).
 
 ### Raw skill library (`skills/gstack/` + `skills/kedra/`)
 
@@ -113,7 +117,7 @@ Pi's recursive discovery (`pi-agent-core` harness) loads `SKILL.md` files at any
 | `skills/gstack/` | 23 cherry-picked gstack skills (router nested at `gstack/gstack/`) | `/skill:gstack-qa`, `/skill:gstack-spec`, … | upstream gstack, adapted by `scripts/adapt-skills.ts` |
 | `skills/kedra/` | 18 full `.agents-clean` skills — sprint methodology, process discipline (Iron Laws), security/infra, code quality | `/skill:systematic-debugging`, `/skill:adr`, `/skill:tasks`, … | `C:\Users\Mattia\Desktop\.agents-clean\skills\`, copied verbatim 2026-08-27 |
 
-`kedra/` ships the FULL source methodology (the digests in `skills-distilled/gstack-sprint-*.md` remain the trimmed runtime form). Deliberately excluded: `acceptance-criteria-backend` and `acceptance-criteria-frontend` — already folded into the `backend-developer`/`frontend-developer` sub-agent bodies (TODOS D12). Companion files (e.g. `testing-anti-patterns.md`, `systematic-debugging` reference material) are copied too — pi resolves skill-relative paths against the skill's own directory.
+`kedra/` ships the FULL source methodology (the digests in `skills-distilled/` remain as `GSTACK_PI_SKILL_INJECTION=digest` mode and the missing-file fallback). Deliberately excluded: `acceptance-criteria-backend` and `acceptance-criteria-frontend` — already folded into the `backend-developer`/`frontend-developer` sub-agent bodies (TODOS D12). Companion files (e.g. `testing-anti-patterns.md`, `systematic-debugging` reference material) are copied too — pi resolves skill-relative paths against the skill's own directory.
 
 ### Automatic routing
 
@@ -176,7 +180,7 @@ The extension searches for the browse binary in this order:
 
 1. `$GSTACK_BINARY` (explicit override)
 2. `$GSTACK_ROOT/browse/dist/browse` (standard gstack install)
-3. `<extension>/runtime/browse/dist/browse` (built by update.sh)
+3. `<extension>/runtime/browse/dist/browse` (built by update.sh / downloaded at session start)
 4. `../../gstack/browse/dist/browse` (dev sibling layout)
 
 On Windows, `.exe` is appended automatically.
@@ -265,7 +269,12 @@ gstack-pi/
 │   ├── spawn.ts             Deterministic subagent execution (pi --mode json)
 │   ├── sprint.ts            Sprint numbering discovery + root/archive anomaly guards
 │   ├── verdicts.ts          Deterministic verdict parsing, dual-channel verification, retry feedback
-│   ├── config.ts            Feature flags (GSTACK_PI_SKILLS / _DETERMINISTIC / _MANUAL_GATES)
+│   ├── artifacts.ts         Sprint-stamped artifact filenames — single source for templates, verdicts, freeze path
+│   ├── handoff.ts           ## HANDOFF extraction for {previous} (tail fallback)
+│   ├── skip.ts              Structural-skip guards (root-cause collapse, QA fix loop)
+│   ├── telemetry.ts         Per-step run reports (.gstack/runs)
+│   ├── text.ts              $-safe interpolation
+│   ├── config.ts            Feature flags (GSTACK_PI_*)
 │   ├── command.ts           /gstack command handler (+ /gstack next)
 │   └── router.ts            Input intent detection (transform, never block)
 ├── skills/                  Raw skill library, recursive discovery (manual /skill: use)
@@ -276,8 +285,9 @@ gstack-pi/
 │   ├── gen-tools.ts         Regenerate tools from source/ commands
 │   └── sync-skills.ts       Re-sync skills with path rewriting
 ├── test/
-│   └── orchestrator.test.ts Unit tests (state machine, gates, workflows, tiering, intents)
-│   └── sprint.test.ts        Sprint workflow tests (verdicts, routing, loop engine, parks)
+│   ├── orchestrator.test.ts  Unit tests (state machine, gates, workflows, tiering, intents)
+│   ├── sprint.test.ts        Sprint workflow tests (verdicts, routing, loop engine, parks)
+│   └── executor-delegation.test.ts  Fake-spawn integration tests over runDeterministicDelegation
 ├── TODOS.md                 Backlog: deferred features, skill integrations, follow-ups
 ├── update.sh                Pull submodule + build + deploy + feature detection
 └── .gitignore               Excludes runtime/ (built artifacts)
@@ -313,7 +323,7 @@ State persists across session reloads via pi's `appendEntry` (not sent to LLM co
 |---|---|---|
 | Browser tools | ~180 tokens (tool descriptions) | 0 |
 | Orchestrator | ~150 tokens (advance/start) | ~600-1000 (instructions) |
-| Skill digests | 0 (on disk) | full digest on first delivery (main phases); DoD gate only for subagent-phase verification and repeats (~2K vs ~7K per full skill load) |
+| Skill methodology | 0 (on disk) | full SKILL.md on first delivery (main phases); DoD gate only for subagent-phase verification and repeats |
 
 ## Branches & feature flags
 
@@ -400,6 +410,8 @@ the root-cause scout->planner chain collapses to ONE validate-only planner step.
 | `GSTACK_PI_SPRINT` | on | registers the sprint workflow; `off` hides it from menu and router entirely |
 | `GSTACK_PI_LOOPBACKS` | on | sprint loop-back engine; `off` ⇒ negative gate verdicts park in a `/gstack` panel (Accept / Re-run / Abort) instead of retrying |
 | `GSTACK_PI_VERDICTS` | on | deterministic verdict parsing; `off` ⇒ no auto-routing; gates park in a `/gstack` panel (Accept / Re-run / Abort) |
+| `GSTACK_PI_SKILL_INJECTION` | full | `full` injects the sprint-beta unified SKILL.md; `digest` restores `skills-distilled/` digests; missing catalog files always degrade to digest |
+| `GSTACK_PI_DELEGATION_BUDGET_SEC` | 2700 | wall-clock budget for one phase's whole delegation chain; `off` disables |
 | `GSTACK_PI_SPRINT_MAX_ATTEMPTS` | 4 | consecutive implement-rerun ceiling per review gate (counter resets on gate approval or on "Accept result — continue past the gate") |
 | `GSTACK_PI_ARCH_MAX_ATTEMPTS` | 5 | system-design rerun ceiling after architect rejections (reads `GSTACK_PI_SPRINT_ARCH_MAX_ATTEMPTS` / `GSTACK_PI_ARCH_MAX_ATTEMPTS`) |
 | `GSTACK_PI_MODEL_FAST` / `_STRONG` | unset | model tiers for mechanical vs judgment-heavy phases; unset keeps each agent's own default (inert) |

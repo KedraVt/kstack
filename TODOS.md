@@ -4,24 +4,45 @@ Single backlog for the pi extension itself — absorbed `FUTURE_UPDATES.md` (def
 features & skill integrations) so all not-yet-built work lives in one place.
 The vendored gstack source keeps its own `source/TODOS.md`; this file tracks extension-level work only.
 
+## NEXT UP (designed 2026-09-14)
+
+1. **Compaction guard — tiers 1+2** (replaces the old backlog item; the tier-3
+   `session_start` push was descoped as marginal once tier 1 exists). Durable
+   context already lives on disk (sprint artifacts) and in session state — what
+   compaction can eat is the *procedure*: the phase contract and the skill
+   methodology. The router prefix is un-compactable (injected fresh into every
+   user message), so it becomes the carrier:
+   - **Tier 1:** append the current phase's DELIVERABLE/STOP CONDITION contract
+     to `buildResumeContext` — only for `execution:"main"` + `status:"active"`
+     (~100 tok/turn). Subagent phases are excluded (they self-heal: delegation
+     results arrive with fresh instructions); parked states need constraints,
+     not contracts (already covered).
+   - **Tier 2:** a `gstack_phase` read-only tool returning
+     `buildPhaseInstructions(current phase)` on demand — the full methodology
+     re-fetch, ~2K paid only when actually needed. Plus one pointer line in the
+     prefix (~15 tok/turn): "if this phase's full instructions are not in your
+     context, call `gstack_phase`". The model self-detects the loss; the tool
+     stays deterministic (pure function of state, never stale).
+2. **setStatus parked-state upgrade** — today a parked workflow keeps showing
+   the last "running" label (`setStatus` only fires on phase start, delegation
+   activity, complete/abort). Add `statusLineFor(state, workflow)` (pure) mapping
+   every status to a truthful line — running / `PARKED for approval` /
+   `FROZEN: <severity> security rejection` / `verdict unreadable: <cause>` /
+   `loop exhausted` / `phase failed` — each with the unlock action
+   (`/gstack next` vs `/gstack` panel). Call sites: `gstack_advance` execute
+   after `saveState` (covers every `advancePhase`-produced park in one place) +
+   the two executor park paths (numbering anomaly, D4 park). ~40 lines; the
+   live delegation label stays untouched.
+3. **Branch enforcement** (promoted from scope cuts — also the prerequisite for
+   E3 parallel waves) — `MASTER_DOD` mandates `task/<slug>` branches but nothing
+   verifies; subagents share the host's git tree, so a specialist committing to
+   `main` pollutes the diff the gate then audits. Check at phase entry in
+   `executeCurrentPhase` before verdict-bearing gates (`detectGitContext`
+   already returns `isMainBranch`). Fail-closed like every other park: `paused`
+   + `pausedReason:"branch-violation:…"` + panel — never a warning the model
+   can wave past.
+
 ## INTEGRATION FOLLOW-UPS (feat/sprint-workflow)
-
-### Code-review pass-1 deferred items (2026-08-31) — RESOLVED 2026-09-14
-
-All five shipped on `feat/sprint-workflow`:
-
-- **Browse binary bloat — DONE without LFS:** `runtime/` was already gitignored and
-  provisioned by `update.sh` + `downloadBinary`; the tracked dist files were index
-  leftovers. `git rm --cached` untracked ~197MB (`b6a71df`). No LFS needed.
-- **D4 park cause distinction — DONE:** three causes (`no-verdict` /
-  `artifact-mismatch` / `unroutable`) ride in `pausedReason` as a third segment;
-  the D4 panel names each for triage (`a2b5f87`).
-- **Centralized artifact filenames — DONE:** `orchestrator/artifacts.ts` owns every
-  sprint-stamped name; `verdicts.ts`, `state.ts` freeze path and `templates.ts` task
-  prose all consume it (`15c024e`).
-- **Executor integration tests — DONE:** `test/executor-delegation.test.ts` runs the
-  real `runDeterministicDelegation` with an injected `spawnFn` (`a78de38`).
-- **`handoff.ts` cutAtParagraph — DONE:** true tail cut (`a2b5f87`).
 
 ### Non-distilled .agents-clean skills — fold into existing gstack skills (D12)
 
@@ -34,13 +55,10 @@ All five shipped on `feat/sprint-workflow`:
 None forgotten; each maps to an existing mechanism and lands when its host skill next evolves:
 
 - `systematic-debugging` → deepen **gstack-investigate** digest (hypothesis-testing cadence overlap; merge unique sections only)
-- `strategic-compact` → **HANDOFF protocol** (handoff.ts already covers compaction; the named-artifact habit shipped as the workers' HANDOFF section duty)
 - `code-audit-reviewer` → fold remaining checklist items into **gstack-review** digest
 - `code-simplification` → cross-reference **ponytail** `/gstack simplify` (better gate design already tracked here — do not double-inject)
-- `acceptance-criteria-backend` / `-frontend` → DONE: folded into backend-/frontend-developer agent bodies at port time
 - `agent-introspection-debugging` → future standalone digest if agent-self-debugging demand appears
-- `code-tour` → DONE at raw level: `skills/kedra/code-tour/` (digest/execution integration still future, orthogonal to execution)
-- `manim-video`, `add-model` → REJECTED (domain utilities of the source project, zero workflow relation)
+- `code-tour` → raw source shipped at `skills/kedra/code-tour/`; digest/execution integration still future (orthogonal)
 
 Deferred from the sprint-workflow integration (D12) — deliberate scope cuts, each
 with its trigger for when to build it:
@@ -48,8 +66,6 @@ with its trigger for when to build it:
 - **Parallel task waves (E3)** — `implement` currently runs strict BE→FE sequential
   chains per wave. Independent backend tasks could fan out concurrently once
   branch-per-task merge discipline is mechanically enforced.
-- **Branch enforcement** — the executor instructs specialists to work on branches but
-  does not verify it mechanically. Add a git-state assertion before each review gate.
 - **Two niche digests** — the devsecops-review and qa-verdict phases reuse adjacent
   methodology digests; two dedicated digests (threat-modeling, test-design) would
   tighten gate quality if reviews keep coming back noisy.
@@ -126,6 +142,12 @@ changes manually (MIT, pin a version in the digest header).
 **What:** Review and improve all `skills-distilled/*.md` digests so they steer agent behavior
 more reliably inside workflows. Priority: `gstack-office-hours.md` (planning-phase quality gate).
 
+> **Update 2026-09-14:** `GSTACK_PI_SKILL_INJECTION` defaults to `full` — the injected
+> source is the sprint-beta catalog and digests are only the missing-file fallback.
+> This item is now conditional on the digest-vs-full evaluation: improve whichever
+> source actually ships (the office-hours output-contract critique applies to both).
+> The registry `dod` lines are injected either way.
+
 Pain points to address:
 - Office-hours digest is persona-heavy (YC partner voice) but light on **workflow integration**:
   when to smart-skip, how to converge to a plan artifact, what handoff format the next phase
@@ -172,37 +194,23 @@ machine and is unrelated to the browser-daemon health tool planned as
 `gstack_daemon_status` (upgrade-plan WP1, commit `1cae721`); the `daemon-` prefix on the tool side is the
 deliberate disambiguator.
 
+> **Rescoped 2026-09-14:** the setStatus upgrade (NEXT UP) covers the interactive
+> need — a parked workflow currently keeps showing a stale "running" label. The
+> remaining value is headless/RPC sessions with no TUI status line. Build only if
+> headless use appears.
+
 ### Orchestrator: per-step checkpoint + `WorkflowState` versioning
 
 Persist a checkpoint after each chain step so a session reload can resume mid-chain without
 redoing scout work. Paired requirement: the persisted schema needs an explicit version field.
 (`orchestrator/state.ts` + `orchestrator/telemetry.ts`.)
 
-### Orchestrator: compaction guard
+### Learnings memory — CLOSED (verified 2026-08-24; nothing to implement)
 
-On `session_start`, if a workflow is active but the phase instructions were compacted away,
-re-inject via existing `buildResumeContext()`.
-
-### Learnings memory — CLOSED (no work needed)
-
-**Resolved 2026-08-24 by direct verification.** The upgrade plan's WP4 (HANDOFF.md §6,
-preserved as commit `1cae721`) proposed reimplementing
-the memory writers, based on the claim they "were never vendored". That claim was wrong:
-the writers already exist in `source/bin/` (`gstack-learnings-log`, `-question-log`,
-`-telemetry-log`, `-decision-log`) — exactly where the adapted skills' preambles point
-(absolute `source/bin/...` paths with `-x` guards and `|| true` fallbacks). Roundtrip
-verified under Git Bash: write exit 0, valid JSONL with auto `ts`, `gstack-learnings-search`
-(the vendored reader) returns entries, invalid types rejected exit 1 (fail-loud), duplicate
-key+type resolves latest-wins at read time. **Nothing to implement.**
-
-Residual notes:
-- Writers validate via `bun -e`, so bun is a **runtime** dependency for skill memory, not
-  just updates (documented in README Requirements).
-- `update.sh` step 7b already warns if these go missing from `source/bin`.
-- Minor: `gstack-question-log` accepts malformed ad-hoc question ids (e.g. `"x"`) without
-  rejection — lenient but harmless; upstream contract keeps it log-only.
-- Read-side injection into phases (`GSTACK_PI_LEARNINGS`) remains a *separate*, optional
-  future idea; ranking only matters if that ever ships.
+Residual future idea: read-side injection into phases (`GSTACK_PI_LEARNINGS`) —
+optional; ranking only matters if that ever ships. The writers in `source/bin/`
+are vendored and verified; bun is a runtime dep for skill memory (README
+Requirements covers it).
 
 ### Skill promotions
 
@@ -278,6 +286,8 @@ consumer: plan-gate rationale persistence and `/gstack retro` (also still open a
 - **Full egress receipt ledger** — designed for upstream's dozens of off-machine sinks;
   ours are two (binary download, update-check). A log line suffices.
 - **Multi-host abstraction (`hosts/`)** — meaningless for a pi-only extension.
+- **`manim-video` / `add-model` (.agents-clean)** — domain utilities of the source
+  project, zero workflow relation (rejected at D12 intake).
 
 ## Notes
 
