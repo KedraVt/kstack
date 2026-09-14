@@ -6,23 +6,22 @@ The vendored gstack source keeps its own `source/TODOS.md`; this file tracks ext
 
 ## INTEGRATION FOLLOW-UPS (feat/sprint-workflow)
 
-### Code-review pass-1 deferred items (2026-08-31)
+### Code-review pass-1 deferred items (2026-08-31) — RESOLVED 2026-09-14
 
-- **Git LFS for `runtime/browse/dist/*`** — the ~98MB browse daemon binary is committed
-  (and re-committed on every rebuild), bloating history. Move to Git LFS or a
-  build-on-demand script; do NOT keep re-committing the binary.
-- **D4 park cause distinction** — `parkForUnreadableVerdict` merges "no verdict lines
-  found" and "parsed verdict failed disk verification" into one panel. Surface the two
-  causes distinctly for triage (agent misbehaved vs artifact disagreement).
-- **Centralize artifact filenames** — sprint-stamped artifact paths are duplicated across
-  `verdicts.ts`, `templates.ts` task strings and the `state.ts` freeze path. One
-  `artifactPaths(sprintNumber)` module would prevent the stamping drift class (the B3 bug).
-- **Executor integration tests** — the pass-1 findings (B1/B2/B3) were all wiring bugs
-  invisible to the pure-function suite; a fake-spawn harness exercising
-  `runDeterministicDelegation` end-to-end would catch this class.
-- **`handoff.ts` cutAtParagraph** — documented as a *tail* fallback ("last 12000 chars")
-  but `slice(0, limit)` implements a *head* cut. Harmless for verdict parsing (fail-closed
-  either way) but the comment and code disagree — align or implement a true tail cut.
+All five shipped on `feat/sprint-workflow`:
+
+- **Browse binary bloat — DONE without LFS:** `runtime/` was already gitignored and
+  provisioned by `update.sh` + `downloadBinary`; the tracked dist files were index
+  leftovers. `git rm --cached` untracked ~197MB (`b6a71df`). No LFS needed.
+- **D4 park cause distinction — DONE:** three causes (`no-verdict` /
+  `artifact-mismatch` / `unroutable`) ride in `pausedReason` as a third segment;
+  the D4 panel names each for triage (`a2b5f87`).
+- **Centralized artifact filenames — DONE:** `orchestrator/artifacts.ts` owns every
+  sprint-stamped name; `verdicts.ts`, `state.ts` freeze path and `templates.ts` task
+  prose all consume it (`15c024e`).
+- **Executor integration tests — DONE:** `test/executor-delegation.test.ts` runs the
+  real `runDeterministicDelegation` with an injected `spawnFn` (`a78de38`).
+- **`handoff.ts` cutAtParagraph — DONE:** true tail cut (`a2b5f87`).
 
 ### Non-distilled .agents-clean skills — fold into existing gstack skills (D12)
 
