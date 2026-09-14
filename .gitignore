@@ -8,7 +8,11 @@ node_modules/
 
 bun.lock
 .gstack/
+# runtime/ binaries are provisioned by update.sh / auto-download — never commit them
 runtime/
 
 # mindrun QA artifacts (temporary, never committed)
 mindrun-*.md
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
