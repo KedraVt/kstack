@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { runDeterministicDelegation } from "../orchestrator/executor.ts";
+import { runDeterministicDelegation, executeCurrentPhase } from "../orchestrator/executor.ts";
 import { getWorkflow } from "../orchestrator/workflows.ts";
 import { beginRun, resetTelemetry } from "../orchestrator/telemetry.ts";
 import { resolveTimeoutMs } from "../orchestrator/spawn.ts";
@@ -327,5 +327,36 @@ describe("runDeterministicDelegation — fake-spawn integration", () => {
     assert.equal(calls.length, 1, "the planner step must not spawn on a dead context");
     assert.equal(results.length, 1, "the completed step's result is still recorded");
     assert.equal(events.filter((e) => e.event === "started").length, 1);
+  });
+});
+
+describe("branch enforcement at sprint verdict gates", () => {
+  test("a verdict-bearing gate on main parks fail-closed before any delegation runs", async () => {
+    const host = fakeHost(process.cwd());
+    // detectGitContext shells out via pi.exec — fake git on "main".
+    const pi: any = {
+      appendEntry: host.pi.appendEntry,
+      sendUserMessage: () => {},
+      exec: async (_cmd: string, args: string[]) => ({
+        stdout: args.includes("--show-current") ? "main\n" : "",
+        stderr: "",
+      }),
+    };
+    const state = {
+      workflowId: "sprint",
+      phaseIndex: 7, // devsecops-review — loopBackTo: "implement"
+      status: "active" as const,
+      goal: "ship the cart",
+      results: {},
+      sprintNumber: 7,
+    };
+    beginRun("sprint");
+    await executeCurrentPhase(pi, host.ctx, state);
+
+    const parked = host.events.find((e) => e.status === "paused");
+    assert.ok(parked, "no paused state persisted");
+    assert.match(parked.pausedReason, /^branch-violation:devsecops-review on main/);
+    assert.ok(host.notifications.some((n) => n.level === "warning" && n.msg.includes("BRANCH VIOLATION")), "user-facing warning missing");
+    assert.ok(host.statuses.some((s) => s?.includes("branch violation")), "status line must name the park cause");
   });
 });

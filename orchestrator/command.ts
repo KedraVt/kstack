@@ -411,14 +411,14 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
     return true;
   }
 
-  // Loop exhaustion / numbering anomaly: paused for a HUMAN decision.
-  if (state.status === "paused" && (reason.startsWith("loop-exhausted:") || reason.startsWith("anomaly:"))) {
+  // Loop exhaustion / numbering anomaly / branch violation: paused for a HUMAN decision.
+  if (state.status === "paused" && (reason.startsWith("loop-exhausted:") || reason.startsWith("anomaly:") || reason.startsWith("branch-violation:"))) {
     const exhausted = reason.startsWith("loop-exhausted:");
     const choices = exhausted
       ? ["Re-run the gated phase (+1 verified attempt)", "Accept result — continue past the gate", "Abort workflow"]
-      : ["Resume (re-checks sprint numbering first)", "Abort workflow"];
+      : [reason.startsWith("branch-violation:") ? "Resume (re-checks the git branch first)" : "Resume (re-checks sprint numbering first)", "Abort workflow"];
     const choice = await ctx.ui.select(`Sprint paused — ${reason}`, choices);
-    if (choice === "Resume (re-checks sprint numbering first)") {
+    if (choice?.startsWith("Resume")) {
       if (panelGuard(ctx, state)) return true;
       const resumed = resumeState(state);
       saveState(pi, resumed);

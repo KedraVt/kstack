@@ -4,43 +4,23 @@ Single backlog for the pi extension itself — absorbed `FUTURE_UPDATES.md` (def
 features & skill integrations) so all not-yet-built work lives in one place.
 The vendored gstack source keeps its own `source/TODOS.md`; this file tracks extension-level work only.
 
-## NEXT UP (designed 2026-09-14)
+## NEXT UP (designed 2026-09-14 — SHIPPED 2026-09-15)
 
-1. **Compaction guard — tiers 1+2** (replaces the old backlog item; the tier-3
-   `session_start` push was descoped as marginal once tier 1 exists). Durable
-   context already lives on disk (sprint artifacts) and in session state — what
-   compaction can eat is the *procedure*: the phase contract and the skill
-   methodology. The router prefix is un-compactable (injected fresh into every
-   user message), so it becomes the carrier:
-   - **Tier 1:** append the current phase's DELIVERABLE/STOP CONDITION contract
-     to `buildResumeContext` — only for `execution:"main"` + `status:"active"`
-     (~100 tok/turn). Subagent phases are excluded (they self-heal: delegation
-     results arrive with fresh instructions); parked states need constraints,
-     not contracts (already covered).
-   - **Tier 2:** a `gstack_phase` read-only tool returning
-     `buildPhaseInstructions(current phase)` on demand — the full methodology
-     re-fetch, ~2K paid only when actually needed. Plus one pointer line in the
-     prefix (~15 tok/turn): "if this phase's full instructions are not in your
-     context, call `gstack_phase`". The model self-detects the loss; the tool
-     stays deterministic (pure function of state, never stale).
-2. **setStatus parked-state upgrade** — today a parked workflow keeps showing
-   the last "running" label (`setStatus` only fires on phase start, delegation
-   activity, complete/abort). Add `statusLineFor(state, workflow)` (pure) mapping
-   every status to a truthful line — running / `PARKED for approval` /
-   `FROZEN: <severity> security rejection` / `verdict unreadable: <cause>` /
-   `loop exhausted` / `phase failed` — each with the unlock action
-   (`/gstack next` vs `/gstack` panel). Call sites: `gstack_advance` execute
-   after `saveState` (covers every `advancePhase`-produced park in one place) +
-   the two executor park paths (numbering anomaly, D4 park). ~40 lines; the
-   live delegation label stays untouched.
-3. **Branch enforcement** (promoted from scope cuts — also the prerequisite for
-   E3 parallel waves) — `MASTER_DOD` mandates `task/<slug>` branches but nothing
-   verifies; subagents share the host's git tree, so a specialist committing to
-   `main` pollutes the diff the gate then audits. Check at phase entry in
-   `executeCurrentPhase` before verdict-bearing gates (`detectGitContext`
-   already returns `isMainBranch`). Fail-closed like every other park: `paused`
-   + `pausedReason:"branch-violation:…"` + panel — never a warning the model
-   can wave past.
+All three items landed in one commit:
+
+1. **Compaction guard — tiers 1+2** — tier 1: `buildResumeContext` re-anchors
+   the current phase's DELIVERABLE/STOP CONDITION contract (`mainContractFor`,
+   narrowed to `Pick<WorkflowContext,"state">`) for `execution:"main"` +
+   `status:"active"` only. Tier 2: `gstack_phase` read-only tool returns
+   `buildPhaseInstructions(current phase)`; one pointer line in the prefix.
+2. **setStatus parked-state upgrade** — `statusLineFor(state, workflow)` maps
+   every status to a truthful line with its unlock action; wired after
+   `saveState` in `gstack_advance` and on the executor's anomaly/D4 park paths.
+3. **Branch enforcement** — `executeCurrentPhase` parks fail-closed
+   (`pausedReason:"branch-violation:<phase> on <branch>"` + panel Resume/Abort)
+   when a sprint verdict gate (`loopBackTo` phase) is entered on main/master.
+   Scope: gates only — planning phases legitimately run on main; implement-phase
+   enforcement stays a possible follow-up.
 
 ## INTEGRATION FOLLOW-UPS (feat/sprint-workflow)
 

@@ -5,9 +5,10 @@ import { createInputRouter } from "./router.ts";
 import { loadActiveState, saveState, advancePhase, gateForApproval, createState } from "./state.ts";
 import type { AdvanceOptions } from "./state.ts";
 import { getWorkflow, getWorkflowIds } from "./workflows.ts";
-import { launchPhase, invalidateRuntime, advanceBlockReason } from "./executor.ts";
+import { launchPhase, invalidateRuntime, advanceBlockReason, setGstackStatus } from "./executor.ts";
 import { manualGates, autoGateValidated, optionalPhases, deterministicSubagents } from "./config.ts";
-import { parsePlanFileMarker } from "./templates.ts";
+import { parsePlanFileMarker, buildPhaseInstructions } from "./templates.ts";
+import { detectGitContext } from "./git.ts";
 import { isValidatedStrategy } from "./skip.ts";
 import { existsSync } from "node:fs";
 import * as path from "node:path";
@@ -139,6 +140,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         }
       }
       saveState(pi, newState);
+      setGstackStatus(ctx, newState, workflow);
 
       // D3 security freeze surfaced to both model and user.
       if (newState.frozenUntilHuman) {
@@ -163,7 +165,6 @@ export function initOrchestrator(pi: ExtensionAPI): void {
 
 
       if (newState.status === "completed") {
-        ctx.ui.setStatus("gstack", undefined);
         // STEP 0 telemetry: flush the structured run report for this run.
         writeRunReport(ctx.cwd, state.workflowId);
         const completedPhases = Object.entries(newState.results)
@@ -178,7 +179,6 @@ export function initOrchestrator(pi: ExtensionAPI): void {
       }
 
       if (newState.status === "paused") {
-        ctx.ui.setStatus("gstack", undefined);
         return {
           content: [{
             type: "text" as const,
@@ -207,6 +207,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         }
         const gated = gateForApproval(newState);
         saveState(pi, gated);
+        setGstackStatus(ctx, gated, workflow);
         const nextPhase = workflow.phases[gated.phaseIndex];
         ctx.ui.notify(
           `gstack: "${phase.name}" complete — review the output, then run /gstack next to proceed to "${nextPhase?.name ?? "?"}".`,
@@ -238,6 +239,42 @@ export function initOrchestrator(pi: ExtensionAPI): void {
           type: "text" as const,
           text: `Phase "${phase.name}" recorded. Advancing to: ${nextPhase.name} (${newState.phaseIndex + 1}/${workflow.phases.length}).${decisionNote}`,
         }],
+      };
+    },
+  });
+
+  // Compaction guard tier 2: the full phase methodology is context-only — after
+  // compaction the model can re-fetch it here. Read-only and deterministic
+  // (pure function of the persisted state), so it can never be stale.
+  pi.registerTool({
+    name: "gstack_phase",
+    label: "Show Phase Instructions",
+    description:
+      "Re-fetch the full instructions for the current gstack workflow phase. Call this when the phase's instructions are no longer in your context (e.g. after compaction).",
+    promptSnippet: "Re-fetch the current gstack phase's full instructions",
+    promptGuidelines: [
+      "Call gstack_phase only when a gstack workflow is active and the current phase's instructions are missing from your context",
+      "The output is a pure function of the persisted workflow state — it is never stale",
+    ],
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx: ExtensionContext): Promise<any> {
+      const state = loadActiveState(ctx);
+      if (!state) {
+        return { content: [{ type: "text" as const, text: "No active gstack workflow. Start one with /gstack." }] };
+      }
+      const workflow = getWorkflow(state.workflowId);
+      const phase = workflow?.phases[state.phaseIndex];
+      if (!workflow || !phase) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `No current phase for workflow "${state.workflowId}" (status: ${state.status}, phaseIndex ${state.phaseIndex}).`,
+          }],
+        };
+      }
+      const git = await detectGitContext(ctx.cwd, pi);
+      return {
+        content: [{ type: "text" as const, text: buildPhaseInstructions(phase, { state, git, cwd: ctx.cwd }) }],
       };
     },
   });

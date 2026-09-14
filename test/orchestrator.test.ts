@@ -9,7 +9,7 @@ import { getAllWorkflows, getWorkflow, getWorkflowIds } from "../orchestrator/wo
 import { loadSkillDigest, getSkillInfo, buildSkillIndex, getSkillIds } from "../orchestrator/skills.ts";
 import { buildPhaseInstructions, buildDeterministicPlan, planFilePath, parsePlanFileMarker, resolvePlanFilePath, carryOverOpenQuestions } from "../orchestrator/templates.ts";
 import type { WorkflowContext, WorkflowPhase } from "../orchestrator/types.ts";
-import { launchPhase, ctxAlive, isPhaseInFlight, advanceBlockReason, releasePhaseInFlight, buildResumeContext, activeConstraintLines } from "../orchestrator/executor.ts";
+import { launchPhase, ctxAlive, isPhaseInFlight, advanceBlockReason, releasePhaseInFlight, buildResumeContext, activeConstraintLines, statusLineFor } from "../orchestrator/executor.ts";
 import { activityLabelFromEvent } from "../orchestrator/spawn.ts";
 import { runSubagent, resolveTimeoutMs } from "../orchestrator/spawn.ts";
 import {
@@ -1525,5 +1525,78 @@ describe("open-questions carry-over (2026-09 fix 1)", () => {
     const instructions = buildPhaseInstructions(findPhase("develop", "plan"), ctx);
     assert.match(instructions, /Carried-over open questions/);
     assert.match(instructions, /Which storage backend\?/);
+  });
+});
+
+// --- Compaction guard + truthful status lines (NEXT UP, 2026-09-15) ---------
+
+describe("compaction guard — resume prefix contract", () => {
+  test("active main phase: prefix carries the DELIVERABLE/STOP CONDITION contract", () => {
+    const prefix = buildResumeContext(makeCtx("investigate", 0).state); // reproduce = main
+    assert.ok(prefix.includes("## DELIVERABLE"), "main-phase contract missing from resume prefix");
+    assert.ok(prefix.includes("## STOP CONDITION"), "main-phase stop condition missing");
+    assert.ok(prefix.includes("gstack_phase"), "tier-2 pointer missing");
+  });
+
+  test("active subagent phase: no contract (delegation results self-heal), pointer still present", () => {
+    const prefix = buildResumeContext(makeCtx("investigate", 1).state); // root-cause = subagent
+    assert.ok(!prefix.includes("## DELIVERABLE"), "subagent phases must not carry the main contract");
+    assert.ok(prefix.includes("gstack_phase"));
+  });
+
+  test("parked gate: neither contract nor pointer", () => {
+    const state = { ...makeCtx("investigate", 2).state, status: "awaiting_approval" as const };
+    const prefix = buildResumeContext(state);
+    assert.ok(prefix.includes("PARKED"));
+    assert.ok(!prefix.includes("## DELIVERABLE"));
+    assert.ok(!prefix.includes("gstack_phase"));
+  });
+
+  test("sprint contracts interpolate the assigned sprint number", () => {
+    const state = { ...makeCtx("sprint", 3).state, sprintNumber: 7 }; // system-design = main
+    const prefix = buildResumeContext(state);
+    assert.ok(prefix.includes("system-design_07.md"), "sprint contract must carry the real sprint number");
+  });
+});
+
+describe("statusLineFor", () => {
+  const sprint = getWorkflow("sprint")!;
+
+  test("active returns the running label", () => {
+    const state = makeCtx("sprint", 7).state; // devsecops-review
+    assert.equal(statusLineFor(state, sprint), "Sprint (Agile Pipeline): DevSecOps Review (8/10)");
+  });
+
+  test("awaiting_approval: parked for approval vs optional-phase decision", () => {
+    const state = { ...makeCtx("sprint", 4).state, status: "awaiting_approval" as const };
+    assert.match(statusLineFor(state, sprint)!, /PARKED for approval.*\/gstack next/);
+    assert.match(statusLineFor({ ...state, pendingOptional: true }, sprint)!, /PARKED.*Run\/Skip\/Abort/);
+  });
+
+  test("paused decodes freeze / unreadable verdict / exhaustion / branch violation / failure", () => {
+    const base = makeCtx("sprint", 7).state;
+    assert.match(
+      statusLineFor({ ...base, status: "paused" as const, frozenUntilHuman: true, pausedReason: "security-freeze:devsecops-review", freezeInfo: { phaseId: "devsecops-review", severity: "critical", artifactPath: "x" } }, sprint)!,
+      /FROZEN: critical security rejection/,
+    );
+    assert.match(
+      statusLineFor({ ...base, status: "paused" as const, verdictPark: "qa-verdict", pausedReason: "verdict-unreadable:qa-verdict:artifact-mismatch" }, sprint)!,
+      /verdict unreadable \(artifact-mismatch\)/,
+    );
+    assert.match(
+      statusLineFor({ ...base, status: "paused" as const, pausedReason: "loop-exhausted:implement after 4 runs" }, sprint)!,
+      /loop exhausted/,
+    );
+    assert.match(
+      statusLineFor({ ...base, status: "paused" as const, pausedReason: "branch-violation:qa-verdict on main" }, sprint)!,
+      /branch violation/,
+    );
+    assert.match(statusLineFor({ ...base, status: "paused" as const }, sprint)!, /phase failed/);
+  });
+
+  test("terminal states clear the line", () => {
+    const state = makeCtx("sprint", 7).state;
+    assert.equal(statusLineFor({ ...state, status: "completed" as const }, sprint), undefined);
+    assert.equal(statusLineFor({ ...state, status: "aborted" as const }, sprint), undefined);
   });
 });

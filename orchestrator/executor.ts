@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { WorkflowState, WorkflowContext, GitContext, WorkflowPhase } from "./types.ts";
 import { getWorkflow } from "./workflows.ts";
 import { saveState, advancePhase, gateForApproval, gateOptionalPhase, parkForUnreadableVerdict, loadActiveState, type AdvanceOptions } from "./state.ts";
-import { buildPhaseInstructions, buildDeterministicPlan } from "./templates.ts";
+import { buildPhaseInstructions, buildDeterministicPlan, mainContractFor } from "./templates.ts";
 import { detectGitContext } from "./git.ts";
 import { runSubagent, type SpawnRequest, type SpawnResult, resolveTimeoutMs } from "./spawn.ts";
 import { parseHandoffVerdicts, verifyArtifactVerdicts, mergeParseOutcomes } from "./verdicts.ts";
@@ -307,6 +307,7 @@ export async function executeCurrentPhase(
     if (discovery.anomaly) {
       const parked = { ...state, status: "paused" as const, pausedReason: `anomaly:${discovery.anomaly}` };
       saveState(pi, parked);
+      setGstackStatus(ctx, parked, workflow);
       notify(`gstack sprint: sprint numbering anomaly — ${discovery.anomaly}. Resolve manually, then resume via /gstack (the panel re-checks the numbering).`, "warning");
       return;
     }
@@ -315,6 +316,21 @@ export async function executeCurrentPhase(
     state = numbered;
     wfCtx.state = numbered;
     notify(`gstack sprint: assigned sprint number ${String(discovery.next).padStart(2, "0")}.`, "info");
+  }
+
+  // Branch enforcement: sprint verdict gates audit the implement chain's diff —
+  // meaningless if a specialist committed to main/master (subagents share the
+  // host's git tree). Fail closed like every other park: the /gstack panel's
+  // Resume re-runs this function, which re-detects the branch.
+  if (state.workflowId === "sprint" && phase.loopBackTo && git.isMainBranch) {
+    const parked = { ...state, status: "paused" as const, pausedReason: `branch-violation:${phase.id} on ${git.branch}` };
+    saveState(pi, parked);
+    setGstackStatus(ctx, parked, workflow);
+    notify(
+      `gstack sprint: BRANCH VIOLATION — "${phase.id}" audits a task/<slug> diff, but HEAD is "${git.branch}". Move the work onto a task branch, then resume via /gstack.`,
+      "warning",
+    );
+    return;
   }
 
   if (phase.skipWhen?.(wfCtx)) {
@@ -358,11 +374,7 @@ export async function executeCurrentPhase(
     // /gstack decision panel (approvedOptional) — fall through and run it.
   }
 
-  try {
-    ctx.ui.setStatus("gstack", `${workflow.name}: ${phase.name} (${state.phaseIndex + 1}/${workflow.phases.length})`);
-  } catch {
-    /* stale ctx */
-  }
+  setGstackStatus(ctx, state, workflow);
 
   // Deterministic mode: the executor spawns subagents itself for subagent
   // phases. Delegation no longer depends on the model choosing to call the
@@ -419,6 +431,7 @@ export async function executeCurrentPhase(
           parkCause,
         );
         saveState(pi, parkedState);
+        setGstackStatus(ctx, parkedState, workflow);
         notify(
           `gstack sprint: no trustworthy verdict found for "${phase.id}" — pipeline parked for manual review (/gstack next). No retry budget consumed.`,
           "warning",
@@ -457,11 +470,7 @@ export async function executeCurrentPhase(
       }
     }
     // Restore the phase status line (delegation left subagent progress there).
-    try {
-      ctx.ui.setStatus("gstack", `${workflow.name}: ${phase.name} (${state.phaseIndex + 1}/${workflow.phases.length})`);
-    } catch {
-      /* stale ctx */
-    }
+    setGstackStatus(ctx, state, workflow);
   }
 
   const instructions = buildPhaseInstructions(phase, wfCtx);
@@ -783,6 +792,51 @@ export function activeConstraintLines(state: WorkflowState, phase?: WorkflowPhas
   return lines;
 }
 
+/**
+ * Truthful status line for the workflow's current posture: a parked or frozen
+ * workflow must never keep showing the last "running" label. Every non-running
+ * line names its unlock action (/gstack next vs the /gstack panel). Returns
+ * undefined for terminal states so callers can pass the result straight to
+ * ctx.ui.setStatus (undefined clears the line).
+ */
+export function statusLineFor(state: WorkflowState, workflow: { name: string; phases: WorkflowPhase[] }): string | undefined {
+  const phase = workflow.phases[state.phaseIndex];
+  const progress = `(${state.phaseIndex + 1}/${workflow.phases.length})`;
+  if (state.status === "completed" || state.status === "aborted") return undefined;
+  if (state.status === "awaiting_approval") {
+    return state.pendingOptional
+      ? `${workflow.name}: PARKED — optional phase "${phase?.name ?? "?"}" awaits Run/Skip/Abort via /gstack`
+      : `${workflow.name}: PARKED for approval — /gstack next`;
+  }
+  if (state.status === "paused") {
+    const reason = state.pausedReason ?? "";
+    const cause =
+      state.frozenUntilHuman || reason.startsWith("security-freeze:")
+        ? `FROZEN: ${state.freezeInfo?.severity ?? "critical/high"} security rejection`
+        : state.verdictPark
+          ? `verdict unreadable (${reason.split(":")[2] ?? "?"})`
+          : reason.startsWith("loop-exhausted:")
+            ? "loop exhausted"
+            : reason.startsWith("anomaly:")
+              ? "sprint numbering anomaly"
+              : reason.startsWith("branch-violation:")
+                ? "branch violation"
+                : reason
+                  ? `paused: ${reason}`
+                  : "phase failed";
+    return `${workflow.name}: ${cause} ${progress} — /gstack`;
+  }
+  return `${workflow.name}: ${phase?.name ?? "unknown"} ${progress}`;
+}
+
+export function setGstackStatus(ctx: ExtensionContext, state: WorkflowState, workflow: { name: string; phases: WorkflowPhase[] }): void {
+  try {
+    ctx.ui.setStatus("gstack", statusLineFor(state, workflow));
+  } catch {
+    /* stale ctx */
+  }
+}
+
 export function buildResumeContext(state: WorkflowState): string {
   const workflow = getWorkflow(state.workflowId);
   if (!workflow) return "";
@@ -827,7 +881,21 @@ export function buildResumeContext(state: WorkflowState): string {
     return parts.join("\n");
   }
 
+  // Compaction guard tier 1: durable artifacts survive compaction on disk, but
+  // the phase contract is context-only — re-anchor it every turn for main
+  // phases. Subagent phases self-heal (delegation results arrive with fresh
+  // instructions); parked states need constraints, not contracts.
+  if (state.status === "active" && phase?.execution === "main") {
+    parts.push("");
+    parts.push(mainContractFor(phase, { state }));
+  }
+
   parts.push("Continue working on the current phase. Call gstack_advance when done.");
+  if (state.status === "active") {
+    // Compaction guard tier 2: gstack_phase re-fetches the full phase
+    // instructions on demand — the model self-detects the loss after compaction.
+    parts.push("If this phase's full instructions are not in your context, call the gstack_phase tool.");
+  }
   // F2 mitigation (2026-09 handoff): the router snapshots the state once per
   // input event and this prefix cannot refresh mid-turn, so a chain that lands
   // mid-turn (gate resolves, verdict re-parks — possibly FROZEN) is invisible

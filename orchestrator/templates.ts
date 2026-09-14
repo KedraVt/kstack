@@ -344,7 +344,7 @@ const SUPPORT_PREFIX = "Apply the parts useful to the deliverable; nothing more.
  * Every main-phase instruction ends with a falsifiable DELIVERABLE /
  * STOP CONDITION pair so the model optimizes for the artifact, not the method.
  */
-const MAIN_CONTRACTS: Record<string, (ctx: WorkflowContext) => string> = {
+const MAIN_CONTRACTS: Record<string, (ctx: Pick<WorkflowContext, "state">) => string> = {
   "understand": () =>
     "## DELIVERABLE\nA shared-understanding summary: what exists today, what must change, and the chosen approach. End the summary with a section `OPEN QUESTIONS:` followed by one bullet per unresolved question (or exactly `OPEN QUESTIONS: none` when everything is settled).\n\n## STOP CONDITION\nStop when: ambiguities are resolved with the user or explicitly listed as open questions.",
   "plan": (c) =>
@@ -365,7 +365,7 @@ const MAIN_CONTRACTS: Record<string, (ctx: WorkflowContext) => string> = {
     '## DELIVERABLE\nThe requested single action (QA / review / ship / investigate) completed, with its standard report.\n\n## STOP CONDITION\nStop when: the action\'s own deliverable is produced.',
 };
 
-function mainContractFor(phase: WorkflowPhase, ctx: WorkflowContext): string {
+export function mainContractFor(phase: WorkflowPhase, ctx: Pick<WorkflowContext, "state">): string {
   const builder = MAIN_CONTRACTS[phase.id];
   if (builder) return builder(ctx);
   return `## DELIVERABLE\nA clear, verifiable result for the "${phase.name}" phase, directly usable by the next phase.\n\n## STOP CONDITION\nStop when: the result can be checked against this description as done or not done. Further work is waste.`;
@@ -375,7 +375,7 @@ function mainContractFor(phase: WorkflowPhase, ctx: WorkflowContext): string {
 // backlog stay four separate main phases). The assigned sprint number travels
 // inside the contract — the main model never sees UI notifications, so "XX"
 // alone would leave it guessing the artifact name.
-function sprintNum(ctx?: WorkflowContext): string {
+function sprintNum(ctx?: Pick<WorkflowContext, "state">): string {
   return ctx?.state.sprintNumber !== undefined ? pad2(ctx.state.sprintNumber) : "XX";
 }
 MAIN_CONTRACTS["user-story"] = (c) =>
