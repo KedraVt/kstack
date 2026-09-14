@@ -21,7 +21,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ParsedVerdict, VerdictSeverity } from "./types.ts";
 import { extractHandoff } from "./handoff.ts";
-import { pad2 } from "./sprint.ts";
+import {
+  qaArtifactPath,
+  codeReviewArtifactPath,
+  securityReviewArtifactPath,
+  dockerBuildReportPath,
+  newestArchitectArtifact,
+} from "./artifacts.ts";
 
 /** Closed value whitelist (case-normalized to lowercase). Anything else ⇒ null. */
 const VALUE_WHITELIST = ["approved", "rejected", "green", "red", "orange", "success", "failed"] as const;
@@ -210,49 +216,31 @@ function readTail(filePath: string): string | null {
  * relative to cwd. Gate artifacts are SPRINT-STAMPED (BUG-2 fix): a stale
  * report from a prior sprint can no longer satisfy this sprint's disk channel.
  * QA status rides the sprint-numbered artifact; architect review rides the
- * NEWEST sprint-stamped software-architect-artifact.
+ * NEWEST sprint-stamped software-architect-artifact. All names come from
+ * artifacts.ts — the single source shared with the task templates that tell
+ * subagents which files to write (B3-class drift guard).
  */
 export function artifactForVariable(variable: string, cwd: string, sprintNumber?: number): string[] {
   switch (variable) {
     case "status":
-      return sprintNumber !== undefined ? [path.join(cwd, `qa-artifact_${pad2(sprintNumber)}.md`)] : [];
+      return sprintNumber !== undefined ? [qaArtifactPath(cwd, sprintNumber)] : [];
     case "code-review":
-      return [path.join(cwd, "devsecops", `code-review-artifact${sprintStamp(sprintNumber)}.md`)];
+      return [codeReviewArtifactPath(cwd, sprintNumber)];
     case "security-review":
     // B5: the severity rides the security-review artifact — freeze/loop-back
     // routing must be disk-confirmable against the same file.
     case "severity":
-      return [path.join(cwd, "devsecops", `security-review-artifact${sprintStamp(sprintNumber)}.md`)];
+      return [securityReviewArtifactPath(cwd, sprintNumber)];
     case "docker-build":
     case "docker-security":
-      return [path.join(cwd, "devsecops", `docker-build-report${sprintStamp(sprintNumber)}.md`)];
+      return [dockerBuildReportPath(cwd, sprintNumber)];
     case "software-architect-review": {
-      try {
-        const files = fs
-          .readdirSync(cwd)
-          .filter((f) =>
-            sprintNumber !== undefined
-              ? new RegExp(`^software-architect-artifact_${pad2(sprintNumber)}_(\\d+)\\.md$`).test(f)
-              : /^software-architect-artifact_\d+\.md$/.test(f),
-          )
-          .sort((a, b) => {
-            // numeric tail sort: _03_10 is newer than _03_2
-            const na = Number(/_(\d+)\.md$/.exec(a)?.[1] ?? 0);
-            const nb = Number(/_(\d+)\.md$/.exec(b)?.[1] ?? 0);
-            return na - nb;
-          });
-        return files.length > 0 ? [path.join(cwd, files[files.length - 1])] : [];
-      } catch {
-        return [];
-      }
+      const newest = newestArchitectArtifact(cwd, sprintNumber);
+      return newest ? [newest] : [];
     }
     default:
       return [];
   }
-}
-
-function sprintStamp(sprintNumber?: number): string {
-  return sprintNumber !== undefined ? `_${pad2(sprintNumber)}` : "";
 }
 
 /**

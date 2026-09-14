@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { WorkflowState, PhaseResult, WorkflowPhase, ParsedVerdict } from "./types.ts";
 import { sprintMaxAttempts, sprintArchMaxAttempts, loopbacksEnabled, verdictsEnabled } from "./config.ts";
 import { buildRetryFeedback, PHASE_EXPECTATIONS, NEGATIVE_VALUES } from "./verdicts.ts";
-import { pad2 } from "./sprint.ts";
+import { securityReviewArtifactRel, SPRINT_PLACEHOLDER } from "./artifacts.ts";
 
 const ENTRY_TYPE = "gstack-wf-state";
 
@@ -176,10 +176,7 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
         severity: parsed.severity!,
         // Sprint number may be unknown if the freeze happens off the normal
         // path — surface the template placeholder instead of a bogus "00".
-        artifactPath:
-          next.sprintNumber !== undefined
-            ? `devsecops/security-review-artifact_${pad2(next.sprintNumber)}.md`
-            : "devsecops/security-review-artifact_XX.md",
+        artifactPath: securityReviewArtifactRel(next.sprintNumber ?? SPRINT_PLACEHOLDER),
       };
       return next; // phaseIndex held at the review phase
     }

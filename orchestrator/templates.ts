@@ -8,6 +8,7 @@ import { parseRootCauseMarker, validateStrategyTask } from "./skip.ts";
 import { readFileSync, existsSync } from "node:fs";
 import * as path from "node:path";
 import { pad2 } from "./sprint.ts";
+import { qaArtifactName, softwareArchitectArtifactName, SPRINT_PLACEHOLDER } from "./artifacts.ts";
 
 /**
  * Sprint loop engine support (plan B6 / E6).
@@ -720,7 +721,7 @@ Goal: {goal} | Branch: {branch}
 7. Output the DOC REPORT block`,
     // Sprint gates (plan B5): verdicts live BOTH on disk and in ## HANDOFF.
     "architect-gate": `## DELIVERABLE
-software-architect-artifact_{sprint}_N.md in the project root (N = next sequence number): binary verdict 'software-architect-review == approved' or 'software-architect-review == rejected', each rejection with file:line findings and concrete failure scenarios.
+${softwareArchitectArtifactName("{sprint}", "N")} in the project root (N = next sequence number): binary verdict 'software-architect-review == approved' or 'software-architect-review == rejected', each rejection with file:line findings and concrete failure scenarios.
 
 ## STOP CONDITION
 Stop when: the artifact exists with its parseable verdict line and every finding cites code.
@@ -734,7 +735,7 @@ End the artifact with EXACTLY ONE of these two lines (your real verdict, nothing
 - 'software-architect-review == rejected'
 Repeat the SAME line verbatim inside your ## HANDOFF — the orchestrator cross-checks both channels before routing.`,
     "qa-verdict": `## DELIVERABLE
-qa-artifact_XX.md in the project root: test execution report ending with '## STATUS == GREEN', '## STATUS == RED' or '## STATUS == ORANGE' (exactly one) plus failure reports for RED (repro steps) or Testability Blockers for ORANGE (missing selectors/ids).
+${qaArtifactName(SPRINT_PLACEHOLDER)} in the project root: test execution report ending with '## STATUS == GREEN', '## STATUS == RED' or '## STATUS == ORANGE' (exactly one) plus failure reports for RED (repro steps) or Testability Blockers for ORANGE (missing selectors/ids).
 
 ## STOP CONDITION
 Stop when: the artifact exists with its STATUS line and every non-GREEN finding is reproducible from the report alone.
@@ -743,7 +744,7 @@ Stop when: the artifact exists with its STATUS line and every non-GREEN finding 
 Sprint {sprint} | Goal: {goal} | Branch: {branch}
 Execute the acceptance criteria of user-story_XX.md against the implemented branch using browser tools. RED/ORANGE loops back to implement automatically.
 
-Write qa-artifact_XX.md ending with EXACTLY ONE of these three lines (your real verdict, nothing else on the line):
+Write ${qaArtifactName(SPRINT_PLACEHOLDER)} ending with EXACTLY ONE of these three lines (your real verdict, nothing else on the line):
 - 'status == green'
 - 'status == red'
 - 'status == orange'
