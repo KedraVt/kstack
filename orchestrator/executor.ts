@@ -405,6 +405,10 @@ export async function executeCurrentPhase(
         results.map((r) => parseHandoffVerdicts(r.result.rawOutput || r.result.output || "")),
       );
       let parsed = outcome.parsed;
+      // D4 park cause: capture whether the merge produced a verdict BEFORE the
+      // artifact check can null it — a non-null start means the park is a
+      // HANDOFF/disk disagreement, not an agent that emitted nothing.
+      const parkCause = parsed ? "artifact-mismatch" : "no-verdict";
       if (parsed && !verifyArtifactVerdicts(parsed, ctx.cwd, state.sprintNumber)) {
         parsed = null; // HANDOFF says X, artifact disagrees ⇒ fail closed
       }
@@ -412,6 +416,7 @@ export async function executeCurrentPhase(
         const parkedState = parkForUnreadableVerdict(
           { ...state, pendingVerdict: { phaseId: phase.id, parsed: null, excerpt: outcome.lines.join("\n") } },
           phase.id,
+          parkCause,
         );
         saveState(pi, parkedState);
         notify(
@@ -482,12 +487,16 @@ export async function executeCurrentPhase(
   }
 }
 
-async function runDeterministicDelegation(
+export async function runDeterministicDelegation(
   phase: { id: string },
   wfCtx: WorkflowContext,
   ctx: ExtensionContext,
   alive: () => boolean,
   pi: ExtensionAPI,
+  // Test seam: inject a fake spawn to exercise the delegation engine
+  // end-to-end without real child processes. The production call site
+  // (executeCurrentPhase) passes nothing and gets the real runSubagent.
+  spawnFn: typeof runSubagent = runSubagent,
 ): Promise<Array<{ agent: string; result: SpawnResult }>> {
   const plan = buildDeterministicPlan(phase as any, wfCtx);
   // STEP 4d: a collapsed validate-only root-cause step may be REFUTED — then
@@ -580,7 +589,7 @@ async function runDeterministicDelegation(
       delegationEvent(pi, { phaseId: phase.id, step: index, agent: step.agent, event: "started" });
       // STEP 2f/4d: at most one retry for transient failures; the cooldown
       // depends on the failure class (timeout → long, fast blip → short).
-      let result = await runSubagent(req);
+      let result = await spawnFn(req);
       const decision = retryDecision(result, 1);
       if (decision.retry && alive()) {
         delegationEvent(pi, {
@@ -601,7 +610,7 @@ async function runDeterministicDelegation(
         }
         await delay(decision.delayMs);
         if (alive()) {
-          result = await runSubagent({
+          result = await spawnFn({
             ...req,
             timeoutMs: retryTimeoutMs(req, decision.timeoutScale),
           });

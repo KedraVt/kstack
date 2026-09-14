@@ -339,9 +339,18 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
   // D4 UNREADABLE VERDICT PARK: fixed choices over ONLY the failing lines.
   if (state.verdictPark) {
     const phaseId = state.verdictPark;
+    // pausedReason encodes the park cause as "verdict-unreadable:<phaseId>:<cause>"
+    // (state.ts); parks written before the cause existed fall back to no-verdict.
+    const cause = state.pausedReason?.split(":")[2] ?? "no-verdict";
+    const causeText =
+      cause === "artifact-mismatch"
+        ? "the parsed HANDOFF verdict disagrees with the on-disk artifact"
+        : cause === "unroutable"
+          ? "a whitelisted verdict value is off this phase's expectation map"
+          : "the agent emitted no trustworthy verdict";
     const excerpt = state.pendingVerdict?.excerpt?.trim() || "(no verdict-shaped lines found in the subagent HANDOFF)";
     const choice = await ctx.ui.select(
-      `Verdict unreadable in "${phaseId}" — parked WITHOUT burning an attempt. Verdict lines found: ${excerpt.slice(0, 200)}`,
+      `Verdict unreadable in "${phaseId}" — ${causeText} — parked WITHOUT burning an attempt. Verdict lines found: ${excerpt.slice(0, 200)}`,
       ["Continue as approved", "Return phase with context", "View report excerpt", "Other…", "Abort workflow"],
     );
     if (choice === "Continue as approved") {

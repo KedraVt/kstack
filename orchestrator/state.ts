@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { WorkflowState, PhaseResult, WorkflowPhase, ParsedVerdict } from "./types.ts";
+import type { WorkflowState, PhaseResult, WorkflowPhase, ParsedVerdict, VerdictParkCause } from "./types.ts";
 import { sprintMaxAttempts, sprintArchMaxAttempts, loopbacksEnabled, verdictsEnabled } from "./config.ts";
 import { buildRetryFeedback, PHASE_EXPECTATIONS, NEGATIVE_VALUES } from "./verdicts.ts";
 import { securityReviewArtifactRel, SPRINT_PLACEHOLDER } from "./artifacts.ts";
@@ -158,7 +158,7 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
     if (action.kind === "park") {
       // BUG-1 fail-closed: whitelisted-but-unroutable verdict ⇒ D4 panel,
       // WITHOUT recording completion or burning an attempt.
-      return parkForUnreadableVerdict({ ...state, pendingVerdict: state.pendingVerdict }, phase.id);
+      return parkForUnreadableVerdict({ ...state, pendingVerdict: state.pendingVerdict }, phase.id, "unroutable");
     }
 
     const targetIndex = opts!.phases!.findIndex((p) => p.id === phase.loopBackTo);
@@ -231,12 +231,15 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
 
 /**
  * D4: a verdict-bearing phase completed but no trustworthy verdict could be
- * parsed. Park WITHOUT recording completion or incrementing any attempt —
- * only the interactive panel in command.ts resolves this.
+ * routed. Park WITHOUT recording completion or incrementing any attempt —
+ * only the interactive panel in command.ts resolves this. `cause` rides in
+ * pausedReason ("verdict-unreadable:<phaseId>:<cause>") so the panel can
+ * name why the park fired (agent emitted nothing vs artifact disagreement
+ * vs whitelisted-but-unexpected value).
  */
-export function parkForUnreadableVerdict(state: WorkflowState, phaseId: string): WorkflowState {
+export function parkForUnreadableVerdict(state: WorkflowState, phaseId: string, cause: VerdictParkCause): WorkflowState {
   if (state.verdictPark) return state; // idempotent
-  return { ...state, status: "paused", verdictPark: phaseId, pausedReason: `verdict-unreadable:${phaseId}` };
+  return { ...state, status: "paused", verdictPark: phaseId, pausedReason: `verdict-unreadable:${phaseId}:${cause}` };
 }
 
 /** D4 panel choice 1: treat the parked phase as approved and continue linearly. */

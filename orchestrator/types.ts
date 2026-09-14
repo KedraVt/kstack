@@ -100,6 +100,18 @@ export interface PendingVerdict {
   excerpt: string;
 }
 
+/**
+ * Why a D4 park fired, encoded as the trailing segment of
+ * `pausedReason` ("verdict-unreadable:<phaseId>:<cause>"):
+ * - "no-verdict": the subagent emitted nothing trustworthy (no verdict
+ *   lines, hedged, or a contradiction across chain steps);
+ * - "artifact-mismatch": the HANDOFF parsed but disagreed with the
+ *   on-disk artifact (or the artifact was absent);
+ * - "unroutable": the verdict parsed and whitelisted but is not on the
+ *   phase's expectation map.
+ */
+export type VerdictParkCause = "no-verdict" | "artifact-mismatch" | "unroutable";
+
 /** D3 freeze payload: critical/high security rejection parked for human review. */
 export interface FreezeInfo {
   phaseId: string;

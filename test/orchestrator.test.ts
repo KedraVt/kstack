@@ -860,6 +860,23 @@ describe("extractHandoff levels (STEP 2b)", () => {
     assert.ok(h2.text.length <= 12000);
   });
 
+  test("the fallback tail keeps the END of the output — the head is what is dropped", () => {
+    // Rule 6 is a TAIL cut: a trailing HANDOFF-shaped tail must survive while
+    // leading content is dropped, and the cut must not start mid-line.
+    const tailEnd = "TRAILING NOTE\nstatus == green";
+    const head = `LEADING-CONTENT ${"a".repeat(13000)}`;
+    const h = extractHandoff(`${head}\n${tailEnd}`);
+    assert.equal(h.level, "fallback");
+    assert.equal(h.text, tailEnd, "the cut advances past the first break in the tail");
+    assert.ok(!h.text.includes("LEADING-CONTENT"));
+  });
+
+  test("a tail with no line break returns the raw last `limit` chars", () => {
+    const h = extractHandoff("z".repeat(20000));
+    assert.equal(h.level, "fallback");
+    assert.equal(h.text, "z".repeat(12000));
+  });
+
   test("incomplete output caps the level at fallback", () => {
     assert.equal(extractHandoff(bigReport(GOOD_HANDOFF), { incomplete: true }).level, "fallback");
     assert.equal(extractHandoff("tiny", { incomplete: true }).level, "fallback");

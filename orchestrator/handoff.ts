@@ -22,13 +22,17 @@ const RAW_WHOLE_LIMIT = 6000;
 const FULL_HANDOFF_LIMIT = 4000;
 const FALLBACK_TAIL = 12000;
 
-/** Cut at a paragraph boundary at or before `limit` characters. */
+/**
+ * Tail cut at a paragraph boundary: keep the LAST `limit` characters, then
+ * advance past the first line break so the result does not start mid-line.
+ * With no break in the tail, the raw tail is returned.
+ */
 function cutAtParagraph(text: string, limit: number): string {
   if (text.length <= limit) return text;
-  const slice = text.slice(0, limit);
-  const lastBreak = Math.max(slice.lastIndexOf("\n\n"), slice.lastIndexOf("\n"));
-  if (lastBreak <= 0) return slice;
-  return slice.slice(0, lastBreak);
+  const tail = text.slice(-limit);
+  const firstBreak = tail.indexOf("\n");
+  if (firstBreak < 0) return tail;
+  return tail.slice(firstBreak + 1);
 }
 
 /**

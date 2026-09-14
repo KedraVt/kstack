@@ -514,16 +514,16 @@ describe("loop engine in advancePhase (B3)", () => {
 describe("D4 park helpers", () => {
   test("park is idempotent and burns no attempts", () => {
     const state = sprintState(7, { attempts: { implement: 2 } });
-    const parked = parkForUnreadableVerdict(state, "devsecops-review");
+    const parked = parkForUnreadableVerdict(state, "devsecops-review", "no-verdict");
     assert.equal(parked.status, "paused");
     assert.equal(parked.verdictPark, "devsecops-review");
-    assert.equal(parked.pausedReason, "verdict-unreadable:devsecops-review");
-    const reparked = parkForUnreadableVerdict(parked, "devsecops-review");
-    assert.equal(reparked, parked, "idempotent");
+    assert.equal(parked.pausedReason, "verdict-unreadable:devsecops-review:no-verdict");
+    const reparked = parkForUnreadableVerdict(parked, "devsecops-review", "artifact-mismatch");
+    assert.equal(reparked, parked, "idempotent — a second park keeps the original cause");
   });
 
   test("forceApproveParked advances past the gate and records the decision", () => {
-    const parked = parkForUnreadableVerdict(sprintState(8), "qa-verdict");
+    const parked = parkForUnreadableVerdict(sprintState(8), "qa-verdict", "no-verdict");
     const next = forceApproveParked(parked);
     assert.equal(next.phaseIndex, 9);
     assert.equal(next.status, "active");
@@ -533,7 +533,7 @@ describe("D4 park helpers", () => {
   });
 
   test("returnParkedWithContext loops back without incrementing attempts", () => {
-    const parked = parkForUnreadableVerdict(sprintState(8, { attempts: { implement: 1 } }), "qa-verdict");
+    const parked = parkForUnreadableVerdict(sprintState(8, { attempts: { implement: 1 } }), "qa-verdict", "no-verdict");
     const next = returnParkedWithContext(parked, SPRINT.phases, "custom guidance");
     assert.ok(next);
     assert.equal(next!.phaseIndex, 6, "back to implement");
@@ -542,7 +542,7 @@ describe("D4 park helpers", () => {
   });
 
   test("returnParkedWithContext refuses non-looping phases (null)", () => {
-    const parked = parkForUnreadableVerdict(sprintState(8), "qa-verdict");
+    const parked = parkForUnreadableVerdict(sprintState(8), "qa-verdict", "no-verdict");
     assert.equal(returnParkedWithContext(parked, getWorkflow("develop")!.phases), null);
   });
 
@@ -553,6 +553,62 @@ describe("D4 park helpers", () => {
     assert.equal(next.status, "active");
     assert.equal(next.pendingVerdict, undefined);
     assert.equal(next.pausedReason, undefined);
+  });
+});
+
+describe("D4 park cause distinction", () => {
+  test("the three causes encode distinctly in pausedReason", () => {
+    for (const cause of ["no-verdict", "artifact-mismatch", "unroutable"] as const) {
+      const parked = parkForUnreadableVerdict(sprintState(8), "qa-verdict", cause);
+      assert.equal(parked.pausedReason, `verdict-unreadable:qa-verdict:${cause}`);
+    }
+  });
+
+  test("a whitelisted-but-off-map verdict parks with the unroutable cause", () => {
+    // `software-architect-review == success` is whitelisted but neither
+    // expected-positive nor a routing negative at architect-gate (BUG-1).
+    const state = sprintState(4, {
+      pendingVerdict: {
+        phaseId: "architect-gate",
+        parsed: { verdicts: { "software-architect-review": "success" } },
+        excerpt: "software-architect-review == success",
+      },
+    });
+    const next = advancePhase(state, "architect-gate", { status: "completed", summary: "ambiguous" }, SPRINT.phases.length, {
+      phases: SPRINT.phases,
+      cwd: process.cwd(),
+    });
+    assert.equal(next.status, "paused");
+    assert.equal(next.phaseIndex, 4, "held at the gate — no completion recorded");
+    assert.equal(next.verdictPark, "architect-gate");
+    assert.equal(next.pausedReason, "verdict-unreadable:architect-gate:unroutable");
+  });
+
+  test("the D4 panel prompt names the cause for triage", async () => {
+    const prompts: string[] = [];
+    const ui = {
+      notify: () => {},
+      setStatus: () => {},
+      input: async () => undefined,
+      select: async (prompt: string) => {
+        prompts.push(prompt);
+        return undefined; // dismissed — no mutating branch runs
+      },
+      confirm: async () => false,
+    };
+    const cmdCtx: any = { ui };
+    const pi: any = { appendEntry: () => {} };
+
+    for (const [cause, pattern] of [
+      ["no-verdict", /no trustworthy verdict/i],
+      ["artifact-mismatch", /on-disk artifact/i],
+      ["unroutable", /expectation map/i],
+    ] as const) {
+      prompts.length = 0;
+      const parked = parkForUnreadableVerdict(sprintState(8), "qa-verdict", cause);
+      assert.equal(await handleSprintPanel(parked, cmdCtx, pi), true);
+      assert.match(prompts[0] ?? "", pattern, `panel prompt must name the "${cause}" cause`);
+    }
   });
 });
 
@@ -1012,7 +1068,7 @@ describe("advanceBlockReason (F1): every parked state is code-enforced", () => {
   });
 
   test("unreadable-verdict park is blocked", () => {
-    const parked = parkForUnreadableVerdict(sprintState(8, { status: "paused" }), "qa-verdict");
+    const parked = parkForUnreadableVerdict(sprintState(8, { status: "paused" }), "qa-verdict", "no-verdict");
     const blocked = advanceBlockReason(parked);
     assert.ok(blocked, "D4 park must refuse gstack_advance");
     assert.match(blocked!, /unreadable/i);
@@ -1121,7 +1177,7 @@ describe("buildResumeContext / activeConstraintLines (Q4)", () => {
   });
 
   test("unreadable-verdict park re-anchors the park constraint", () => {
-    const parked = parkForUnreadableVerdict(sprintState(8, { status: "paused" }), "qa-verdict");
+    const parked = parkForUnreadableVerdict(sprintState(8, { status: "paused" }), "qa-verdict", "no-verdict");
     assert.match(buildResumeContext(parked), /CONSTRAINT: the phase's verdict was UNREADABLE/);
   });
 
@@ -1253,7 +1309,7 @@ describe("in-flight decision guards (2026-09 fix 4)", () => {
   });
 
   test("sprint panel refuses a mutating decision while the chain runs, allows it after (F4)", async () => {
-    const parked = parkForUnreadableVerdict(sprintState(8), "qa-verdict");
+    const parked = parkForUnreadableVerdict(sprintState(8), "qa-verdict", "artifact-mismatch");
 
     const notified: string[] = [];
     const saved: unknown[] = [];
