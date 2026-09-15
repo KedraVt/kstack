@@ -20,7 +20,10 @@ One extension, two layers:
 
 - **`sprint` workflow (default-on)** — a 10-phase agile delivery pipeline distilled from `.agents-clean` methodology: understand → user-story → capability → system-design → ⏸ architect gate → backlog → implement → devsecops review → QA verdict → commit/archive. Planning artifacts (`user-story_XX.md`, `system-design_XX.md`, `tasks_XX.md`, …) live in the project root and archive to `.gstack/sprints/sprint_XX/` when the sprint goes green.
 - **Deterministic verdict routing** — review gates emit machine-parseable verdict lines (`status == red|green|orange`, `security-review == approved|rejected`) inside a `## HANDOFF` section. The orchestrator parses them fail-closed (whitelist-only values, containment-checked), cross-verifies them against the artifact files on disk (dual channel: chat + disk must agree), and routes deterministically — never on the model's say-so.
-- **Parks are code-enforced** — every parked state (security freeze, unreadable verdict, loop exhaustion, numbering anomaly, failed phase) is refused by the `gstack_advance` tool itself, not just discouraged in prose: a repeat call cannot advance past a park on the model's say-so. Only the `/gstack` panel (or `/gstack next` where applicable) can resume, re-run, accept or abort.
+- **Parks are code-enforced** — every parked state (security freeze, unreadable verdict, loop exhaustion, numbering anomaly, branch violation, failed phase) is refused by the `gstack_advance` tool itself, not just discouraged in prose: a repeat call cannot advance past a park on the model's say-so. Only the `/gstack` panel (or `/gstack next` where applicable) can resume, re-run, accept or abort.
+- **Branch enforcement** — sprint gates that audit developer output (`devsecops-review`, `qa-verdict`) park fail-closed when entered on main/master: MASTER_DOD requires `task/<slug>` branches for implementation work. Document-level phases (`architect-gate`, planning) legitimately run on main.
+- **Compaction guard** — the per-turn resume prefix re-anchors the active main phase's deliverable/stop-condition contract, and the read-only `gstack_phase` tool re-fetches full phase instructions on demand — for delegated phases it also names the durable artifact files, since specialist results arrive via a transient message and are never persisted.
+- **Truthful status line** — the footer shows the real state instead of the last running label: `PARKED for approval — /gstack next`, `FROZEN: <severity> security rejection`, `verdict unreadable (<cause>)`, `loop exhausted`, `branch violation`, `phase failed`; cleared on completion/abort.
 - **Security freeze** — a critical/high security rejection parks the whole sprint until a human types the confirmation phrase in the panel; medium/low rejections loop back to implement normally.
 - **Trust boundary note** — dual-channel verification trusts files in the repo root: a malicious repo can pre-plant both channels against a predictable next sprint number. Sprint stamping, anomaly guards, and the hard commit-archive gate raise the bar but do not close within-sprint planting — review gate artifacts before approving.
 - **Bounded loop-backs** — rejected reviews return work to the implementing phase with extracted blocker feedback; after N attempts (configurable) the sprint parks for human decision instead of looping forever. Accepting an exhausted gate ("Accept result — continue past the gate") resets the loop budget, so the next review gate gets a fresh ceiling instead of parking on its first rejection.
@@ -258,7 +261,7 @@ gstack-pi/
 │   ├── commands.generated.ts  Allowed command set (auto-generated)
 │   └── schemas.ts           TypeBox parameter schemas
 ├── orchestrator/
-│   ├── index.ts             Registers /gstack, gstack_advance, gstack_start, input router
+│   ├── index.ts             Registers /gstack, gstack_advance, gstack_phase, gstack_start, input router
 │   ├── types.ts             Workflow, Phase, State interfaces
 │   ├── state.ts             State machine (persist via pi appendEntry; approval gates)
 │   ├── git.ts               Git context detection
@@ -269,7 +272,7 @@ gstack-pi/
 │   ├── spawn.ts             Deterministic subagent execution (pi --mode json)
 │   ├── sprint.ts            Sprint numbering discovery + root/archive anomaly guards
 │   ├── verdicts.ts          Deterministic verdict parsing, dual-channel verification, retry feedback
-│   ├── artifacts.ts         Sprint-stamped artifact filenames — single source for templates, verdicts, freeze path
+│   ├── artifacts.ts         Sprint-stamped artifact filenames + phase→artifact map — single source for templates, verdicts, freeze path, gstack_phase
 │   ├── handoff.ts           ## HANDOFF extraction for {previous} (tail fallback)
 │   ├── skip.ts              Structural-skip guards (root-cause collapse, QA fix loop)
 │   ├── telemetry.ts         Per-step run reports (.gstack/runs)
@@ -312,7 +315,7 @@ input router ─────────────┘         ↑             
 3. Subagent phases are executed by the orchestrator itself: specialists run in isolated `pi` processes and their output is prefixed for review
 4. The LLM calls `gstack_advance` with a summary — this is the only progression mechanism; it must never defer back to the user
 5. Auto phases advance immediately; decision phases (`develop.plan`, `investigate.root-cause`) park in `awaiting_approval` until you run `/gstack next`
-6. Sprint parks (security freeze, unreadable verdict, loop exhaustion, numbering anomaly, kill-switch pauses, failed phases) are tool-enforced: a repeat `gstack_advance` is refused and only the `/gstack` panel moves the state machine
+6. Sprint parks (security freeze, unreadable verdict, loop exhaustion, numbering anomaly, branch violation, kill-switch pauses, failed phases) are tool-enforced: a repeat `gstack_advance` is refused and only the `/gstack` panel moves the state machine
 7. Repeat until all phases complete
 
 State persists across session reloads via pi's `appendEntry` (not sent to LLM context).
