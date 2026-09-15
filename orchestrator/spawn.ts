@@ -57,6 +57,7 @@ function killTree(proc: any, hard: boolean): void {
       const killer = spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], {
         shell: false,
         stdio: "ignore",
+        windowsHide: true,
       });
       killer.on("error", () => {
         try {
@@ -402,6 +403,7 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
           cwd: req.cwd,
           shell: false,
           stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
         });
       } catch (err: any) {
         // Synchronous spawn failures (invalid args, permissions) are
