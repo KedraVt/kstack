@@ -359,4 +359,34 @@ describe("branch enforcement at sprint verdict gates", () => {
     assert.ok(host.notifications.some((n) => n.level === "warning" && n.msg.includes("BRANCH VIOLATION")), "user-facing warning missing");
     assert.ok(host.statuses.some((s) => s?.includes("branch violation")), "status line must name the park cause");
   });
+
+  test("architect-gate on main does NOT park — it reviews documents, no task branch exists yet", async () => {
+    const NAME = "GSTACK_PI_DETERMINISTIC";
+    const original = process.env[NAME];
+    process.env[NAME] = "off"; // skip real delegation; flow straight to instructions
+    try {
+      const host = fakeHost(process.cwd());
+      const sent: string[] = [];
+      const pi: any = {
+        appendEntry: host.pi.appendEntry,
+        sendUserMessage: (msg: string) => sent.push(msg),
+        exec: async (_c: string, args: string[]) => ({ stdout: args.includes("--show-current") ? "main\n" : "", stderr: "" }),
+      };
+      const state = {
+        workflowId: "sprint",
+        phaseIndex: 4, // architect-gate — loopBackTo: "system-design"
+        status: "active" as const,
+        goal: "ship the cart",
+        results: {},
+        sprintNumber: 7,
+      };
+      beginRun("sprint");
+      await executeCurrentPhase(pi, host.ctx, state);
+      assert.ok(!host.events.some((e) => e.status === "paused"), "architect-gate must not branch-park on main");
+      assert.equal(sent.length, 1, "phase instructions still delivered");
+    } finally {
+      if (original === undefined) delete process.env[NAME];
+      else process.env[NAME] = original;
+    }
+  });
 });

@@ -13,6 +13,7 @@ import { isValidatedStrategy } from "./skip.ts";
 import { existsSync } from "node:fs";
 import * as path from "node:path";
 import { ensureRun, writeRunReport } from "./telemetry.ts";
+import { phaseArtifactPaths } from "./artifacts.ts";
 import { SECURITY_SECTION } from "../lib/content-security.ts";
 
 export function initOrchestrator(pi: ExtensionAPI): void {
@@ -263,12 +264,20 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         return { content: [{ type: "text" as const, text: "No active gstack workflow. Start one with /gstack." }] };
       }
       const workflow = getWorkflow(state.workflowId);
-      const phase = workflow?.phases[state.phaseIndex];
-      if (!workflow || !phase) {
+      if (!workflow) {
         return {
           content: [{
             type: "text" as const,
-            text: `No current phase for workflow "${state.workflowId}" (status: ${state.status}, phaseIndex ${state.phaseIndex}).`,
+            text: `Unknown workflow "${state.workflowId}" — the persisted state references a workflow this extension does not know (stale state entry?).`,
+          }],
+        };
+      }
+      const phase = workflow.phases[state.phaseIndex];
+      if (!phase) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Workflow "${state.workflowId}" has no phase at index ${state.phaseIndex} (status: ${state.status}).`,
           }],
         };
       }
@@ -279,8 +288,22 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         state.status === "active"
           ? ""
           : `[workflow ${state.status}${state.pausedReason ? `: ${state.pausedReason}` : ""} — reference only: do NOT start or continue this phase]\n\n`;
+      // Delegated results arrive via a followUp message and are never
+      // persisted — after compaction "review the output above" points at
+      // nothing. Name the durable record instead.
+      const artifactPaths = phaseArtifactPaths(phase.id, ctx.cwd, state.sprintNumber);
+      const recordLines =
+        phase.execution === "subagent" && deterministicSubagents()
+          ? artifactPaths.length
+            ? artifactPaths.map((p) => `- ${path.relative(ctx.cwd, p) || p}${existsSync(p) ? "" : " (not written yet)"}`)
+            : ["- no fixed artifact — recover via git history and the files the phase produced"]
+          : [];
+      const record = recordLines.length
+        ? "\n\n### On-disk record\nSpecialist results were delivered in an earlier message and are not persisted — if they are gone from your context, the durable record is:\n" +
+          recordLines.join("\n")
+        : "";
       return {
-        content: [{ type: "text" as const, text: posture + buildPhaseInstructions(phase, { state, git, cwd: ctx.cwd }) }],
+        content: [{ type: "text" as const, text: posture + buildPhaseInstructions(phase, { state, git, cwd: ctx.cwd }) + record }],
       };
     },
   });

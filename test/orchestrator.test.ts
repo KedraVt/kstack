@@ -10,6 +10,7 @@ import { loadSkillDigest, getSkillInfo, buildSkillIndex, getSkillIds } from "../
 import { buildPhaseInstructions, buildDeterministicPlan, planFilePath, parsePlanFileMarker, resolvePlanFilePath, carryOverOpenQuestions } from "../orchestrator/templates.ts";
 import type { WorkflowContext, WorkflowPhase } from "../orchestrator/types.ts";
 import { launchPhase, ctxAlive, isPhaseInFlight, advanceBlockReason, releasePhaseInFlight, buildResumeContext, activeConstraintLines, statusLineFor } from "../orchestrator/executor.ts";
+import { initOrchestrator } from "../orchestrator/index.ts";
 import { activityLabelFromEvent } from "../orchestrator/spawn.ts";
 import { runSubagent, resolveTimeoutMs } from "../orchestrator/spawn.ts";
 import {
@@ -1608,5 +1609,55 @@ describe("statusLineFor", () => {
     const state = makeCtx("sprint", 7).state;
     assert.equal(statusLineFor({ ...state, status: "completed" as const }, sprint), undefined);
     assert.equal(statusLineFor({ ...state, status: "aborted" as const }, sprint), undefined);
+  });
+});
+
+describe("gstack_phase tool", () => {
+  function fakePiWithState(state: unknown) {
+    const tools = new Map<string, any>();
+    const pi: any = {
+      registerTool: (t: any) => tools.set(t.name, t),
+      registerCommand: () => {},
+      on: () => {},
+      exec: async () => ({ stdout: "", stderr: "" }),
+      appendEntry: () => {},
+    };
+    const ctx: any = {
+      cwd: process.cwd(),
+      ui: { notify: () => {}, setStatus: () => {} },
+      sessionManager: {
+        getEntries: () => (state ? [{ type: "custom", customType: "gstack-wf-state", data: state }] : []),
+      },
+    };
+    return { pi, tools, ctx };
+  }
+
+  test("delegated phase: instructions + posture header + on-disk record", async () => {
+    const state = { ...makeCtx("sprint", 7).state, status: "paused" as const, pausedReason: "branch-violation:devsecops-review on main", sprintNumber: 7 };
+    const { pi, tools, ctx } = fakePiWithState(state);
+    initOrchestrator(pi);
+    const res = await tools.get("gstack_phase").execute("t", {}, undefined, undefined, ctx);
+    const text = res.content[0].text;
+    assert.ok(text.startsWith("[workflow paused: branch-violation:devsecops-review on main"), "posture header missing");
+    assert.ok(text.includes("### On-disk record"), "artifact section missing");
+    assert.ok(text.includes("code-review-artifact_07.md"), "expected artifact path not listed");
+    assert.ok(text.includes("(not written yet)"), "missing-file marker absent");
+  });
+
+  test("active main phase: instructions, no posture header, no record section", async () => {
+    const { pi, tools, ctx } = fakePiWithState(makeCtx("sprint", 3).state); // system-design = main
+    initOrchestrator(pi);
+    const res = await tools.get("gstack_phase").execute("t", {}, undefined, undefined, ctx);
+    const text = res.content[0].text;
+    assert.ok(text.includes("Phase: System Design"));
+    assert.ok(!text.startsWith("[workflow"), "active phase must not carry the reference-only header");
+    assert.ok(!text.includes("### On-disk record"), "main phases have no delegation results to lose");
+  });
+
+  test("unknown workflowId gets its own message (not 'no current phase')", async () => {
+    const { pi, tools, ctx } = fakePiWithState({ workflowId: "legacy-x", phaseIndex: 0, status: "active", goal: "g", results: {} });
+    initOrchestrator(pi);
+    const res = await tools.get("gstack_phase").execute("t", {}, undefined, undefined, ctx);
+    assert.ok(res.content[0].text.includes('Unknown workflow "legacy-x"'));
   });
 });

@@ -19,7 +19,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { pad2 } from "./sprint.ts";
+import { pad2, sprintArchiveDir } from "./sprint.ts";
 
 /**
  * Sprint reference accepted by the builders below: a real sprint number, a
@@ -104,6 +104,28 @@ const ARCHITECT_BASE = "software-architect-artifact";
  */
 export function softwareArchitectArtifactName(sprint: SprintRef, seq: number | string): string {
   return `${ARCHITECT_BASE}${sprintStamp(sprint)}_${seq}.md`;
+}
+
+/**
+ * Durable on-disk outputs a subagent phase leaves behind — used by the
+ * gstack_phase tool to point at the record when the delegation results
+ * (delivered via followUp message) are no longer in context.
+ */
+export function phaseArtifactPaths(phaseId: string, cwd: string, sprint?: SprintRef): string[] {
+  switch (phaseId) {
+    case "architect-gate": {
+      const newest = newestArchitectArtifact(cwd, typeof sprint === "number" ? sprint : undefined);
+      return newest ? [newest] : [];
+    }
+    case "devsecops-review":
+      return [codeReviewArtifactPath(cwd, sprint), securityReviewArtifactPath(cwd, sprint)];
+    case "qa-verdict":
+      return sprint !== undefined ? [qaArtifactPath(cwd, sprint)] : [];
+    case "commit-archive":
+      return typeof sprint === "number" ? [sprintArchiveDir(cwd, sprint)] : [];
+    default:
+      return [];
+  }
 }
 
 /**

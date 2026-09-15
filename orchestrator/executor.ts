@@ -318,11 +318,13 @@ export async function executeCurrentPhase(
     notify(`gstack sprint: assigned sprint number ${String(discovery.next).padStart(2, "0")}.`, "info");
   }
 
-  // Branch enforcement: sprint verdict gates audit the implement chain's diff —
-  // meaningless if a specialist committed to main/master (subagents share the
-  // host's git tree). Fail closed like every other park: the /gstack panel's
-  // Resume re-runs this function, which re-detects the branch.
-  if (state.workflowId === "sprint" && phase.loopBackTo && git.isMainBranch) {
+  // Branch enforcement: gates that loop back to "implement" audit the BE/FE
+  // chain's diff — meaningless if a specialist committed to main/master
+  // (subagents share the host's git tree). architect-gate is deliberately out:
+  // it loops to system-design and reviews documents — main is legitimate
+  // there. Fail closed like every other park: the /gstack panel's Resume
+  // re-runs this function, which re-detects the branch.
+  if (state.workflowId === "sprint" && phase.loopBackTo === "implement" && git.isMainBranch) {
     const parked = { ...state, status: "paused" as const, pausedReason: `branch-violation:${phase.id} on ${git.branch}` };
     saveState(pi, parked);
     setGstackStatus(ctx, parked, workflow);

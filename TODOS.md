@@ -18,9 +18,9 @@ All three items landed in one commit:
    `saveState` in `gstack_advance` and on the executor's anomaly/D4 park paths.
 3. **Branch enforcement** — `executeCurrentPhase` parks fail-closed
    (`pausedReason:"branch-violation:<phase> on <branch>"` + panel Resume/Abort)
-   when a sprint verdict gate (`loopBackTo` phase) is entered on main/master.
-   Scope: gates only — planning phases legitimately run on main; implement-phase
-   enforcement stays a possible follow-up.
+   when a sprint gate that audits developer output (`loopBackTo:"implement"`)
+   is entered on main/master. Scope: developer gates only — `architect-gate`
+   reviews documents on main legitimately; planning phases too.
 
 ## INTEGRATION FOLLOW-UPS (feat/sprint-workflow)
 
