@@ -16,7 +16,8 @@ export async function detectGitContext(cwd: string, pi: ExtensionAPI): Promise<G
     const [branchRes, statusRes, logRes, revRes] = await Promise.all([
       pi.exec("git", ["branch", "--show-current"], { cwd }),
       pi.exec("git", ["status", "--porcelain"], { cwd }),
-      pi.exec("git", ["log", "-1", "--format=%s"], { cwd }),
+      // Unborn branch (fresh repo, no commits): log fails — tolerate like rev-list.
+      pi.exec("git", ["log", "-1", "--format=%s"], { cwd }).catch(() => null),
       pi.exec("git", ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"], { cwd }).catch(() => null),
     ]);
 
@@ -40,7 +41,7 @@ export async function detectGitContext(cwd: string, pi: ExtensionAPI): Promise<G
       aheadOfRemote: ahead,
       behindRemote: behind,
       isMainBranch: branch === "main" || branch === "master",
-      recentCommitSubject: logRes.stdout?.trim() || "",
+      recentCommitSubject: logRes?.stdout?.trim() || "",
     };
   } catch {
     return DEFAULT_GIT;
