@@ -1,25 +1,29 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerGstackTools } from "./tools.generated";
-import { resolveBinary } from "./lib/browse";
-import { isBinaryInstalled, downloadBinary, getBinaryPath } from "./lib/download";
+import { resolveBinary, invalidateBinaryCache } from "./lib/browse";
+import { isBinaryInstalled, downloadBinary } from "./lib/download";
 import { initOrchestrator } from "./orchestrator/index";
 
 export default function (pi: ExtensionAPI) {
   const bin = resolveBinary();
 
-  if ("error" in bin && !isBinaryInstalled()) {
+  if ("error" in bin) {
+    // resolveBinary() memoizes the miss — so after a successful download (or
+    // an externally-provided binary appearing) we MUST drop the cache or
+    // runBrowse keeps reporting the stale "not found" error all session.
     pi.on("session_start", async (_event, ctx) => {
+      if (isBinaryInstalled()) {
+        invalidateBinaryCache();
+        return;
+      }
       ctx.ui.notify("gstack-pi: downloading browse binary...", "info");
       const result = await downloadBinary((msg) => ctx.ui.notify(`gstack-pi: ${msg}`, "info"));
       if ("error" in result) {
         ctx.ui.notify(`gstack-pi: ${result.error} — browse tools unavailable`, "warning");
       } else {
+        invalidateBinaryCache();
         ctx.ui.notify(`gstack-pi: binary ready at ${result.path}`, "info");
       }
-    });
-  } else if ("error" in bin) {
-    pi.on("session_start", async (_event, ctx) => {
-      ctx.ui.notify(`gstack-pi warning: ${bin.error}`, "warning");
     });
   }
 

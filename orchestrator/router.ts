@@ -30,7 +30,9 @@ export function createInputRouter(_pi: ExtensionAPI) {
       // "proceed" and need the re-anchoring prefix — the phase instructions may
       // be many turns back. MIN_INPUT_LENGTH only guards intent matching below.
       const contextPrefix = buildResumeContext(activeState);
-      return { action: "transform", text: `${contextPrefix}\n\n${event.text}` };
+      // Preserve event.images — dropping them silently ate pasted screenshots
+      // in the transformed message.
+      return { action: "transform", text: `${contextPrefix}\n\n${event.text}`, images: event.images };
     }
 
     if (event.text.length < MIN_INPUT_LENGTH) return { action: "continue" };
@@ -42,7 +44,7 @@ export function createInputRouter(_pi: ExtensionAPI) {
 
     const best = scores[0];
     const suggestion = buildSuggestion(best.workflow);
-    return { action: "transform", text: `${suggestion}\n\n${event.text}` };
+    return { action: "transform", text: `${suggestion}\n\n${event.text}`, images: event.images };
   };
 }
 

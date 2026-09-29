@@ -14,5 +14,12 @@
     "noImplicitAny": false,
     "lib": ["ES2023"]
   },
-  "include": ["orchestrator/**/*.ts", "test/**/*.ts", "index.ts"]
+  "include": [
+    "orchestrator/**/*.ts",
+    "lib/**/*.ts",
+    "scripts/**/*.ts",
+    "test/**/*.ts",
+    "tools.generated.ts",
+    "index.ts"
+  ]
 }

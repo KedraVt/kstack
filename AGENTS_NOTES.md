@@ -1,27 +1,43 @@
-# AGENTS_NOTES — required state of HOME agent files
+# AGENTS_NOTES — state of the subagent definitions
 
-Agent definitions live OUTSIDE this repo, in `~/.pi/agent/agents/*.md`. Because
-they are not versioned here, every behavioral directive added by the
-efficiency plan is mirrored in this file and guarded by a unit test
-(`orchestrator.test.ts` → "AGENTS_NOTES mirror"), which reads the actual home
-files and fails on drift.
+## Where the agent files live
 
-## `C:\Users\Mattia\.pi\agent\agents\planner.md`
+Canonical, versioned copies live in this repo at `agents/*.md`. `update.sh`
+syncs them into `~/.pi/agent/agents/` (backing up existing files to
+`.bak-<timestamp>` first, never deleting). If you hand-tuned deployed copies,
+re-apply your changes after a sync.
 
-After the "gstack workflow cooperation" paragraph, this directive MUST exist:
+> **History:** this file previously claimed agent definitions were NOT
+> versioned here and described a mirror-test premise. That was stale: the
+> canonical files ARE in `agents/` and had already drifted from deployed copies
+> before the deep review (2026-09). The deployed `~/.pi/agent/agents/` may lag
+> `agents/` until the next `update.sh` run — keep that in mind when debugging
+> "the prompt says X but the subagent did Y".
 
-> You receive VERIFIED FACTS from a prior specialist. Treat them as context,
-> not proof: do NOT re-verify systematically, but ALWAYS re-check claims that
-> are load-bearing for code changes you are about to make.
+## Shared contract (all workflow subagents)
 
-## `C:\Users\Mattia\.pi\agent\agents\worker.md`
+Every agent that participates in a deterministic delegation chain ends its
+report with a `## HANDOFF` section (≤4000 chars) beginning with
+`VERIFIED FACTS:`. The orchestrator parses the LAST `## HANDOFF` marker —
+earlier markers in the report body are ignored. Verdict lines inside HANDOFF
+are bare `KEY == VALUE` lines; `##`-prefixed heading lines also parse.
 
-After the "gstack workflow cooperation" paragraph, this directive MUST exist:
+Per-agent notes:
 
-> Trust the HANDOFF section of the task as working context; re-check only
-> claims that are load-bearing for edits you are about to make.
+- **worker.md / reviewer.md** — carry the `Trust the HANDOFF…` trust directive
+  AND the emit contract (added 2026-09 review; both are chain participants).
+- **frontend-developer.md** — must NEVER `git checkout main`/`git pull`
+  mid-chain: the sprint implement chain has backend commits on the task branch
+  that `checkout main` would abandon.
+- **qa-engineer.md / software-architect.md** — emit `##`-prefixed verdict lines
+  (`## STATUS == GREEN`, `## software-architect-review == blank`); the parser
+  tolerates the prefix, so no prompt change was needed.
+- **sprint-planner.md** — ORPHANED: no workflow phase delegates to it. Kept
+  documented-as-such for manual invocation and a future planner-delegation
+  variant.
+- **planner.md** — "VERIFIED FACTS … treat as context, not proof, re-check
+  load-bearing claims" directive (efficiency plan STEP 2e).
 
-Rationale (efficiency plan STEP 2e): without these directives the receiving
+Rationale for the trust directive (unchanged): without it the receiving
 specialist re-verifies its input end-to-end, duplicating turns and wall time.
-The balance keeps the safety property: load-bearing claims justifying code
-changes are always re-checked.
+Load-bearing claims justifying code changes are always re-checked.

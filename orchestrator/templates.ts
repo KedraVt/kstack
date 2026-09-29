@@ -1,6 +1,6 @@
 import type { WorkflowPhase, WorkflowContext, Workflow } from "./types.ts";
 import { getWorkflow } from "./workflows.ts";
-import { loadSkillDigest, loadSkillSource, getSkillInfo, type SkillInfo } from "./skills.ts";
+import { loadSkillSource, getSkillInfo } from "./skills.ts";
 import { skillsEnabled, manualGates, deterministicSubagents, skillInjectionMode } from "./config.ts";
 import { replaceExact } from "./text.ts";
 import { extractHandoff } from "./handoff.ts";
@@ -8,7 +8,7 @@ import { parseRootCauseMarker, validateStrategyTask } from "./skip.ts";
 import { readFileSync, existsSync } from "node:fs";
 import * as path from "node:path";
 import { pad2 } from "./sprint.ts";
-import { qaArtifactName, softwareArchitectArtifactName, SPRINT_PLACEHOLDER } from "./artifacts.ts";
+import { qaArtifactName, softwareArchitectArtifactName } from "./artifacts.ts";
 
 /**
  * Sprint loop engine support (plan B6 / E6).
@@ -77,7 +77,10 @@ export function conditionalSkillIds(ids: string[] | undefined, cwd?: string): st
     if (id === "gstack-sprint-pipeline") return repoHasCI(cwd);
     return true;
   });
-  return filtered.length > 0 ? filtered : undefined;
+  // Return [] (not undefined) when filtering emptied the list: downstream
+  // uses `filtered ?? phase.skills` — undefined would resurrect the very
+  // Docker/CI digests this function just proved absent in the repo.
+  return filtered;
 }
 
 /** Scrape the BINDING Ubiquitous Language table out of system-design_XX.md. */
@@ -442,7 +445,7 @@ function buildMainInstructions(phase: WorkflowPhase, ctx: WorkflowContext): stri
       `1. Identify what to test: "${c.state.goal}"`,
       `2. Determine the target URL or dev server (ask user if unclear)`,
       `3. Define the test plan: which user flows, which breakpoints`,
-      `4. Ensure the gstack browser binary is available (use gstack_status tool)`,
+      `4. Ensure the gstack browser binary is available (use the gstack_daemon_status tool)`,
       `5. Summarize the test plan before proceeding`,
     ].join("\n"),
 
@@ -735,29 +738,29 @@ End the artifact with EXACTLY ONE of these two lines (your real verdict, nothing
 - 'software-architect-review == rejected'
 Repeat the SAME line verbatim inside your ## HANDOFF — the orchestrator cross-checks both channels before routing.`,
     "qa-verdict": `## DELIVERABLE
-${qaArtifactName(SPRINT_PLACEHOLDER)} in the project root: test execution report ending with '## STATUS == GREEN', '## STATUS == RED' or '## STATUS == ORANGE' (exactly one) plus failure reports for RED (repro steps) or Testability Blockers for ORANGE (missing selectors/ids).
+${qaArtifactName("{sprint}")} in the project root: test execution report ending with 'status == green', 'status == red' or 'status == orange' (exactly one, as a bare line) plus failure reports for RED (repro steps) or Testability Blockers for ORANGE (missing selectors/ids).
 
 ## STOP CONDITION
 Stop when: the artifact exists with its STATUS line and every non-GREEN finding is reproducible from the report alone.
 
 ## CONTEXT
 Sprint {sprint} | Goal: {goal} | Branch: {branch}
-Execute the acceptance criteria of user-story_XX.md against the implemented branch using browser tools. RED/ORANGE loops back to implement automatically.
+Execute the acceptance criteria of user-story_{sprint}.md against the implemented branch using browser tools. RED/ORANGE loops back to implement automatically.
 
-Write ${qaArtifactName(SPRINT_PLACEHOLDER)} ending with EXACTLY ONE of these three lines (your real verdict, nothing else on the line):
+Write ${qaArtifactName("{sprint}")} ending with EXACTLY ONE of these three lines (your real verdict, nothing else on the line):
 - 'status == green'
 - 'status == red'
 - 'status == orange'
 Repeat the SAME line verbatim inside your ## HANDOFF — the orchestrator cross-checks both channels before routing.`,
     "commit-archive": `## DELIVERABLE
-Sprint closed: all work committed via Conventional Commits, artifacts archived to .gstack/sprints/sprint_XX/, archive manifest written.
+Sprint closed: all work committed via Conventional Commits, artifacts archived to .gstack/sprints/sprint_{sprint}/, archive manifest written.
 
 ## STOP CONDITION
-Stop when: git status is clean, the archive directory contains all sprint_XX artifacts, and the manifest lists them.
+Stop when: git status is clean, the archive directory contains all sprint_{sprint} artifacts, and the manifest lists them.
 
 ## CONTEXT
 Sprint {sprint} | Goal: {goal} | Branch: {branch}
-This phase runs ONLY after explicit user approval. Steps: 1) verify suite green, 2) commit any uncommitted work (Conventional Commits), 3) move ALL sprint artifacts (user-story/capability/system-design/ADR/tasks/QA/review files) into .gstack/sprints/sprint_XX/, 4) write manifest.md listing the moved files.`,
+This phase runs ONLY after explicit user approval (the orchestrator entry-gates it). Steps: 1) verify suite green, 2) commit any uncommitted work (Conventional Commits), 3) move ALL sprint artifacts (user-story/capability/system-design/ADR/tasks/QA/review files) into .gstack/sprints/sprint_{sprint}/, 4) write manifest.md listing the moved files.`,
   };
 
   // Explicit phase.task wins over the generic per-id template (same
@@ -952,7 +955,10 @@ function interpolate(template: string, ctx: WorkflowContext): string {
   // Sprint tokens: number + BINDING Ubiquitous Language table.
   out = replaceExact(out, /\{sprint\}/g, ctx.state.sprintNumber !== undefined ? pad2(ctx.state.sprintNumber) : "??");
   out = replaceExact(out, /\{glossary\}/g, glossaryTable(ctx.cwd, ctx.state.sprintNumber));
-  out = replaceExact(out, /\{(\w+)_summary\}/g, (_, phaseId: string) =>
+  // [\w-] not \w: hyphenated phase ids (root-cause, regression-qa) carry
+  // real summaries — with \w the {root-cause_summary} token never matched
+  // and the fix phase ran without the diagnosis.
+  out = replaceExact(out, /\{([\w-]+)_summary\}/g, (_, phaseId: string) =>
     ctx.state.results[phaseId]?.summary ?? "(not yet available)");
   return out;
 }

@@ -19,9 +19,9 @@ import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const EXT_ROOT = resolve(here, "..");
-const SOURCE_DIR = process.env.GSTACK_SOURCE_DIR
-  ? resolve(process.env.GSTACK_SOURCE_DIR)
-  : join(EXT_ROOT, "source");
+// GSTACK_REPO is canonical; GSTACK_SOURCE_DIR accepted as alias (matches gen-tools.ts).
+const SOURCE_DIR_RAW = process.env.GSTACK_REPO || process.env.GSTACK_SOURCE_DIR;
+const SOURCE_DIR = SOURCE_DIR_RAW ? resolve(SOURCE_DIR_RAW) : join(EXT_ROOT, "source");
 // gstack skills are nested one level down (skills/gstack/) so the same root can
 // also host skills/kedra/ (.agents-clean raw sources) without name conflicts.
 const SKILLS_OUT_DIR = join(EXT_ROOT, "skills", "gstack");

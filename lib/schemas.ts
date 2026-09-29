@@ -221,7 +221,7 @@ const S = {
     ...COMMON,
   }),
   download: Type.Object({
-    url: Type.Optional(Type.String()),
+    url: Type.Optional(Type.String({ description: "URL to download (positional — url OR ref, not both)" })),
     ref: Type.Optional(Type.String()),
     path: Type.Optional(Type.String()),
     base64: Type.Optional(Type.Boolean()),
@@ -280,7 +280,7 @@ const S = {
     commands: Type.Array(Type.Array(Type.String()), {
       minItems: 1,
       description:
-        'JSON array of [cmd, ...args] batches, e.g. [["goto","https://x"],["click","@e3"],["text","h1"]]. Executed in order, stops at first error, one result per command. Payload travels via stdin.',
+        'JSON array of [cmd, ...args] batches, e.g. [["goto","https://x"],["click","@e3"],["text","h1"]]. Executed in order; every command runs — failures appear as "[cmd] ERROR: ..." lines (no early stop; check every line). Payload travels via stdin.',
     }),
     // Deliberately NO extraArgs here: argv extras are meaningless when the
     // payload travels via stdin, and passing them would silently break the

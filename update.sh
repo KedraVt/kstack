@@ -66,8 +66,8 @@ done
 
 # 2c. New browse commands in source not in our allowlist
 if [ -f "$REPO/browse/src/commands.ts" ]; then
-  UPSTREAM_CMDS=$(grep -oP "^\s+'[\w-]+'" "$REPO/browse/src/commands.ts" 2>/dev/null | tr -d " '" | sort -u)
-  LOCAL_CMDS=$(grep -oP "'[\w-]+'" "$DEST/lib/commands.generated.ts" 2>/dev/null | tr -d "'" | sort -u)
+  UPSTREAM_CMDS=$(grep -oE "^[[:space:]]*'[a-zA-Z0-9_-]+'" "$REPO/browse/src/commands.ts" 2>/dev/null | tr -d " '" | sort -u)
+  LOCAL_CMDS=$(grep -oE "'[a-zA-Z0-9_-]+'" "$DEST/lib/commands.generated.ts" 2>/dev/null | tr -d "'" | sort -u)
   for cmd in $UPSTREAM_CMDS; do
     if ! echo "$LOCAL_CMDS" | grep -qx "$cmd"; then
       NEW_FEATURES="${NEW_FEATURES}\n  [tool]  gstack_$cmd"

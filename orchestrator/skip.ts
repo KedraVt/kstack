@@ -5,8 +5,12 @@
  * SECURITY: everything in a subagent summary is UNTRUSTED INPUT — repo content
  * can plant the literal marker string anywhere. A collapse therefore triggers
  * ONLY if ALL guards hold:
- *  1. the marker appears inside the structured `## HANDOFF` section of the
- *     handoff text extracted by extractHandoff();
+ *  1. when a `## HANDOFF` marker is present, the root-cause marker must
+ *     appear at or after its LAST occurrence (a planted earlier heading must
+ *     not redefine the section). Summaries without any HANDOFF marker — e.g.
+ *     a MAIN phase's summary, whose contract has no HANDOFF section — are
+ *     scanned whole; guard 2 and the never-skipped validation step carry the
+ *     anti-spoofing weight there;
  *  2. EVERY cited file exists on disk relative to cwd;
  *  3. the validate-only step itself is NEVER skipped nor compressed.
  */
@@ -34,9 +38,14 @@ export function parseRootCauseMarker(
   const match = MARKER_RE.exec(handoffText ?? "");
   if (!match) return null;
 
-  // Guard 1: only inside the ## HANDOFF section.
-  const handoffStart = handoffText.indexOf("## HANDOFF");
-  if (handoffStart < 0 || match.index! < handoffStart) {
+  // Guard 1: when a ## HANDOFF marker exists, the root-cause marker must sit
+  // at or after its LAST occurrence — an earlier planted heading cannot
+  // smuggle a marker into the section's position. With NO marker at all the
+  // text is scanned whole: main-phase summaries (the channel this parser
+  // actually reads) never contain a HANDOFF section, and requiring one made
+  // the collapse unreachable in production.
+  const handoffStart = handoffText.lastIndexOf("## HANDOFF");
+  if (handoffStart >= 0 && match.index! < handoffStart) {
     warn?.("[skip] root-cause marker outside HANDOFF ignored");
     return null;
   }
@@ -92,8 +101,14 @@ export function isRefutedStrategy(text: string): boolean {
 }
 
 function leadingKeyword(text: string, keyword: string): boolean {
-  const first = (text.split("\n").find((line) => line.trim().length > 0) ?? "").trim();
-  return first.startsWith(keyword);
+  // Tolerate markdown decoration around the tag: models emit "**REFUTED:**",
+  // "REFUTED :", or lowercase "refuted:" often enough that a strict
+  // startsWith on the raw line let real refusals slide past the reopen check.
+  const first = (text.split("\n").find((line) => line.trim().length > 0) ?? "")
+    .trim()
+    .replace(/^[\s#>*_`-]+/, "");
+  const normalized = first.toUpperCase().replace(/\s+:/g, ":");
+  return normalized.startsWith(keyword.toUpperCase());
 }
 
 /**
@@ -103,9 +118,16 @@ function leadingKeyword(text: string, keyword: string): boolean {
 export function allTestsPassed(summary: string | undefined | null): boolean {
   if (!summary) return false;
   const s = summary.toLowerCase();
+  // Negation guard: "not all tests passed" / "all tests didn't pass" must
+  // never read as a pass. Reject when a negator sits in the ~60 chars before
+  // the pass-shaped match.
+  const passMatch = /\ball (tests |checks )?(pass|passed|green)\b/.exec(s);
+  if (passMatch && /\b(?:not|n't|never|without|barely)\b[^.;]{0,40}$/i.test(s.slice(0, passMatch.index))) {
+    return false;
+  }
   return (
     /\b0 failures?\b/.test(s) ||
     /\bno failures\b/.test(s) ||
-    /\ball (tests |checks )?(pass|passed|green)\b/.test(s)
+    passMatch !== null
   );
 }

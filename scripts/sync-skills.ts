@@ -13,7 +13,9 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
-const gstackRoot = process.env.GSTACK_REPO || resolve(here, "..", "source");
+// GSTACK_REPO is canonical; GSTACK_SOURCE_DIR accepted as alias (matches gen-tools.ts).
+const gstackRoot =
+  process.env.GSTACK_REPO || process.env.GSTACK_SOURCE_DIR || resolve(here, "..", "source");
 const gstackPiRoot = resolve(here, "..");
 
 const INCLUDE = [

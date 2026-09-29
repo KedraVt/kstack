@@ -13,9 +13,11 @@
 
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { silentChildEnv, winPreloadArgs } from "../lib/silent-spawn.ts";
 // CRASH FIX (2026-08-23 incident): these were USED but never imported —
 // `subagentTimeoutFor` blew up the first attempt inside the awaited promise
 // (harmless-looking fast failure), and `livenessThresholdMs` threw inside the
@@ -306,8 +308,39 @@ async function writePromptToTempFile(agentName: string, systemPrompt: string): P
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gstack-pi-agent-"));
   const safeName = agentName.replace(/[^a-z0-9_-]/gi, "_");
   const filePath = path.join(dir, `${safeName}.md`);
-  await fs.promises.writeFile(filePath, systemPrompt, "utf-8");
+  try {
+    await fs.promises.writeFile(filePath, systemPrompt, "utf-8");
+  } catch (err) {
+    // A failed write would otherwise leak the empty mkdtemp dir (the caller's
+    // finally only sees a dir it was never handed).
+    try {
+      fs.rmdirSync(dir);
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
   return { dir, filePath };
+}
+
+/**
+ * The pi CLI entry script (dist/cli.js), resolved from the installed package
+ * rather than PATH: the `pi` binary on Windows is an npm `pi.cmd` shim that
+ * raw spawn() cannot exec without a shell (EINVAL on Node ≥20.12), and
+ * `process.argv[1]` is unreliable inside compiled/test-runner hosts.
+ */
+function resolvePiCliScript(): string | null {
+  try {
+    // import.meta.resolve honors the package's "import" exports condition —
+    // createRequire's "require" condition is NOT exported by this package and
+    // always throws (verified: ERR_PACKAGE_PATH_NOT_EXPORTED). bin: dist/cli.js
+    // is a sibling of the resolved main (dist/index.js).
+    const pkgEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const cli = path.join(path.dirname(pkgEntry), "cli.js");
+    return fs.existsSync(cli) ? cli : null;
+  } catch {
+    return null;
+  }
 }
 
 function resolvePiInvocation(
@@ -315,23 +348,31 @@ function resolvePiInvocation(
   scriptOverride?: string,
   execPathOverride?: string,
 ): { command: string; args: string[] } {
+  const preload = winPreloadArgs();
   // Test seam: force a specific runtime (e.g. node.exe). Without it a test
   // running under `bun test` would spawn the CLI with bun, which cannot host
   // pi reliably and hangs. Behaves like the normal script branch: the CLI
   // script stays the first argument.
   if (execPathOverride) {
     const script = scriptOverride ?? process.argv[1];
-    return { command: execPathOverride, args: script ? [script, ...args] : args };
+    return { command: execPathOverride, args: script ? [...preload, script, ...args] : args };
   }
   const currentScript = scriptOverride ?? process.argv[1];
   const isBunVirtualScript = currentScript?.startsWith("/$bunfs/root/");
   if (currentScript && !isBunVirtualScript && fs.existsSync(currentScript)) {
-    return { command: process.execPath, args: [currentScript, ...args] };
+    return { command: process.execPath, args: [...preload, currentScript, ...args] };
   }
   const execName = path.basename(process.execPath).toLowerCase();
   const isGenericRuntime = /^(node|bun)(\.exe)?$/.test(execName);
   if (!isGenericRuntime) {
+    // Compiled/self-contained pi host (e.g. devin.exe): argv goes straight to
+    // the binary — no -r slot exists, but NODE_OPTIONS still covers any
+    // nested node processes it launches.
     return { command: process.execPath, args };
+  }
+  const cliScript = resolvePiCliScript();
+  if (cliScript) {
+    return { command: process.execPath, args: [...preload, cliScript, ...args] };
   }
   return { command: "pi", args };
 }
@@ -371,7 +412,12 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
       tmpPromptPath = tmp.filePath;
       args.push("--append-system-prompt", tmpPromptPath);
     }
-    args.push(`Task: ${req.task}`);
+    // The task payload travels via stdin, never argv: full-mode skill
+    // injection makes `Task:` tens of kilobytes and CreateProcess' ~32K-char
+    // command-line limit would EINVAL the spawn on Windows (Bugs & Fixes #3).
+    // pi reads piped stdin as the initial message in -p mode
+    // (readPipedStdin → buildInitialMessage), so semantics are identical.
+    const stdinPayload = `Task: ${req.task}\n`;
 
     // All mutable state lives OUTSIDE the promise executor: the result below
     // references it, and a nested declaration would be a runtime
@@ -402,8 +448,13 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
         proc = spawn(invocation.command, invocation.args, {
           cwd: req.cwd,
           shell: false,
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: ["pipe", "pipe", "pipe"],
+          // CREATE_NO_WINDOW for the child itself. Its OWN spawned tools get
+          // windowsHide via the silent-spawn preload (argv -r + NODE_OPTIONS),
+          // which is the only way to stop pi's internal exec/grep/find spawns
+          // — none pass the flag — from flashing a console window per call.
           windowsHide: true,
+          env: silentChildEnv(),
         });
       } catch (err: any) {
         // Synchronous spawn failures (invalid args, permissions) are
@@ -414,6 +465,17 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
         return;
       }
       debugLog(`child pid=${proc.pid}`);
+
+      // Deliver the task on stdin (see stdinPayload note above). An EPIPE
+      // from a child that already exited must not crash the host — same
+      // guard as lib/browse.ts.
+      try {
+        proc.stdin?.on("error", () => {});
+        proc.stdin?.write(stdinPayload);
+        proc.stdin?.end();
+      } catch {
+        /* child already gone — the exit/close path resolves the promise */
+      }
 
       const processLine = (line: string) => {
         if (!line.trim()) return;

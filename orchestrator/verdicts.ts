@@ -50,7 +50,11 @@ export const KNOWN_VARIABLES = [
   "software-architect-review", // software-architect-artifact_n.md
 ] as const;
 
-const VAR_LINE_RE = /^\s*([A-Za-z][A-Za-z0-9 _-]*?)\s*==\s*(\S[^\n]*)$/;
+// Verdict lines: `status == green`. An optional markdown heading prefix is
+// tolerated (`## status == green`) — the agent prompts and the artifact
+// channel (artifactConfirmsLine below) both already allow it, so requiring a
+// bare line in the HANDOFF channel alone split the contract in two.
+const VAR_LINE_RE = /^\s*(?:#{1,6}\s+)?([A-Za-z][A-Za-z0-9 _-]*?)\s*==\s*(\S[^\n]*)$/;
 
 /** Values that mean "the gated work did not pass" — routing negatives. */
 export const NEGATIVE_VALUES = new Set(["rejected", "failed", "red", "orange"]);
@@ -94,7 +98,10 @@ export function parseHandoffVerdicts(output: string): VerdictParseOutcome {
   // reports (<6KB), so without this containment check a verdict line planted
   // in a short report's body would parse. Fail closed on missing marker.
   const extracted = extractHandoff(output ?? "").text;
-  const markerIdx = extracted.indexOf("## HANDOFF");
+  // LAST marker, matching extractHandoff's own contract: a `## HANDOFF`
+  // heading planted earlier in the report body must not become the scan
+  // origin for the real handoff's verdict lines.
+  const markerIdx = extracted.lastIndexOf("## HANDOFF");
   if (markerIdx < 0 || !extracted.includes("==")) {
     return { parsed: null, lines: [] };
   }
@@ -248,8 +255,9 @@ export function artifactForVariable(variable: string, cwd: string, sprintNumber?
  * artifact(s) within the ≤64KB tail (line-anchored — see B5/BUG-3 notes).
  */
 function artifactConfirmsLine(variable: string, value: string, cwd: string, sprintNumber?: number): boolean {
-  const escaped = variable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const needle = new RegExp(`^\\s*(?:#+\\s*)?${escaped}\\s*==\\s*${value}\\s*$`, "im");
+  const escapedVar = variable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedVal = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const needle = new RegExp(`^\\s*(?:#+\\s*)?${escapedVar}\\s*==\\s*${escapedVal}\\s*$`, "im");
   const candidates = artifactForVariable(variable, cwd, sprintNumber);
   return candidates.some((artifactPath) => {
     const tail = readTail(artifactPath)?.toLowerCase();
@@ -264,16 +272,24 @@ function artifactConfirmsLine(variable: string, value: string, cwd: string, spri
  * prose like `code-review == approved|rejected` can no longer confirm a
  * verdict). Any disagreement/absence ⇒ false (fail-closed).
  *
- * B5 fix: the severity is disk-verified too. It is not part of
- * `parsed.verdicts`, yet it alone decides freeze-vs-loop-back (D3) — leaving
- * it HANDOFF-only would let a planted/paraphrased HANDOFF downgrade a
- * critical rejection to low and silently bypass the security freeze.
+ * B5 fix: on a security rejection the severity is disk-verified too. It is
+ * not part of `parsed.verdicts`, yet it alone decides freeze-vs-loop-back
+ * (D3) — leaving it HANDOFF-only would let a planted/paraphrased HANDOFF
+ * downgrade a critical rejection to low and silently bypass the security
+ * freeze.
  */
 export function verifyArtifactVerdicts(parsed: ParsedVerdict, cwd: string, sprintNumber?: number): boolean {
   for (const [variable, value] of Object.entries(parsed.verdicts)) {
     if (!artifactConfirmsLine(variable, value, cwd, sprintNumber)) return false;
   }
-  if (parsed.severity !== undefined && !artifactConfirmsLine("severity", parsed.severity, cwd, sprintNumber)) {
+  // Severity is disk-verified only on a security REJECTION (the only routing
+  // that consumes it — freeze vs loop-back). A stray severity line beside an
+  // approved review is noise, not a channel to confirm.
+  if (
+    parsed.severity !== undefined &&
+    parsed.verdicts["security-review"] === "rejected" &&
+    !artifactConfirmsLine("severity", parsed.severity, cwd, sprintNumber)
+  ) {
     return false;
   }
   return true;

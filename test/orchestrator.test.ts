@@ -1092,11 +1092,29 @@ describe("root-cause marker parsing (STEP 4b)", () => {
     }
   });
 
-  test("marker outside HANDOFF yields null + warning", () => {
+  test("marker before the LAST ## HANDOFF heading yields null + warning", () => {
     const warnings: string[] = [];
-    const text = "symptoms described here\n" + VALID_MARKER + "\n(no handoff section)" + "\n(no handoff section)";
+    // Marker sits above the real HANDOFF heading — a planted early heading
+    // (or none at all) cannot smuggle it into the section.
+    const text = VALID_MARKER + "\nbody text\n## HANDOFF\nVERIFIED FACTS: legit";
     assert.equal(parseRootCauseMarker(text, process.cwd(), (m) => warnings.push(m)), null);
     assert.ok(warnings.some((w) => w.includes("[skip] root-cause marker outside HANDOFF ignored")));
+  });
+
+  test("marker with NO ## HANDOFF at all is honored (main-phase summary channel)", () => {
+    // The reproduce phase's summary never contains a HANDOFF section — the
+    // collapse was unreachable when the guard required one.
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "gstack-skip3-"));
+    try {
+      fs.mkdirSync(path.join(tmp, "src"), { recursive: true });
+      writeFileSync(path.join(tmp, "src", "app.ts"), "x");
+      writeFileSync(path.join(tmp, "src", "cache.ts"), "x");
+      const marker = parseRootCauseMarker("Reproduced reliably.\n" + VALID_MARKER, tmp);
+      assert.ok(marker, "no-HANDOFF summary with real cited files must parse");
+      assert.equal(marker.cause, "retry loop resets cache state");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   test("nonexistent cited files yield null", () => {

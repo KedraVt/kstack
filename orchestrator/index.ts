@@ -78,6 +78,15 @@ export function initOrchestrator(pi: ExtensionAPI): void {
       }
 
       const phase = workflow.phases[state.phaseIndex];
+      if (!phase) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `gstack: workflow "${state.workflowId}" has no phase at index ${state.phaseIndex} (status: ${state.status}) — the persisted state is inconsistent; resolve via /gstack.`,
+          }],
+          isError: true,
+        };
+      }
 
       // Optional-phase decision gate (STEP 2g v2): while the workflow is parked
       // at an optional phase awaiting the user's Run/Skip/Abort decision, the
@@ -140,7 +149,16 @@ export function initOrchestrator(pi: ExtensionAPI): void {
           }
         }
       }
-      saveState(pi, newState);
+      // A manual gate (post-completion) still to come means newState will be
+      // re-persisted as the gated variant below — skip the intermediate write
+      // so the session log carries one entry per state transition.
+      const willManualGate =
+        manualGates() &&
+        phase.advance === "manual" &&
+        params.status === "completed" &&
+        newState.status === "active" &&
+        state.entryGate !== "approved";
+      if (!willManualGate) saveState(pi, newState);
       setGstackStatus(ctx, newState, workflow);
 
       // D3 security freeze surfaced to both model and user.
@@ -149,7 +167,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         return {
           content: [{
             type: "text" as const,
-            text: `SECURITY FREEZE: ${info?.severity ?? "critical/high"} severity security rejection in "${phase.id}". The pipeline is FROZEN — no further automated work. A human security panel must review devsecops/security-review-artifact.md; only /gstack next can unfreeze after that review. Do NOT attempt fixes or call gstack_advance again.`,
+            text: `SECURITY FREEZE: ${info?.severity ?? "critical/high"} severity security rejection in "${phase.id}". The pipeline is FROZEN — no further automated work. A human security panel must review ${info?.artifactPath ?? "devsecops/security-review-artifact.md"}; only /gstack next can unfreeze after that review. Do NOT attempt fixes or call gstack_advance again.`,
           }],
           isError: false,
         };
@@ -180,10 +198,26 @@ export function initOrchestrator(pi: ExtensionAPI): void {
       }
 
       if (newState.status === "paused") {
+        // Name the REAL park cause — reporting every park as a phase failure
+        // trained the model (and the user) to misread verdict parks, freezes
+        // and loop exhaustion as crashes.
+        const reason = newState.pausedReason ?? "";
+        const cause =
+          newState.verdictPark
+            ? `the phase's verdict was unreadable (${reason.split(":")[2] ?? "no verdict parsed"}); no retry budget was consumed`
+            : reason.startsWith("loopback-disabled:") || reason.startsWith("verdicts-disabled:")
+              ? `a verdict gate completed but auto-routing is disabled (${reason})`
+              : reason.startsWith("anomaly:")
+                ? `a sprint numbering anomaly needs manual resolution (${reason})`
+                : reason.startsWith("branch-violation:")
+                  ? `a verdict gate found the work on a protected branch (${reason})`
+                  : reason
+                    ? reason
+                    : "the phase reported failure";
         return {
           content: [{
             type: "text" as const,
-            text: `Phase "${phase.name}" failed. Workflow paused. The user can resume via /gstack.`,
+            text: `Phase "${phase.name}" done — workflow PARKED for a human decision: ${cause}. Do NOT call gstack_advance again; the user resolves it via /gstack.`,
           }],
         };
       }
@@ -191,7 +225,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
       // Manual gate: decision phases park in awaiting_approval until the user
       // runs /gstack next. The model cannot bypass this — only /gstack next
       // resumes execution.
-      if (manualGates() && phase.advance === "manual" && params.status === "completed") {
+      if (willManualGate) {
         // STEP 4e (opt-in): a VALIDATED validate-only diagnosis may auto-advance.
         if (autoGateValidated() && isValidatedStrategy(params.summary)) {
           ctx.ui.notify(
@@ -281,7 +315,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
           }],
         };
       }
-      const git = await detectGitContext(ctx.cwd, pi);
+      const git = await detectGitContext(ctx.cwd);
       // A parked workflow still answers — but the instructions end with "call
       // gstack_advance", which the park forbids. Lead with the posture.
       const posture =

@@ -19,6 +19,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { silentChildEnv } from "./silent-spawn.ts";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const CAP = 32_000; // ~8k tokens worst case (PLAN §18)
@@ -89,6 +90,17 @@ export function resolveBinary(): { path: string } | { error: string } {
   return { error: cachedError };
 }
 
+/**
+ * Drop the memoized resolution. index.ts calls this after a successful
+ * session_start auto-download — without it runBrowse kept returning the
+ * cached not-found error for the rest of the session, making the download
+ * path dead code in the session that needed it most.
+ */
+export function invalidateBinaryCache(): void {
+  cachedBinary = undefined;
+  cachedError = null;
+}
+
 export interface RunResult {
   stdout: string;
   stderr: string;
@@ -119,8 +131,12 @@ export function runBrowse(
     const child = spawn(bin.path, [cmd, ...args], {
       shell: false,
       windowsHide: true,
+      // NODE_OPTIONS carries the silent-spawn preload into the daemon's own
+      // `node -e` launcher so ITS detached children stay console-less too.
+      env: silentChildEnv(),
     });
     let killedByTimeout = false;
+    let settled = false;
 
     // WP1 §3.1: batch payloads (`chain`) travel via stdin, never argv —
     // argv-length limits and Windows quoting make argv the wrong transport
@@ -188,7 +204,12 @@ export function runBrowse(
       }
     }
 
-    child.on("close", (code, signal) => {
+    // Single settle point. 'close' waits for ALL stdio to close — a detached
+    // grandchild (daemon) inheriting the pipes can hold them open forever on
+    // Windows — so 'exit' plus a 1.5s grace guarantees the promise settles.
+    const finish = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (settled) return;
+      settled = true;
       const stdout = Buffer.concat(stdoutChunks).toString("utf8");
       let stderr = Buffer.concat(stderrChunks).toString("utf8");
       let normalizedCode = code;
@@ -204,6 +225,18 @@ export function runBrowse(
         }
       }
       resolveP({ stdout, stderr, code: normalizedCode, signal: signal ?? undefined });
+    };
+    child.on("close", finish);
+    child.on("exit", (code, signal) => {
+      const grace = setTimeout(() => finish(code, signal), 1500);
+      grace.unref?.();
+    });
+    // A failed spawn emits 'error' WITHOUT a subsequent 'close' — without a
+    // listener the event throws inside the host process, and the returned
+    // promise would never settle.
+    child.on("error", (err) => {
+      stderrChunks.push(Buffer.from(`spawn error: ${err.message}\n`));
+      finish(127, null);
     });
   });
 }

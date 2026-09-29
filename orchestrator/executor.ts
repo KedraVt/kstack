@@ -1,16 +1,16 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { WorkflowState, WorkflowContext, GitContext, WorkflowPhase } from "./types.ts";
 import { getWorkflow } from "./workflows.ts";
-import { saveState, advancePhase, gateOptionalPhase, parkForUnreadableVerdict, loadActiveState, type AdvanceOptions } from "./state.ts";
+import { saveState, advancePhase, gateOptionalPhase, gateEntry, parkForUnreadableVerdict, loadActiveState, type AdvanceOptions } from "./state.ts";
 import { buildPhaseInstructions, buildDeterministicPlan, mainContractFor } from "./templates.ts";
-import { detectGitContext } from "./git.ts";
+import { detectGitContext, type ExecFn } from "./git.ts";
 import { runSubagent, type SpawnRequest, type SpawnResult, resolveTimeoutMs } from "./spawn.ts";
 import { parseHandoffVerdicts, verifyArtifactVerdicts, mergeParseOutcomes } from "./verdicts.ts";
 import { computeNextSprintNumber } from "./sprint.ts";
-import { deterministicSubagents, skillsEnabled, optionalPhases, maxRunTokens, delegationBudgetMs, modelTierFor, verdictsEnabled } from "./config.ts";
+import { deterministicSubagents, skillsEnabled, optionalPhases, maxRunTokens, delegationBudgetMs, modelTierFor, verdictsEnabled, timeoutClassFor, manualGates } from "./config.ts";
 import { ensureRun, recordDelegatedStep, writeRunReport, recordLiveness, recordTokens, totalTokensUsed } from "./telemetry.ts";
 import { extractHandoff } from "./handoff.ts";
-import { isRefutedStrategy } from "./skip.ts";
+import { isRefutedStrategy, isValidatedStrategy } from "./skip.ts";
 import { replaceExact } from "./text.ts";
 
 // --- Sequential-chain resilience (STEP 2f) -----------------------------------
@@ -257,7 +257,7 @@ export async function executeCurrentPhase(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   state: WorkflowState,
-  opts?: { approvedOptional?: boolean },
+  opts?: { approvedOptional?: boolean; execGit?: ExecFn },
 ): Promise<void> {
   const startEpoch = runtimeEpoch;
   const alive = (): boolean => runtimeEpoch === startEpoch && ctxAlive(ctx);
@@ -296,7 +296,7 @@ export async function executeCurrentPhase(
     return;
   }
 
-  const git = await detectGitContext(ctx.cwd, pi);
+  const git = await detectGitContext(ctx.cwd, opts?.execGit);
   if (!alive()) return;
   const wfCtx: WorkflowContext = { state, git, cwd: ctx.cwd };
 
@@ -374,6 +374,28 @@ export async function executeCurrentPhase(
     }
     // mode === "auto", or the user explicitly approved this phase via the
     // /gstack decision panel (approvedOptional) — fall through and run it.
+  }
+
+  // Entry gate for side-effect phases (commit-archive): advance:"manual"
+  // alone can only park AFTER the phase completes — far too late when the
+  // phase's own delegation commits and archives. Park BEFORE anything runs;
+  // the /gstack approve path flips entryGate to "approved" (cleared by
+  // advancePhase when the phase completes).
+  if (
+    deterministicSubagents() &&
+    phase.execution === "subagent" &&
+    manualGates() &&
+    phase.advance === "manual" &&
+    state.entryGate !== "approved"
+  ) {
+    const gated = gateEntry(state);
+    saveState(pi, gated);
+    setGstackStatus(ctx, gated, workflow);
+    notify(
+      `gstack: "${phase.name}" is a human-gated side-effect phase — it has NOT run yet. Approve via /gstack (Run) before it executes.`,
+      "info",
+    );
+    return;
   }
 
   setGstackStatus(ctx, state, workflow);
@@ -458,16 +480,16 @@ export async function executeCurrentPhase(
         tokensIn: result.usage?.input,
         tokensCacheRead: result.usage?.cacheRead,
         tokensOut: result.usage?.output,
-        timeoutClass: "default",
+        timeoutClass: timeoutClassFor(phase.id) ?? "default",
       });
     }
     delegationPrefix = formatDelegationResults(phase.id, results);
     // STEP 4d: make the skip outcome explicit in what the model reviews.
     if (phase.id === "root-cause" && results.length > 0) {
       const lastOutput = results[results.length - 1].result.output ?? "";
-      if (/^REFUTED:/im.test(lastOutput)) {
+      if (isRefutedStrategy(lastOutput)) {
         delegationPrefix += "\n\n[root-cause outcome: refuted→full-reinvestigation]";
-      } else if (/^VALIDATED:/im.test(lastOutput)) {
+      } else if (isValidatedStrategy(lastOutput)) {
         delegationPrefix += "\n\n[root-cause outcome: validated]";
       }
     }
@@ -643,7 +665,10 @@ export async function runDeterministicDelegation(
       prevIncomplete = !result.ok || result.incomplete === true;
       // STEP 5c: token budget circuit-breaker — notify + orderly stop, no kill.
       const used =
-        (result.usage?.input ?? 0) + (result.usage?.cacheRead ?? 0) + (result.usage?.output ?? 0);
+        (result.usage?.input ?? 0) +
+        (result.usage?.cacheRead ?? 0) +
+        (result.usage?.cacheWrite ?? 0) +
+        (result.usage?.output ?? 0);
       recordTokens(used);
       if (totalTokensUsed() > maxRunTokens()) {
         try {
@@ -654,6 +679,15 @@ export async function runDeterministicDelegation(
         } catch {
           /* stale ctx */
         }
+        break;
+      }
+      // A failed step's error text is not a usable handoff for downstream
+      // work — continuing burned a full extra delegation on garbage (e.g. the
+      // FE developer "implementing" against a BE step that never produced
+      // code). Stopping is also verdict-safe: a missing step parses as
+      // unreadable and the gate parks fail-closed either way.
+      if (!result.ok) {
+        delegationEvent(pi, { phaseId: phase.id, step: index, agent: step.agent, event: "chain-stopped", reason: "step-failed" });
         break;
       }
     }
@@ -682,7 +716,17 @@ export async function runDeterministicDelegation(
       ...wfCtx,
       state: { ...wfCtx.state, results: { ...wfCtx.state.results } },
     };
-    delete freshCtx.state.results["reproduce"];
+    // Keep the reproduce evidence in the rebuilt chain's context — only strip
+    // the CONFIRMED ROOT CAUSE marker line itself. Deleting the whole result
+    // (previous behavior) hid the original reproduction steps from the fresh
+    // scout; the marker is what triggers re-collapse, not the summary.
+    const repro = freshCtx.state.results["reproduce"];
+    if (repro?.summary) {
+      freshCtx.state.results["reproduce"] = {
+        ...repro,
+        summary: repro.summary.replace(/^CONFIRMED ROOT CAUSE:.*$/gim, "").trim(),
+      };
+    }
     const fullPlan = buildDeterministicPlan(phase as any, freshCtx);
     if (fullPlan.length > 0) {
       if (causeMatch) {
@@ -733,7 +777,13 @@ function formatDelegationResults(
           handoffSuffix += `, output INCOMPLETE (${result.timedOut ? "timed out" : "partial output"})`;
         }
       }
-      parts.push(`### Subagent: ${agent} — ${result.ok ? "completed" : "FAILED"} (${secs}s · ${result.toolCalls ?? "?"} tool calls · ${turns} turns · ${avgTurn}${handoffSuffix} · ${tok})`);
+      // `ok` means "produced output" — a crash that still emitted a report
+      // must not read as a clean completion.
+      const statusLabel =
+        result.ok && (result.exitCode ?? 0) === 0
+          ? "completed"
+          : `FAILED (exit ${result.exitCode ?? "?"})`;
+      parts.push(`### Subagent: ${agent} — ${statusLabel} (${secs}s · ${result.toolCalls ?? "?"} tool calls · ${turns} turns · ${avgTurn}${handoffSuffix} · ${tok})`);
     if (result.ok) {
       parts.push(result.output || "(no textual output)");
     } else {
@@ -778,7 +828,11 @@ export function activeConstraintLines(state: WorkflowState, phase?: WorkflowPhas
   // resume context, so a "continue working" body here reads as an instruction
   // to keep going — the exact mechanic that made a parked plan phase implement
   // the plan instead of waiting for /gstack next.
-  if (state.status === "awaiting_approval" && !state.pendingOptional) {
+  if (state.status === "awaiting_approval" && state.entryGate === true) {
+    lines.push(
+      "CONSTRAINT: the workflow is PARKED BEFORE a human-gated side-effect phase — it has NOT run yet. Do NOT perform the phase's work and do NOT call gstack_advance; the user decides via /gstack (Run / Abort).",
+    );
+  } else if (state.status === "awaiting_approval" && !state.pendingOptional) {
     lines.push(
       "CONSTRAINT: the workflow is PARKED at a decision gate — the completed phase awaits user approval. Do NOT continue the phase, do NOT implement anything, and do NOT call gstack_advance; the user decides via /gstack next. If the user asks for revisions, apply them to the completed phase's output only.",
     );
@@ -806,6 +860,9 @@ export function statusLineFor(state: WorkflowState, workflow: { name: string; ph
   const progress = `(${state.phaseIndex + 1}/${workflow.phases.length})`;
   if (state.status === "completed" || state.status === "aborted") return undefined;
   if (state.status === "awaiting_approval") {
+    if (state.entryGate === true) {
+      return `${workflow.name}: PARKED — gated phase "${phase?.name ?? "?"}" awaits approval to RUN via /gstack`;
+    }
     return state.pendingOptional
       ? `${workflow.name}: PARKED — optional phase "${phase?.name ?? "?"}" awaits Run/Skip/Abort via /gstack`
       : `${workflow.name}: PARKED for approval — /gstack next`;
@@ -871,6 +928,16 @@ export function buildResumeContext(state: WorkflowState): string {
   }
 
   if (state.status === "awaiting_approval") {
+    if (state.entryGate === true) {
+      // Entry gate: phaseIndex still points AT the gated phase — it has NOT
+      // run. Telling the model to "continue the current phase" here would
+      // literally start the gated work.
+      parts.push(
+        `The workflow is PARKED BEFORE the human-gated side-effect phase "${phase?.name ?? "the next phase"}" — it has NOT run yet.`,
+        "Do NOT perform that phase's work and do NOT call gstack_advance — only the user's approval via /gstack starts it.",
+      );
+      return parts.join("\n");
+    }
     // Parked at a manual decision gate: never tell the model to keep working.
     // phaseIndex already points at the NEXT phase (advancePhase moved it), so
     // "continue the current phase" here meant "start the next phase without

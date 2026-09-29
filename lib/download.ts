@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, createWriteStream } from "node:fs";
+import { existsSync, mkdirSync, createWriteStream, renameSync, unlinkSync, chmodSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
@@ -7,6 +7,8 @@ import { Readable } from "node:stream";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const RUNTIME_DIR = resolve(here, "..", "runtime", "browse", "dist");
 
+// NOTE: pinned release tag — must be bumped alongside package.json's version
+// when a new binary release is cut, or fresh installs download a stale build.
 const RELEASE_BASE = "https://github.com/KedraVt/gstack-pi/releases/download/v2.0.0";
 
 const ASSETS: Record<string, string> = {
@@ -34,19 +36,25 @@ export async function downloadBinary(
 
   const url = `${RELEASE_BASE}/${asset}`;
   const dest = getBinaryPath();
+  // Write to a sibling temp file and rename on success: an interrupted
+  // download must never leave a half-written binary that resolveBinary()
+  // then happily resolves and executes.
+  const tmp = `${dest}.part-${process.pid}`;
 
   mkdirSync(RUNTIME_DIR, { recursive: true });
   onProgress?.(`Downloading browse binary from GitHub Releases...`);
 
   try {
-    const res = await fetch(url, { redirect: "follow" });
+    // 120s ceiling: a silently-stalled fetch previously hung session_start
+    // forever (the extension host awaited the hook).
+    const res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(120_000) });
     if (!res.ok || !res.body) {
       return { error: `Download failed: HTTP ${res.status}` };
     }
 
     const total = Number(res.headers.get("content-length") || 0);
     let received = 0;
-    const fileStream = createWriteStream(dest);
+    const fileStream = createWriteStream(tmp);
 
     const reader = res.body.getReader();
     const readable = new Readable({
@@ -66,9 +74,25 @@ export async function downloadBinary(
     });
 
     await pipeline(readable, fileStream);
+    renameSync(tmp, dest);
+    // POSIX: a downloaded file lands 0644 — the binary cannot exec until
+    // chmod +x, which previously made every fresh macOS/Linux install fail
+    // with EACCES on first use.
+    if (process.platform !== "win32") {
+      try {
+        chmodSync(dest, 0o755);
+      } catch {
+        /* leave the file; the spawn error surfaces readably downstream */
+      }
+    }
     onProgress?.("Download complete.");
     return { path: dest };
   } catch (err: any) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* no partial file, or removal failed — either way nothing to leak */
+    }
     return { error: `Download failed: ${err.message}` };
   }
 }

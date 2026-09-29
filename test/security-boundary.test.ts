@@ -117,7 +117,9 @@ describe("WP1 tool expansion", () => {
       src.includes("UNTRUSTED WEB CONTENT (chain batch)"),
       "missing chain envelope preamble",
     );
-    assert.match(src, /UNTRUSTED_BEGIN \+ "\\n" \+ finalBody \+ "\\n" \+ UNTRUSTED_END/);
+    // Page text is escapeMarkers()-filtered so embedded sentinels cannot
+    // spoof the envelope boundary before wrapping.
+    assert.match(src, /UNTRUSTED_BEGIN \+ "\\n" \+ escapeMarkers\(finalBody\) \+ "\\n" \+ UNTRUSTED_END/);
   });
 
   test("chain tool description teaches the batching pattern", () => {

@@ -153,6 +153,13 @@ export interface WorkflowState {
    */
   pendingOptional?: boolean;
   /**
+   * Entry gate for side-effect phases (commit-archive): `true` = parked
+   * BEFORE the gated phase runs, awaiting an explicit human Run/Abort via
+   * /gstack; `"approved"` = approved once — the executor proceeds and
+   * advancePhase clears the marker when the phase completes.
+   */
+  entryGate?: true | "approved";
+  /**
    * Plan-file path captured from the plan phase's marker (PLAN FILE: …).
    * Lets the LLM name the plan after its essence instead of the legacy
    * goal-prefix slug; absent ⇒ planFilePath(goal) fallback keeps old sessions

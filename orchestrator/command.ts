@@ -1,9 +1,9 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getAllWorkflows, getWorkflow, getWorkflowIds } from "./workflows.ts";
-import { loadActiveState, createState, saveState, abortState, resumeState, reissueGate, approveNext, approveOptionalPhase, skipPendingOptional, isSecurityFrozen, unfreeze, forceApproveParked, returnParkedWithContext, forceContinuePastGate } from "./state.ts";
+import { loadActiveState, createState, saveState, abortState, resumeState, reissueGate, approveNext, approveEntryGate, approveOptionalPhase, skipPendingOptional, isSecurityFrozen, unfreeze, forceApproveParked, returnParkedWithContext, forceContinuePastGate } from "./state.ts";
 import { detectGitContext } from "./git.ts";
 import { deterministicSubagents } from "./config.ts";
-import { launchPhase, executeCurrentPhase, releasePhaseInFlight, isPhaseInFlight } from "./executor.ts";
+import { launchPhase, executeCurrentPhase, releasePhaseInFlight, isPhaseInFlight, invalidateRuntime } from "./executor.ts";
 import { writeRunReport } from "./telemetry.ts";
 import type { GitContext, WorkflowState } from "./types.ts";
 
@@ -46,6 +46,11 @@ export function decisionBlockedByInFlightChain(
  * exists to prevent, turned against the user.
  */
 function abortWorkflow(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: WorkflowState, message: string): void {
+  // Invalidate first: any in-flight delegation's shouldAbort() flips false→
+  // true and the spawn loop terminates the child (SIGKILL). Previously the
+  // orphaned chain kept running to completion, burning tokens after "aborted"
+  // and racing a same-id restart for the in-flight registry.
+  invalidateRuntime();
   releasePhaseInFlight(state.workflowId, state.phaseIndex);
   saveState(pi, abortState(state));
   try { ctx.ui.setStatus("gstack", undefined); } catch { /* stale */ }
@@ -101,14 +106,16 @@ export async function handleGstackCommand(args: string, ctx: ExtensionCommandCon
       return;
     }
     if (decisionBlockedByInFlightChain(ctx, activeState)) return;
-    const approved = approveNext(activeState);
+    // entryGate parks BEFORE the gated phase runs — a plain approveNext would
+    // leave the marker at `true` and executeCurrentPhase would re-park.
+    const approved = activeState.entryGate === true ? approveEntryGate(activeState) : approveNext(activeState);
     saveState(pi, approved);
     ctx.ui.notify("Approved — continuing workflow.", "info");
     launchPhase(pi, ctx, approved);
     return;
   }
 
-  const git = await detectGitContext(ctx.cwd, pi);
+  const git = await detectGitContext(ctx.cwd);
 
   if (activeState) {
     const workflow = getWorkflow(activeState.workflowId);
@@ -157,16 +164,19 @@ export async function handleGstackCommand(args: string, ctx: ExtensionCommandCon
     }
 
     if (activeState.status === "awaiting_approval") {
+      const entryGated = activeState.entryGate === true;
       const choice = await ctx.ui.select(
         "Workflow awaiting your approval",
         [
-          `Approve & continue: ${activeState.workflowId} → next phase after "${workflow?.phases[activeState.phaseIndex - 1]?.name ?? "previous phase"}" ${progress}`,
+          entryGated
+            ? `Approve & RUN: ${activeState.workflowId} → gated phase "${phaseName}" ${progress} (it has not executed yet)`
+            : `Approve & continue: ${activeState.workflowId} → next phase after "${workflow?.phases[activeState.phaseIndex - 1]?.name ?? "previous phase"}" ${progress}`,
           "Abort workflow",
         ],
       );
       if (choice?.startsWith("Approve")) {
         if (decisionBlockedByInFlightChain(ctx, activeState)) return;
-        const approved = approveNext(activeState);
+        const approved = entryGated ? approveEntryGate(activeState) : approveNext(activeState);
         saveState(pi, approved);
         launchPhase(pi, ctx, approved);
       } else if (choice === "Abort workflow") {
@@ -187,6 +197,9 @@ export async function handleGstackCommand(args: string, ctx: ExtensionCommandCon
     if (!choice) return;
 
     if (choice.startsWith("Resume")) {
+      // Same racing class as the decision panels: a resume while a delegation
+      // is still in flight launches a second chain for the same phase.
+      if (decisionBlockedByInFlightChain(ctx, activeState)) return;
       const resumed = resumeState(activeState);
       saveState(pi, resumed);
       launchPhase(pi, ctx, resumed);
@@ -199,6 +212,15 @@ export async function handleGstackCommand(args: string, ctx: ExtensionCommandCon
         abortWorkflow(pi, ctx, activeState, "Workflow aborted.");
       }
       return;
+    }
+
+    if (choice === "Start new workflow") {
+      // Explicit user choice — record the old workflow as aborted so a new
+      // state's loadActiveState isn't shadowed, and refuse while a chain is
+      // in flight (the orphaned children would keep burning tokens).
+      if (decisionBlockedByInFlightChain(ctx, activeState)) return;
+      abortWorkflow(pi, ctx, activeState, `Aborted "${activeState.workflowId}" — pick a new workflow.`);
+      // fall through to the menu below
     }
   }
 
@@ -355,7 +377,7 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
     );
     if (choice === "Continue as approved") {
       if (panelGuard(ctx, state)) return true;
-      const next = forceApproveParked(state);
+      const next = forceApproveParked(state, phases);
       saveState(pi, next);
       launchPhase(pi, ctx, next);
     } else if (choice === "Return phase with context" || choice === "Other…") {
@@ -364,7 +386,7 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
         "Optional custom guidance appended to the RETRY CONTEXT (empty = rely on extracted blockers)",
       );
       if (panelGuard(ctx, state)) return true;
-      const next = returnParkedWithContext(state, phases, extra?.trim() || undefined);
+      const next = returnParkedWithContext(state, phases, extra?.trim() || undefined, ctx.cwd);
       if (!next) {
         ctx.ui.notify("Cannot loop back: the parked phase has no loopBackTo target.", "error");
         return true;

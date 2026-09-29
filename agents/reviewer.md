@@ -37,3 +37,5 @@ Be specific with file paths and line numbers.
 ## gstack workflow cooperation
 
 If your task includes a `## Skill methodology:` section or references a gstack SKILL.md file, read/follow that methodology before acting. Its checklist, severity categories, stop rules, and output format are mandatory for your final report. When your task mentions `{previous}` output from an earlier step, treat it as trusted context from a prior specialist.
+
+End every report with a `## HANDOFF` section (≤4000 chars) beginning with `VERIFIED FACTS:` — downstream specialists and the orchestrator parse it. Put the verdict line inside it if your task declares one (bare `KEY == VALUE` line; `##`-prefixed headings also parse).

@@ -73,19 +73,25 @@ interface RouteAction {
 export function routeVerdict(phaseId: string, parsed: ParsedVerdict): RouteAction {
   const v = parsed.verdicts;
   const expectations = PHASE_EXPECTATIONS[phaseId];
-  if (!expectations) return { kind: "advance" }; // non-gated phase (defensive)
+  // routeVerdict is only reached for phases declaring loopBackTo. One of
+  // those without an expectations entry is a misconfigured gate — fail closed
+  // (park) rather than silently advancing past it.
+  if (!expectations) return { kind: "park" };
 
   let sawNegative = false;
   for (const [variable, allowed] of Object.entries(expectations)) {
     const value = v[variable];
     if (value === undefined) continue; // optional variable for this phase
+    // NOTE: routing negatives (red/orange/rejected/failed) are checked BEFORE
+    // the allowed-list on purpose — e.g. `status == red` at the QA gate is
+    // not in allowed ["green"], but it is the designed fix-loop trigger, not
+    // ambiguity. Only whitelisted NON-negative values that are off-map here
+    // (e.g. `status == approved` at QA) are ambiguous ⇒ park.
     if (NEGATIVE_VALUES.has(value)) {
       sawNegative = true;
       continue;
     }
     if (!allowed.includes(value)) {
-      // Whitelisted globally but off-map here (e.g. `status == failed` at QA):
-      // ambiguous intent ⇒ human decision, never default-advance.
       return { kind: "park" };
     }
   }
@@ -128,6 +134,7 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
     pendingVerdict: undefined,
     verdictPark: undefined,
     pausedReason: undefined,
+    entryGate: undefined,
   };
 
   if (result.status === "failed") {
@@ -151,7 +158,15 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
     next.pausedReason = `verdicts-disabled:${phase.id}`;
     return next;
   }
-  const parsed = state.pendingVerdict?.parsed ?? null;
+  // Fail closed on a gate whose verdict never arrived (or arrived under a
+  // different phaseId — a stale stash from an earlier gate): silently
+  // advancing past a rejection-shaped blank is exactly what the verdict
+  // channel exists to prevent.
+  const pending = state.pendingVerdict;
+  const parsed = pending && pending.phaseId === phase.id ? pending.parsed : null;
+  if (phase?.loopBackTo && !parsed) {
+    return parkForUnreadableVerdict({ ...state, pendingVerdict: state.pendingVerdict }, phase.id, "no-verdict");
+  }
   if (phase?.loopBackTo && parsed) {
     const action = routeVerdict(phase.id, parsed);
 
@@ -162,6 +177,12 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
     }
 
     const targetIndex = opts!.phases!.findIndex((p) => p.id === phase.loopBackTo);
+    // A loop-back target that names no real phase is a workflow-definition
+    // bug — without this check the loop-back fell through to the "Approved"
+    // branch and a REJECTED verdict advanced linearly.
+    if (action.kind === "loop-back" && targetIndex < 0) {
+      return parkForUnreadableVerdict({ ...state, pendingVerdict: state.pendingVerdict }, phase.id, "unroutable");
+    }
     const cwd = opts?.cwd ?? process.cwd();
     const sprintNumber = next.sprintNumber;
 
@@ -243,8 +264,14 @@ export function parkForUnreadableVerdict(state: WorkflowState, phaseId: string, 
 }
 
 /** D4 panel choice 1: treat the parked phase as approved and continue linearly. */
-export function forceApproveParked(state: WorkflowState): WorkflowState {
+export function forceApproveParked(state: WorkflowState, phases?: WorkflowPhase[]): WorkflowState {
   const phaseId = state.verdictPark!;
+  // Reset the loop target's attempt counter — same contract as
+  // forceContinuePastGate: the human approved moving on, so the NEXT gate
+  // must get a fresh ceiling rather than inheriting a burned one.
+  const gate = phases?.[state.phaseIndex];
+  const attempts = { ...(state.attempts ?? {}) };
+  if (gate?.loopBackTo) delete attempts[gate.loopBackTo];
   return {
     ...state,
     status: "active",
@@ -252,6 +279,7 @@ export function forceApproveParked(state: WorkflowState): WorkflowState {
     verdictPark: undefined,
     pendingVerdict: undefined,
     pausedReason: undefined,
+    attempts,
     results: { ...state.results, [phaseId]: { status: "completed", summary: "Continued as approved by explicit user decision (verdict was unreadable)." } },
   };
 }
@@ -261,7 +289,7 @@ export function forceApproveParked(state: WorkflowState): WorkflowState {
  * burning an attempt. `extraFeedback` carries the typed answer of the
  * "Other…" escape when provided.
  */
-export function returnParkedWithContext(state: WorkflowState, phases: WorkflowPhase[], extraFeedback?: string): WorkflowState | null {
+export function returnParkedWithContext(state: WorkflowState, phases: WorkflowPhase[], extraFeedback?: string, cwd: string = process.cwd()): WorkflowState | null {
   const phaseId = state.verdictPark!;
   const phase = phases.find((p) => p.id === phaseId);
   if (!phase?.loopBackTo) return null;
@@ -280,7 +308,7 @@ export function returnParkedWithContext(state: WorkflowState, phases: WorkflowPh
       maxAttempts: ceilingFor(phase.loopBackTo, phase.maxAttempts),
       feedback:
         [
-          prior ? buildRetryFeedback(prior, phase.feedbackFrom ?? phase.id, process.cwd(), state.sprintNumber) : "",
+          prior ? buildRetryFeedback(prior, phase.feedbackFrom ?? phase.id, cwd, state.sprintNumber) : "",
           extraFeedback,
         ]
           .filter(Boolean)
@@ -379,7 +407,25 @@ export function abortState(state: WorkflowState): WorkflowState {
 }
 
 export function resumeState(state: WorkflowState): WorkflowState {
-  return { ...state, status: "active", pausedReason: undefined };
+  // A resume RE-RUNS the parked phase — any stashed verdict from its previous
+  // attempt must not survive to misroute the rerun.
+  return { ...state, status: "active", pausedReason: undefined, verdictPark: undefined, pendingVerdict: undefined };
+}
+
+/**
+ * Entry gate for side-effect phases (commit-archive): park BEFORE the phase
+ * runs — its own delegation is the side effect, so the post-completion
+ * manual gate (advance:"manual") can never catch it. phaseIndex stays AT the
+ * gated phase; approving flips entryGate to "approved" which bypasses the
+ * gate exactly once (advancePhase clears the marker on completion).
+ */
+export function gateEntry(state: WorkflowState): WorkflowState {
+  return { ...state, status: "awaiting_approval", entryGate: true };
+}
+
+/** The user approved a gated phase's execution: resume at the phase. */
+export function approveEntryGate(state: WorkflowState): WorkflowState {
+  return { ...state, status: "active", entryGate: "approved" };
 }
 
 /**
@@ -398,7 +444,10 @@ export function reissueGate(state: WorkflowState, phases: WorkflowPhase[]): Work
   const attempts = { ...(state.attempts ?? {}) };
   if (gatePhase?.loopBackTo) {
     const ceiling = ceilingFor(gatePhase.loopBackTo, gatePhase.maxAttempts);
-    attempts[gatePhase.loopBackTo] = Math.max(0, ceiling - 2);
+    // ceiling - 2, deliberately unclamped: a ceiling of 1 or 2 must still
+    // grant the promised ONE verified run (negative counters make the next
+    // rejection's runsDone = attempts + 1 < ceiling).
+    attempts[gatePhase.loopBackTo] = ceiling - 2;
   }
   return { ...state, status: "active", pausedReason: undefined, attempts };
 }

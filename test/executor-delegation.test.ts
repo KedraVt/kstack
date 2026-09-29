@@ -333,7 +333,13 @@ describe("runDeterministicDelegation — fake-spawn integration", () => {
 describe("branch enforcement at sprint verdict gates", () => {
   test("a verdict-bearing gate on main parks fail-closed before any delegation runs", async () => {
     const host = fakeHost(process.cwd());
-    // detectGitContext shells out via pi.exec — fake git on "main".
+    // detectGitContext no longer uses pi.exec (pi's internal spawn omits
+    // windowsHide) — it takes an injectable ExecFn seam. Fake git on "main".
+    const execGit = async (_cmd: string, args: string[]) => ({
+      code: 0,
+      stdout: args.includes("--show-current") ? "main\n" : "",
+      stderr: "",
+    });
     const pi: any = {
       appendEntry: host.pi.appendEntry,
       sendUserMessage: () => {},
@@ -351,7 +357,7 @@ describe("branch enforcement at sprint verdict gates", () => {
       sprintNumber: 7,
     };
     beginRun("sprint");
-    await executeCurrentPhase(pi, host.ctx, state);
+    await executeCurrentPhase(pi, host.ctx, state, { execGit });
 
     const parked = host.events.find((e) => e.status === "paused");
     assert.ok(parked, "no paused state persisted");

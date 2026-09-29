@@ -269,6 +269,29 @@ consumer: plan-gate rationale persistence and `/gstack retro` (also still open a
 - **`manim-video` / `add-model` (.agents-clean)** — domain utilities of the source
   project, zero workflow relation (rejected at D12 intake).
 
+## Known upstream limitations (documented in the 2026-09 deep review — not fixable in this repo)
+
+These live in the upstream gstack submodule / bundled binary and reappear on
+every `update.sh` pull unless fixed upstream:
+
+- **Browse daemon detached spawns lack `windowsHide`** (`browse/src/cli.ts`
+  node launcher, `security.ts` telemetry spawn, `bun-polyfill.cjs` drops the
+  flag) — our child-side `--require` preload (`lib/silent-spawn-preload.cjs`)
+  covers Node-level descendants; the daemon's own detached launcher is the
+  residual window-flash source.
+- **`timeoutMs` is advisory at the daemon layer** — the client caps ~30s; long
+  upstream operations can outlive it silently.
+- **Chain "stops at first error" doc** — upstream `commands.ts` claims it;
+  `meta-commands.ts` actually runs the whole batch. Our tool description and
+  schema now tell the truth locally.
+- **`gstack_download` release asset** is pinned to `v2.0.0` (package is 2.1.0)
+  and lacks the server sidecars some commands expect — bump the release tag or
+  ship the sidecars before relying on the download fallback on fresh machines.
+- **pi dist child-process calls miss `windowsHide`** (`exec.js`, `tools/grep.js`,
+  `tools/find.js`, `utils/clipboard.js`) — patched at runtime by our preload
+  inside orchestrator-spawned children only; the host pi process is
+  intentionally untouched (user decision).
+
 ## Notes
 
 - All 23 bundled skills remain invocable manually via `/skill:gstack-*` regardless of wiring.
