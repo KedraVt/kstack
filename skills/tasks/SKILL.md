@@ -1,11 +1,14 @@
 ---
 name: tasks
-description: Ingests functional requirements from *user-story_XX.md* and technical layout from *system-design_XX.md* to break the execution workflow into role-assigned, atomic tasks. Ensures maximum clarity, order, and structural rigor for all sub-agents.
+description: Decomposes requirements + technical design into atomic, role-assigned tasks with a dependency graph and definition of done. Use when the user says "break this into tasks", "task decomposition", "sprint backlog", "assignable work items", "dependency graph for the work", or a design needs an execution plan. Do NOT use for designing the architecture (use system-design) or reviewing an existing plan (use gstack-plan-eng-review).
+compatibility: Sprint doc-chain consumer — reads user-story_XX.md + system-design_XX.md + definition-of-done.md when present and writes tasks_XX.md; standalone invocations may pass the design inline.
 ---
 
 <!-- provenance: kedra/tasks (verbatim) · ported S1 2026-02-11 -->
 
 # Tasks
+
+**Inputs**: reads `user-story_XX.md`, `system-design_XX.md`, `definition-of-done.md` when present; if absent, decompose from the design/requirements given inline — do not halt on missing chain files.
 
 ## Task Rules
 

@@ -1,11 +1,14 @@
 ---
 name: product-capability
-description: Translate PRD intent, roadmap asks, or product discussions into an implementation-ready capability plan that exposes constraints, invariants, interfaces, and unresolved decisions before multi-service work starts. Use when the user needs a PRD-to-SRS lane instead of vague planning prose.
+description: Turns PRDs, roadmap asks, or product discussions into an implementation-ready capability plan — constraints, invariants, interfaces, open decisions. Use when the user says "turn this PRD into a plan", "requirements breakdown", "product requirements document", "what exactly must be true before we build", or product intent needs engineering constraints. Do NOT use for filing issue specs (use gstack-spec), technical architecture (use system-design), or task breakdown (use tasks).
+compatibility: Sprint doc-chain producer — its capability plan feeds system-design and tasks; works standalone on pasted PRD or discussion text.
 ---
 
 <!-- provenance: kedra/product-capability (verbatim) · ported S1 2026-02-11 -->
 
 # Product Capability
+
+**Inputs**: PRD/roadmap/discussion text (inline or file); output feeds `system-design` and `tasks`.
 
 This skill turns product intent into explicit engineering constraints.
 

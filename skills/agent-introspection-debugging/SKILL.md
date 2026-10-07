@@ -1,6 +1,6 @@
 ---
 name: agent-introspection-debugging
-description: Structured self-debugging workflow for AI agent failures using capture, diagnosis, contained recovery, and introspection reports.
+description: Structured self-debugging for AI agent failures — capture the run, diagnose the failure class, apply a contained recovery, emit an introspection report. Use when the agent is "stuck in a loop", "burning tokens without progress", "repeating the same tool call", "drifting off the task", or when a run hit loop-limit/retry-storm. Do NOT use for debugging application code (use gstack-investigate).
 ---
 
 <!-- provenance: kedra/agent-introspection-debugging (verbatim) · ported S1 2026-02-11 -->

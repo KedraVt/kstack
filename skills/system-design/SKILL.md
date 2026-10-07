@@ -1,10 +1,16 @@
 ---
 name: system-design
-description: Provides a standard protocol for building a *system-design_XX.md* file. Describes tactical Domain-Driven Design, maps engineering transaction sequences, and outlines dynamic, stack-agnostic architectures. Use when translating a user story into the technical architecture of a sprint.
+description: Produces a system-design document — tactical DDD domain model, aggregates, bounded contexts, transaction sequences, stack-agnostic architecture. Use when the user says "design the architecture", "technical design doc", "domain model", "bounded context", "map the services", or a user story needs its technical design. Do NOT use for product requirements (use product-capability), task breakdown (use tasks), or recording a settled decision (use adr).
+compatibility: Sprint doc-chain middle layer — reads user-story_XX.md, feeds adr and tasks; without it, supply the requirement text directly.
 ---
 
 <!-- provenance: kedra/system-design (verbatim) · ported S1 2026-02-11 -->
-# Workflow
+
+# System Design
+
+**Inputs**: reads `user-story_XX.md` when present; if absent, design from the requirements stated inline. Output feeds `adr` and `tasks`.
+
+## Workflow
 * **domain & behavior**:
   * **Scan User Story**: Understand what the Product Manager wants through events/brainstorming.
   * **Establish Ubiquitous Language**: Analyze *user-story_XX.md* and extract a strict, shared glossary of technical terms.

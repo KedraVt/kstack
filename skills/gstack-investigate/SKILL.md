@@ -13,11 +13,14 @@ description: >-
   test-driven-development).
 metadata:
   version: "1.0.0"
+compatibility: Runtime helpers under runtime/ (bin/gstack-telemetry-log, skills/gstack-investigate/scripts/find-polluter.sh, browse binary); all degrade gracefully when absent.
 ---
 
 <!-- provenance: sprint-beta/beta-debugging (merged base — phases, contract) + gstack/gstack-investigate (upstream body, stripped) + kedra/systematic-debugging (signals section, references) · merged S1 2026-02-11 -->
 
 # Systematic Debugging
+
+> **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), proceed with the strongest hypothesis at reduced confidence and mark every unconfirmed assumption `~assumed` in the DEBUG REPORT — never block a gate waiting for an answer.
 
 ## The Iron Law
 
@@ -184,6 +187,7 @@ Fix:             [what was changed, with file:line references]
 Evidence:        [test output, reproduction attempt showing fix works]
 Regression test: [file:line of the new test]
 Related:         [TODOS.md items, prior bugs in same area, architectural notes]
+Discoveries:     [non-obvious findings made along the way — brittle invariants, hidden couplings, surprising call paths]
 Status:          DONE | DONE_WITH_CONCERNS | BLOCKED
 ════════════════════════════════════════
 ```
@@ -246,7 +250,7 @@ Watch for these redirections — they mean: STOP, return to Phase 1:
 If investigation shows the issue is truly environmental, timing-dependent, or
 external: document what you investigated, implement appropriate handling
 (retry, timeout, clearer error), add monitoring for future investigation.
-**But: 95% of "no root cause" conclusions are incomplete investigation.**
+**But: most "no root cause" conclusions are incomplete investigation.**
 
 ## DoD gate (verification)
 

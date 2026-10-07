@@ -10,6 +10,7 @@ description: >-
   bugs (use gstack-investigate) — ship consumes their verified output.
 metadata:
   version: "1.0.0"
+compatibility: Requires git + gh CLI for push/PR steps; runtime/bin/gstack-* helpers degrade gracefully.
 ---
 
 <!-- provenance: sprint-beta/beta-ship (merged base — skeleton, save-point, SHIP REPORT) + gstack/gstack-ship (readiness dashboard, version CLI, section machinery) + kedra/qa-git (save-point, git discipline) · merged S1 2026-02-11 -->
@@ -24,6 +25,8 @@ state established by the QA artifact — you do not re-derive it.
 ```bash
 bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill gstack-ship --status start 2>/dev/null || true
 ```
+
+> **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), pick the non-destructive option (e.g. defer to TODOS.md rather than installing release CI) and note the skipped confirmation in the SHIP REPORT — never block waiting for an answer.
 
 ## Save-Point Pattern (the hard gate)
 
@@ -62,7 +65,9 @@ skip when already done (bump, push, PR create→update).
    feature branch."
 2. `git status` (never `-uall`) — uncommitted changes are always included.
 3. `git diff <base>...HEAD --stat` and `git log <base>..HEAD --oneline` —
-   understand what is being shipped.
+   understand what is being shipped. (`<base>` = the integration branch this
+   work lands on — typically `main`/`origin/main`; `{previous}` in task text =
+   the prior step's output, interpolated by the orchestrator.)
 
 ### Step 2: Review readiness
 

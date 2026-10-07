@@ -1,10 +1,13 @@
 ---
 name: grilling
 description: >
-  Interview protocol: relentlessly map decisions as a design tree and work it
-  in rounds over the frontier — every question with a recommended answer,
-  facts looked up (never asked), decisions asked (never assumed), until
-  nothing is silently assumed.
+  Requirements-interrogation protocol: maps decisions as a design tree, works
+  it in rounds over the frontier — facts looked up (never asked), decisions
+  asked with a recommended answer (never assumed). Use when the user says
+  "interview me", "ask me questions before planning", "don't assume my
+  requirements", "help me think this through", or requirements are vague.
+  Do NOT use for reviewing a finished plan (use gstack-plan-eng-review) or
+  drafting the plan document (use plan-draft).
 ---
 
 <!-- provenance: vendored from github.com/mattpocock/skills (MIT) · distilled digest materialized as first-class SKILL.md · 2026-08-28 -->

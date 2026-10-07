@@ -1032,7 +1032,7 @@ describe("role-scoped skill injection (STEP 3)", () => {
     assert.deepEqual(plan.map((s) => s.agent), ["scout", "planner"]);
     assert.ok(plan[0].task.includes("Skill methodology: gstack-investigate"), "scout lost the full methodology");
     assert.ok(plan[1].task.includes("Skill methodology: gstack-fix-strategy"), "planner missing the fix-strategy digest");
-    assert.ok(!plan[1].task.includes("gstack-investigate"), "planner must NOT receive the full investigation digest [E1]");
+    assert.ok(!plan[1].task.includes("Skill methodology: gstack-investigate"), "planner must NOT receive the full investigation digest [E1]");
   });
 
   test("gstack-fix-strategy is a canonical registry skill with a parsed gate", () => {

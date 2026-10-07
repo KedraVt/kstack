@@ -12,6 +12,7 @@ description: >-
   or UX/design review (use gstack-plan-design-review).
 metadata:
   version: "1.0.0"
+compatibility: Runtime/bin helpers degrade gracefully; pure review methodology otherwise.
 ---
 
 <!-- provenance: gstack/gstack-plan-eng-review (scope gate, Step 0, review sections) — boilerplate stripped: brain-cache, learnings, plan-mode machinery adapted to pi · rewritten S1 2026-02-11 -->
@@ -25,6 +26,8 @@ recommendation**, and ask for input before assuming a direction.
 ```bash
 bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill gstack-plan-eng-review --status start 2>/dev/null || true
 ```
+
+> **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), default the review target to the current branch diff or the artifact supplied in the task, make assumptions explicit with `~assumed`, and never block a gate waiting for an answer.
 
 ## Scope gate (FIRST — hard STOP, overrides everything below)
 

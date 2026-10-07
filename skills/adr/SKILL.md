@@ -1,11 +1,14 @@
 ---
 name: adr
-description: Provides a standard protocol for building an *ADR-log_XX.md* (Architecture Decision Record) file containing motivated strategic architectural decisions. Use when a sprint requires architectural changes or when recording design decisions alongside system-design.
+description: Writes motivated Architecture Decision Records into an ADR log — decision, context, alternatives rejected, consequences, status. Use when the user says "record this decision", "add an ADR", "document why we chose X", "architectural decision record", or a design decision needs durable rationale. Do NOT use for designing the architecture itself (use system-design) or breaking work into tasks (use tasks).
+compatibility: Sprint doc-chain consumer/producer — reads user-story_XX.md + system-design_XX.md when present, appends to ADR-log_XX.md; standalone invocations may supply decision context inline.
 ---
 
 <!-- provenance: kedra/adr (verbatim) · ported S1 2026-02-11 -->
 
 # Architecture Decision Records
+
+**Inputs**: reads `user-story_XX.md` and `system-design_XX.md` when present; if absent, use the decision context given inline — do not halt on missing chain files.
 
 ## Workflow
 

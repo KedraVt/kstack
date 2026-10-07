@@ -12,6 +12,7 @@ description: >-
   modeling (use gstack-cso), or root-cause debugging (use gstack-investigate).
 metadata:
   version: "1.0.0"
+compatibility: Optional helpers: runtime/bin/gstack-review-read (cross-review dedup) and repo script `bun run slop:diff`; both degrade gracefully when absent.
 ---
 
 <!-- provenance: sprint-beta/beta-code-review (merged base — dimensions, calibration, verdict contract) + gstack/gstack-review (fix-first mode, review army, greptile, dedup) + kedra/code-audit-reviewer (severity, status block) · merged S1 2026-02-11 -->
@@ -28,6 +29,8 @@ motivates it.**
 ```bash
 bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill gstack-review --status start 2>/dev/null || true
 ```
+
+> **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), emit ASK items in the report with `~assumed` resolutions and downgrade the verdict to `needs-human` — never block waiting for an answer.
 
 ## Modes
 
@@ -128,7 +131,7 @@ first.
 
 For diffs touching multiple domains, dispatch focused passes using the
 bundled specialist lenses — read the matching file under
-`references/specialists/`: `security`, `performance`, `maintainability`,
+`references/`: `security`, `performance`, `maintainability`,
 `testing`, `api-contract`, `data-migration`, `red-team`. Dispatch only the
 lenses the diff actually touches; each specialist finding still passes
 through the Step 4 verification gate.
@@ -254,7 +257,7 @@ When the user asked for review *and* fixes:
 | `references/design-checklist.md` | read | diff touches UI/frontend |
 | `references/greptile-triage.md` | read | Greptile comments exist on the PR |
 | `references/TODOS-format.md` | read | writing new TODO entries |
-| `references/specialists/<lens>.md` | read | Step 3.5 — security, performance, maintainability, testing, api-contract, data-migration, red-team |
+| `references/<lens>.md` | read | Step 3.5 — security, performance, maintainability, testing, api-contract, data-migration, red-team |
 
 ## Related skills
 

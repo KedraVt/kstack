@@ -13,6 +13,7 @@ description: >-
   existing plan (use gstack-plan-eng-review).
 metadata:
   version: "1.0.0"
+compatibility: Requires gh CLI for issue filing + runtime/bin/gstack-redact for leak scanning; $GSTACK_STATE_ROOT for the archive dir (defaults to repo .gstack/).
 ---
 
 <!-- provenance: gstack/gstack-spec (5-phase interrogation, dedupe, redaction sink, issue templates) — boilerplate stripped: brain machinery, plan-mode detection, claude-specific spawn adapted · rewritten S1 2026-02-11 -->
@@ -33,6 +34,8 @@ locally, optionally handed to a spawned agent.
 ```bash
 bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill gstack-spec --status start 2>/dev/null || true
 ```
+
+> **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), take the safe option — dedupe/semantic/redaction flags → file anyway with the flag recorded; spawn confirmation → skip the spawn and leave the spec for manual dispatch — never block waiting for an answer.
 
 ## Flags (parse from the invocation; last wins on conflict)
 
@@ -121,8 +124,8 @@ zero-reformatting paste.
 (`Closes #N`) when a PR completes the spec.
 
 **Spawn (`--execute` only)** — dirty-worktree gate (`git status --porcelain`
-→ AUQ continue/stash/cancel, TOCTOU re-check inside the flow) → pin `PIN_SHA`
-→ `git worktree add` on branch `spec/<slug>-$$` → final confirm AUQ → hand the
+→ ask_user_question continue/stash/cancel, TOCTOU re-check inside the flow) → pin `PIN_SHA`
+→ `git worktree add` on branch `spec/<slug>-$$` → final confirm via ask_user_question → hand the
 spec to a fresh agent session pointed at the worktree (stash path preserved,
 never auto-restored). Default is file-only; spawn needs the explicit flag.
 

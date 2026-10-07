@@ -1,7 +1,6 @@
 ---
 name: docker-manager
-description: Build, run, orchestrate, and secure Docker containers for both the application stack and ephemeral sandbox execution. Use when any agent must write a Dockerfile, configure docker-compose services, spawn sandboxed workers, manage shared volumes, or verify container health.
-version: "2.0.0"
+description: Build, run, orchestrate, and secure Docker containers for the application stack and ephemeral sandboxed workers. Use when the user mentions "Dockerfile", "docker-compose", "containerize", "container health", "docker volumes/networking", or agents need isolated sandbox containers. Do NOT use for CI/CD pipeline design (use pipeline-sre) or Kubernetes cluster operations.
 ---
 
 <!-- provenance: kedra/docker-manager (verbatim) · ported S1 2026-02-11 -->

@@ -13,6 +13,7 @@ description: >-
   gstack-plan-eng-review).
 metadata:
   version: "1.0.0"
+compatibility: Optional runtime/design/dist/design.exe for AI mockup variants; the review proceeds text-only when absent.
 ---
 
 <!-- provenance: gstack/gstack-plan-design-review (scope gate, audit, mockup loop, 7 passes) — boilerplate stripped: brain-cache, learnings, plan-mode machinery adapted · rewritten S1 2026-02-11 -->
@@ -26,6 +27,8 @@ No code changes, no implementation.
 ```bash
 bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill gstack-plan-design-review --status start 2>/dev/null || true
 ```
+
+> **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), review the artifact supplied in the task, skip the mockup-board and outside-voice prompts, rate all seven passes, and flag open design choices in the report — never block waiting for an answer.
 
 ## Scope gate (FIRST — hard STOP)
 
@@ -101,11 +104,11 @@ $D check --image "$_DESIGN_DIR/variant-A.png" --brief "<same brief>"   # per var
 **Comparison board + feedback loop:** `$D compare --images "a.png,b.png,c.png"
 --output "$_DESIGN_DIR/design-board.html" --serve` in background; parse
 `BOARD_URL:` from stderr. Block on `ask_user_question` carrying the board
-URL — the board IS the chooser (never ask which variant via AUQ). After the
+URL — the board IS the chooser (never ask which variant via ask_user_question). After the
 reply, check `feedback.json` (Submit → proceed with `preferred`) vs
 `feedback-pending.json` (Regenerate/Remix → read `regenerateAction`/
 `remixSpec`, `$D iterate`/`variants`, re-`compare`, POST the board reload,
-AUQ again — loop until `feedback.json`). No file → treat the user's text as
+ask_user_question again — loop until `feedback.json`). No file → treat the user's text as
 feedback. Confirm understanding back, then persist:
 `approved.json` = `{approved_variant, feedback, date, screen, branch}`.
 Multiple screens → separate variant sets + boards, all resolved before the

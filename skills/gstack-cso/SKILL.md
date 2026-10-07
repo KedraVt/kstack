@@ -11,6 +11,7 @@ description: >-
   review (use gstack-review) or runtime testing (use gstack-qa).
 metadata:
   version: "1.0.0"
+compatibility: Optional input: system-design_XX.md for attack surface; runtime/bin helpers degrade gracefully.
 ---
 
 <!-- provenance: sprint-beta/beta-security (merged base — three-tier, STRIDE, verdict contract) + gstack/gstack-cso (CSO posture audit — modes, phases, trend tracking, IR playbook) + kedra/appsec-hardening (framework, artifact protocol) · merged S1 2026-02-11 -->
@@ -30,6 +31,8 @@ copy-paste-ready fixes.**
 ```bash
 bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill gstack-cso --status start 2>/dev/null || true
 ```
+
+> **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), apply fixes only inside the assigned task scope, record every unmade decision in the report, and never block waiting for an answer.
 
 ## Mode resolution
 

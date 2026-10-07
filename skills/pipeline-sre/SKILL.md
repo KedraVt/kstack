@@ -1,11 +1,14 @@
 ---
 name: pipeline-sre
-description: Framework for CI/CD automation, static hygiene, progressive delivery, and infrastructure stability.
+description: Designs SRE-grade CI/CD pipelines — pre-commit hygiene, test stages, progressive delivery, rollback strategy, infra stability. Use when the user says "set up CI/CD", "GitHub Actions / GitLab pipeline", "deployment pipeline", "progressive delivery", "release automation", or a pipeline needs hardening. Do NOT use for writing Dockerfiles (use docker-manager) or debugging a broken build (use gstack-investigate).
+compatibility: Sprint doc-chain consumer — reads system-design_XX.md for stack choices (CI provider, runtime, deploy target); standalone invocations must state the stack explicitly.
 ---
 
 <!-- provenance: kedra/pipeline-sre (verbatim) · ported S1 2026-02-11 -->
 
 # Pipeline Automation & SRE Framework
+
+**Inputs**: reads `system-design_XX.md` for stack choices when present; if absent, the stack (CI provider, language, deploy target) must be stated inline.
 
 Apply this framework when building CI/CD pipelines, configuring infrastructure, or establishing deployment strategies. **Read `system-design_XX` to determine the specific tools (e.g., GitHub Actions vs GitLab CI, Docker, Kubernetes vs Serverless, languages to build).**
 

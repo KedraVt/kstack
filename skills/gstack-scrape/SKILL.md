@@ -11,6 +11,7 @@ description: >-
   to a page.
 metadata:
   version: "1.0.0"
+compatibility: Requires runtime/browse/dist/find-browse ($B) — fail-closed when absent; gstack-skillify lives in the user-level stack, not this catalog.
 ---
 
 <!-- provenance: gstack/gstack-scrape (match/prototype paths) — boilerplate stripped: learnings-log, eureka, preamble · rewritten S1 2026-02-11 -->

@@ -13,6 +13,7 @@ description: >-
   (use gstack-plan-eng-review) or drafting the plan artifact (use plan-draft).
 metadata:
   version: "1.0.0"
+compatibility: Writes design docs under .gstack/design/; runtime/bin helpers degrade gracefully.
 ---
 
 <!-- provenance: gstack/gstack-office-hours (full upstream body — boilerplate stripped: brain-cache, learnings, eureka instrumentation, freeze machinery) · rewritten S1 2026-02-11 -->
@@ -31,6 +32,8 @@ a design document.
 ```bash
 bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill gstack-office-hours --status start 2>/dev/null || true
 ```
+
+> **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), do NOT fabricate answers — write a draft design doc marking every unconfirmed assumption with `~` and stop for a human review pass.
 
 ## Phase 1: Context Gathering
 

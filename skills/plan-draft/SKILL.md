@@ -12,6 +12,7 @@ description: >-
   the draft (use gstack-plan-eng-review / gstack-plan-design-review).
 metadata:
   version: "1.0.0"
+compatibility: None — pure drafting methodology.
 ---
 
 <!-- provenance: new skill (S1, D22) — extracted from gstack-office-hours handoff scope; plan structure aligned with gstack-plan-eng-review's gate contract -->

@@ -1,9 +1,13 @@
 ---
 name: gstack-fix-strategy
 description: >
-  Minimal-fix strategy for a CONFIRMED root cause: validation-first,
-  minimal diff, regression test per fix. For planners validating an
-  already-identified cause before any fix is dispatched.
+  Chooses the minimal correct fix once a root cause is identified: validates
+  the hypothesis first, bounds the diff, requires a regression test per fix.
+  Use when the user says "root cause found, what's the fix", "minimal fix vs
+  refactor", "propose the fix strategy", or an investigation produced a cause
+  that needs dispatching. Do NOT use to FIND the root cause (use
+  gstack-investigate) or to verify the landed fix (use gstack-qa).
+compatibility: None — pure methodology.
 ---
 
 <!-- provenance: vendored digest derived from the investigate methodology's Phase 4 · materialized as first-class SKILL.md · 2026-08-28 -->

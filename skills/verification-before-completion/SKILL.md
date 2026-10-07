@@ -1,6 +1,6 @@
 ---
 name: verification-before-completion
-description: Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirming output before making any success claims; evidence before assertions always
+description: Forces executed proof before any success claim — run the verification command, quote real output, only then say "done". Use when about to claim work is complete, fixed, or passing — before committing, merging, or opening a PR. Fires on the agent's own completion instinct, not user phrasing. Do NOT use for choosing what to build or reviewing someone else's code (use gstack-review).
 ---
 
 <!-- provenance: kedra/verification-before-completion (verbatim) · ported S1 2026-02-11 -->

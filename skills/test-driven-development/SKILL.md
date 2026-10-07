@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Use when implementing any feature or bugfix, before writing implementation code
+description: Enforces the red-green-refactor cycle — failing test first, minimal code to pass, then refactor. Use when the user says "write the test first", "TDD", "red green refactor", "tests before code", "cover this with tests", or implementing any feature/bugfix that should ship with tests. Do NOT use for diagnosing a broken behavior (use gstack-investigate) or verifying a finished fix end-to-end (use gstack-qa).
 ---
 
 <!-- provenance: kedra/test-driven-development (verbatim) · ported S1 2026-02-11 -->
@@ -303,7 +303,7 @@ test('rejects empty email', async () => {
 
 **Verify RED**
 ```bash
-$ npm test
+$ npm test   # or the project's runner — bun test, pytest, etc.
 FAIL: expected 'Email required', got undefined
 ```
 
@@ -358,7 +358,7 @@ Never fix bugs without a test.
 
 ## Testing Anti-Patterns
 
-When adding mocks or test utilities, read @references/testing-anti-patterns.md to avoid common pitfalls:
+When adding mocks or test utilities, read `references/testing-anti-patterns.md` (on-demand) to avoid common pitfalls:
 - Testing mock behavior instead of real behavior
 - Adding test-only methods to production classes
 - Mocking without understanding dependencies
@@ -374,4 +374,4 @@ No exceptions without your human partner's permission.
 
 ## DoD gate (verification)
 
-- DoD: failing test precedes production code; AAA structure; bug fixes start from a demonstrably failing test; >=80% coverage on new code paths. BP: no production code without a red test; strip debug artifacts before claiming green.
+- DoD: failing test precedes production code; AAA structure (Arrange–Act–Assert); bug fixes start from a demonstrably failing test; every new code path covered by a test. BP: no production code without a red test; strip debug artifacts before claiming green.

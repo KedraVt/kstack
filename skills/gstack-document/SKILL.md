@@ -11,6 +11,7 @@ description: >-
   (gstack-review) or release mechanics (gstack-ship).
 metadata:
   version: "1.0.0"
+compatibility: runtime/bin/gstack-redact for leak scanning; degrades to manual-pattern scan when absent.
 ---
 
 <!-- provenance: gstack/gstack-document-generate (Diataxis writer) + gstack/gstack-document-release (coverage map, doc audit) · merged S1 2026-02-11 -->
@@ -25,6 +26,8 @@ every API description must match the code.
 ```bash
 bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill gstack-document --status start 2>/dev/null || true
 ```
+
+> **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), default to creating new files under `docs/`, proceed with the full partition plan, and flag deferred choices in the output — never block waiting for an answer.
 
 ## Mode resolution
 

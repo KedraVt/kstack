@@ -1,6 +1,6 @@
 ---
 name: code-simplification
-description: Simplifies code for clarity. Use when refactoring code for clarity without changing behavior. Use when code works but is harder to read, maintain, or extend than it should be. Use when reviewing code that has accumulated unnecessary complexity.
+description: Simplifies working code without changing behavior — removes dead code, needless abstraction, over-engineering, and repeated patterns (YAGNI sweep). Use when the user says "simplify this", "this is over-engineered", "clean up this code", "reduce the complexity", or working code is harder to read than it should be. Do NOT use for finding bugs (use gstack-investigate) or pre-merge review (use gstack-review).
 ---
 
 <!-- provenance: kedra/code-simplification (verbatim) · ported S1 2026-02-11 -->
