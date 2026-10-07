@@ -2,13 +2,18 @@
 name: retro
 description: "Conduct a retrospective on a coding session."
 disable-model-invocation: true
+compatibility: Calls `writing-for-agents` — a user-stack skill (~/.agents/skills/), not part of this catalog.
 ---
+
+<!-- provenance: user-stack /retro verbatim · polished S1-ff (H1, DoD gate, external-dep note) 2026-02-11 -->
+
+# Retro
 
 The user has asked for a **retrospective**. You are suggesting improvements to the coding agent's **environment** to improve future runs.
 
 ## Steps
 
-1. Call the Skill tool with `writing-for-agents` for the writing style guide.
+1. Call the Skill tool with `writing-for-agents` (user stack, outside this catalog) for the writing style guide.
 
 2. Read the primary sources for the session the user specifies. This may mean searching through session logs on this machine. If the user doesn't specify a session, default to the current one.
 
@@ -42,3 +47,12 @@ You have access to several files in the repo:
 - `CODING_STANDARDS.md`: this file is read during review, not implementation. Add **navigation pointers** to docs folders if the standards file gets more than 1,000 lines long.
 - Docs: use docs as references files, pointed to by other files. Look for existing docs before writing new ones.
 - Skills: use skills for docs (since their description goes into the agent's context window), or for user-invoked commands. Follow the advice in the `writing-for-agents` skill.
+
+## DoD gate (verification)
+
+- Session primary sources actually read (logs/transcript), not guessed.
+- Improvement candidates mapped to a concrete artifact category (skill,
+  rule, doc pointer, config) with a proposed edit, not vague advice.
+- `writing-for-agents` style guide applied to any suggested skill/rule text.
+- Report lists what to change, where, and why — no "session went fine"
+  summaries without evidence.

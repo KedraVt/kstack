@@ -6,6 +6,8 @@ metadata:
   version: "0.1.2"
 ---
 
+<!-- provenance: user-stack mindrun verbatim · polished S1-ff (sibling repoint) 2026-02-11 -->
+
 # Mindrun
 
 **Run your code in your mind, before you run it on your machine.**
@@ -20,7 +22,7 @@ chains anchored to reading the **real code**, without running the app.
 - **What it produces**: falsifiable triggers ready to become tests + open questions for the user
   about unspecified behavior + a verified DoD matrix.
 - **When NOT to use**:
-  - a bug symptom is already observed → use a debugging skill (`diagnosing-bugs`, `systematic-debugging`);
+  - a bug symptom is already observed → use a debugging skill (`gstack-investigate`);
   - the user asks for a style/architecture review → use an audit skill;
   - the task is to write tests → this skill *generates* the triggers, it does not write the tests.
 - **Read-only by default**: the only exception is the optional Execution Gate (Phase 4).

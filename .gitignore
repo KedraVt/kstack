@@ -16,3 +16,7 @@ mindrun-*.md
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# devin environment + graft hooks (local, never committed)
+.devin/
+.ignore
