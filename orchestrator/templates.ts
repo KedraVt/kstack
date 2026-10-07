@@ -1,6 +1,6 @@
 import type { WorkflowPhase, WorkflowContext, Workflow } from "./types.ts";
 import { getWorkflow } from "./workflows.ts";
-import { loadSkillSource, getSkillInfo } from "./skills.ts";
+import { loadSkillSource, loadSkillGate, getSkillInfo } from "./skills.ts";
 import { skillsEnabled, manualGates, deterministicSubagents, skillInjectionMode } from "./config.ts";
 import { replaceExact } from "./text.ts";
 import { extractHandoff } from "./handoff.ts";
@@ -295,20 +295,15 @@ function buildOrchestratorSkillBlock(phase: WorkflowPhase, ctx: WorkflowContext)
       const digest = loadSkillSource(id, skillInjectionMode());
       if (digest) {
         parts.push(digest);
-        if (info.fullPath) {
-          parts.push(`(Full skill documentation for deep consultation: ${info.fullPath})`);
-        }
+        parts.push(`(Full skill documentation for deep consultation: ${info.skillPath})`);
         continue;
       }
-      // digest missing → fall through to pointer/gate
-      if (info.fullPath) {
-        parts.push(`Read and follow the full methodology at: ${info.fullPath}`);
-        continue;
-      }
+      // skill file missing → fall through to the gate
     }
 
-    // Subagent phase or repeat delivery: compact DoD + best-practices gate.
-    parts.push(info.dod);
+    // Subagent phase or repeat delivery: compact DoD gate parsed from SKILL.md.
+    const gate = loadSkillGate(id);
+    if (gate) parts.push(gate);
     if (!isSubagentPhase && alreadyDelivered) {
       parts.push("(Full methodology delivered in an earlier phase — follow the same rules.)");
     }
@@ -778,16 +773,8 @@ This phase runs ONLY after explicit user approval (the orchestrator entry-gates 
 /**
  * Embed the skill methodology into a subagent task string. Subagent
  * processes have isolated contexts — embedding the methodology in the task is
- * the only reliable way for them to receive it. Source is mode-aware:
- * distilled digest (default) or the sprint-beta unified SKILL.md when
- * GSTACK_PI_SKILL_INJECTION=full.
- */
-/**
- * Embed the skill methodology into a subagent task string. Subagent
- * processes have isolated contexts — embedding the methodology in the task is
- * the only reliable way for them to receive it. Source is mode-aware:
- * distilled digest (default) or the sprint-beta unified SKILL.md when
- * GSTACK_PI_SKILL_INJECTION=full.
+ * the only reliable way for them to receive it. Source is the canonical
+ * skills/<dir>/SKILL.md (single source post-S1).
  */
 // OUTPUT CONTRACT (STEP 2a): every specialist ends its work with a structured
 // HANDOFF section so the next chain step receives verified facts, not a wall
@@ -818,8 +805,8 @@ function buildTaskSkills(phase: WorkflowPhase, task: string, skillsOverride?: st
     const prefix = skillClassFor(id) === "format-critical" ? FORMAT_CRITICAL_PREFIX : SUPPORT_PREFIX;
     if (digest) {
       blocks.push(`## Skill methodology: ${id} (${skillClassFor(id)})\n${prefix}\n\n${digest}`);
-    } else if (info?.fullPath) {
-      blocks.push(`## Skill methodology: ${id} (${skillClassFor(id)})\n${prefix}\nBefore starting, read the file ${info.fullPath} and follow its methodology.`);
+    } else if (info && existsSync(info.skillPath)) {
+      blocks.push(`## Skill methodology: ${id} (${skillClassFor(id)})\n${prefix}\nBefore starting, read the file ${info.skillPath} and follow its methodology.`);
     }
   }
   if (blocks.length === 0) return appendOutputContract(task);

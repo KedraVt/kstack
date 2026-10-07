@@ -82,16 +82,15 @@ export function verdictsEnabled(): boolean {
   return parse(process.env.GSTACK_PI_VERDICTS) ?? true;
 }
 
-// --- Skill source resolution (sprint-beta catalog) ---------------------------
+// --- Skill source resolution (canonical flat catalog) ------------------------
 
 export type SkillInjectionMode = "digest" | "full";
 
 /**
- * Source of the skill methodology injected into agent contexts:
- *  - full (default): skills/sprint-beta/<file> — the unified catalog's complete
- *    SKILL.md, so agents absorb the full deduplicated methodology;
- *  - digest: skills-distilled/<id>.md — opt-in legacy behavior;
- *    a missing mapped file always degrades to the digest so a run never breaks.
+ * Source of the skill methodology injected into agent contexts. Post-S1 the
+ * canonical skills/<dir>/SKILL.md is the single source for both modes (it is
+ * already distilled-size); the mode is retained for env compat and may
+ * diverge again if a lighter projection is reintroduced.
  */
 export function skillInjectionMode(): SkillInjectionMode {
   return process.env.GSTACK_PI_SKILL_INJECTION?.trim().toLowerCase() === "digest" ? "digest" : "full";

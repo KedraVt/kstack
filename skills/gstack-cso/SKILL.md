@@ -170,7 +170,7 @@ STABLE. If `.gstack/` is not gitignored, flag it — reports stay local.
 **Output artifact** (dual channel): write
 `devsecops/security-review-artifact_XX.md` ending with EXACTLY ONE verdict
 line — `security-review == approved` or `security-review == rejected`; when
-rejecting add EXACTLY ONE severity line — `severity == critical|high|medium|low`.
+rejecting add EXACTLY ONE severity line — `severity == <critical|high|medium|low>`.
 Repeat the SAME lines verbatim in `## HANDOFF` — the orchestrator
 cross-checks both channels before routing.
 

@@ -6,7 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createState, advancePhase, abortState, resumeState, pauseState, gateForApproval, approveNext, gateOptionalPhase, approveOptionalPhase, skipPendingOptional } from "../orchestrator/state.ts";
 import { getAllWorkflows, getWorkflow, getWorkflowIds } from "../orchestrator/workflows.ts";
-import { loadSkillDigest, getSkillInfo, buildSkillIndex, getSkillIds } from "../orchestrator/skills.ts";
+import { loadSkillFull, loadSkillGate, getSkillInfo, buildSkillIndex, getSkillIds } from "../orchestrator/skills.ts";
 import { buildPhaseInstructions, buildDeterministicPlan, planFilePath, parsePlanFileMarker, resolvePlanFilePath, carryOverOpenQuestions } from "../orchestrator/templates.ts";
 import type { WorkflowContext, WorkflowPhase } from "../orchestrator/types.ts";
 import { launchPhase, ctxAlive, isPhaseInFlight, advanceBlockReason, releasePhaseInFlight, buildResumeContext, activeConstraintLines, statusLineFor } from "../orchestrator/executor.ts";
@@ -336,12 +336,12 @@ describe("approval gates", () => {
 });
 
 describe("skill ingestion", () => {
-  test("all registered skill digests exist and are small enough to inject", () => {
+  test("all registered skills resolve to a canonical SKILL.md small enough to inject", () => {
     for (const id of getSkillIds()) {
-      const digest = loadSkillDigest(id);
-      assert.ok(digest, `missing digest for ${id}`);
-      assert.ok(digest.length < 16 * 1024, `digest ${id} too large: ${digest.length} chars`);
-      assert.ok(digest.includes("# Skill:"), `digest ${id} missing header`);
+      const full = loadSkillFull(id);
+      assert.ok(full, `missing canonical SKILL.md for ${id}`);
+      assert.ok(full.length < 48 * 1024, `skill ${id} too large: ${full.length} chars`);
+      assert.ok(full.includes("name:"), `skill ${id} missing frontmatter`);
     }
     for (const wf of getAllWorkflows()) {
       for (const phase of wf.phases) {
@@ -353,26 +353,26 @@ describe("skill ingestion", () => {
     }
   });
 
-  test("loadSkillDigest returns null for unknown skills; grilling is vendored", () => {
-    assert.equal(loadSkillDigest("nonexistent-skill"), null);
+  test("loadSkillFull returns null for unknown skills; grilling resolves canonically", () => {
+    assert.equal(loadSkillFull("nonexistent-skill"), null);
     const grilling = getSkillInfo("grilling")!;
-    assert.equal(grilling.fullPath, null);
-    assert.ok(existsSync(grilling.distilledPath));
+    assert.ok(existsSync(grilling.skillPath));
+    assert.ok(grilling.skillPath.endsWith("skills\\grilling\\SKILL.md") || grilling.skillPath.endsWith("skills/grilling/SKILL.md"));
   });
 
-  test("getSkillInfo resolves full SKILL.md paths that exist on disk", () => {
+  test("getSkillInfo resolves canonical SKILL.md paths that exist on disk", () => {
     for (const id of ["gstack-review", "gstack-office-hours", "gstack-document-generate"]) {
       const info = getSkillInfo(id)!;
-      assert.ok(info.fullPath, `${id} should have an upstream SKILL.md`);
-      assert.ok(existsSync(info.fullPath), `${info.fullPath} not found`);
+      assert.ok(info.skillPath, `${id} should have a canonical SKILL.md`);
+      assert.ok(existsSync(info.skillPath), `${info.skillPath} not found`);
     }
   });
 
-  test("every registered skill exposes a DoD + best-practices gate", () => {
+  test("every registered skill exposes a parsed DoD gate from its SKILL.md", () => {
     for (const id of getSkillIds()) {
-      const info = getSkillInfo(id)!;
-      assert.ok(info.dod.includes("DoD:"), `${id} gate missing DoD`);
-      assert.ok(/BP:/.test(info.dod), `${id} gate missing best practices`);
+      const gate = loadSkillGate(id);
+      assert.ok(gate, `${id} gate missing (## DoD gate section)`);
+      assert.ok(gate.includes(`DoD gate: ${id}`), `${id} gate missing header`);
     }
   });
 });
@@ -382,17 +382,12 @@ describe("skill tiering in orchestrator instructions", () => {
     const plan = findPhase("develop", "plan");
     assert.equal(plan.execution, "main");
     const instructions = buildPhaseInstructions(plan, makeCtx("develop", 2));
-    // Full-injection default: the unified sprint-beta SKILL.md (frontmatter
-    // `name: <id>`) is embedded instead of the distilled digest (`# Skill: <id>`
-    // provenance header). Either marker proves the FULL methodology shipped —
-    // not just the compact gate.
-    assert.ok(
-      instructions.includes("name: grilling") || instructions.includes("# Skill: grilling"),
-      "grilling protocol missing",
-    );
+    // Canonical catalog: the SKILL.md frontmatter (`name: <dir>`) is embedded.
+    // The marker proves the FULL methodology shipped — not just the compact gate.
+    assert.ok(instructions.includes("name: grilling"), "grilling protocol missing");
     assert.ok(instructions.includes("frontier"), "interview protocol content missing");
     assert.ok(
-      instructions.includes("name: gstack-plan-eng-review") || instructions.includes("# Skill: gstack-plan-eng-review"),
+      instructions.includes("name: gstack-plan-eng-review"),
       "eng rigor missing",
     );
   });
@@ -402,8 +397,9 @@ describe("skill tiering in orchestrator instructions", () => {
     assert.equal(review.execution, "subagent");
     const instructions = buildPhaseInstructions(review, makeCtx("ship"));
     assert.ok(instructions.includes("Skill gate: gstack-review"));
-    assert.ok(instructions.includes("DoD: Scope Check line"));
-    assert.ok(!instructions.includes("# Skill: gstack-review"), "full digest leaked into orchestrator instructions");
+    assert.ok(instructions.includes("DoD gate: gstack-review"));
+    assert.ok(instructions.includes("code-review =="), "review gate content missing");
+    assert.ok(!instructions.includes("name: gstack-review"), "full skill leaked into orchestrator instructions");
   });
 
   test("repeat delivery degrades to the DoD gate even on main phases", () => {
@@ -411,7 +407,8 @@ describe("skill tiering in orchestrator instructions", () => {
     const verify = findPhase("investigate", "verify");
     const instructions = buildPhaseInstructions(verify, ctx);
     assert.ok(instructions.includes("Skill gate: gstack-investigate"));
-    assert.ok(!instructions.includes("# Skill: gstack-investigate"), "full digest re-delivered");
+    assert.ok(instructions.includes("DoD gate: gstack-investigate"));
+    assert.ok(!instructions.includes("name: gstack-investigate"), "full skill re-delivered");
   });
 
   test("phases without skills get no skill blocks; advancement rule intact", () => {
@@ -546,10 +543,10 @@ describe("documentation phases", () => {
     assert.ok(plan[0].task.includes("docs: prefix"));
   });
 
-  test("ship digest mandates TODOS.md management and git best practices", () => {
-    const digest = loadSkillDigest("gstack-ship")!;
-    assert.ok(digest.includes("TODOS.md management (mandatory)"));
-    assert.ok(digest.includes("Git best practices throughout"));
+  test("ship skill mandates TODOS.md reconciliation and git discipline", () => {
+    const skill = loadSkillFull("gstack-ship")!;
+    assert.ok(/TODOS\.md/.test(skill), "TODOS.md reconciliation missing");
+    assert.ok(/git add -A/.test(skill), "no-git-add-A rule missing");
   });
 });
 
@@ -738,8 +735,8 @@ describe("deliverable-first contracts (STEP 1)", () => {
       }
     }
     for (const id of getSkillIds()) {
-      const digest = loadSkillDigest(id);
-      if (digest) out.push(digest);
+      const full = loadSkillFull(id);
+      if (full) out.push(full);
     }
     return out;
   }
@@ -1038,15 +1035,14 @@ describe("role-scoped skill injection (STEP 3)", () => {
     assert.ok(!plan[1].task.includes("gstack-investigate"), "planner must NOT receive the full investigation digest [E1]");
   });
 
-  test("gstack-fix-strategy is a vendored registry skill with a small digest", () => {
+  test("gstack-fix-strategy is a canonical registry skill with a parsed gate", () => {
     const info = getSkillInfo("gstack-fix-strategy");
     assert.ok(info);
-    assert.equal(info.fullPath, null, "must be vendored (no upstream SKILL.md)");
-    const digest = loadSkillDigest("gstack-fix-strategy");
-    assert.ok(digest);
-    assert.ok(digest.length < 800, `digest too large: ${digest.length} chars`);
-    assert.ok(digest.includes("# Skill:"));
-    assert.ok(info.dod.includes("DoD:") && /BP:/.test(info.dod));
+    assert.ok(existsSync(info.skillPath));
+    const gate = loadSkillGate("gstack-fix-strategy");
+    assert.ok(gate);
+    assert.ok(gate.includes("VALIDATED:"), "gate missing VALIDATED contract");
+    assert.ok(gate.includes("REFUTED:"), "gate missing REFUTED contract");
   });
 
   test("chain steps without an override inherit the phase skills", () => {

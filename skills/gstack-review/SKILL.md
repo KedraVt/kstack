@@ -237,8 +237,8 @@ When the user asked for review *and* fixes:
 
 ## DoD gate (verification)
 
-- Artifact ends with exactly one verbatim `code-review == approved|rejected`
-  line AND repeats it inside `## HANDOFF`.
+- Artifact ends with exactly one verbatim `code-review ==` verdict line
+  (value `approved` or `rejected`) AND repeats it inside `## HANDOFF`.
 - `approved` ⟹ zero open CRITICALs and no unaddressed HIGH-impact plan
   discrepancy; `rejected` ⟹ `problems-code` filled.
 - Every finding has: file:line, confidence, concrete failure scenario, fix.
