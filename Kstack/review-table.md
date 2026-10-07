@@ -1,106 +1,88 @@
-# S1-T3+T4 — Validazione e batch review
+# S1-T3+T4 — Validazione e batch review → D10 RISOLTO
 
 Rubrica: (a) utile (b) non sovrapposta (c) efficace/non datata
 (d) contratto coerente coi consumer (e) references risolvibili in-dir
 (f) zero dipendenze upstream.
 
-`KW` = keep come vincitore di cluster · `K` = keep · `RW` = keep con rewrite
-(strip boilerplate + adattamento pi/kstack) · `DR` = drop · `NEW` = da creare.
+## Decisioni D10 — approvate dall'utente
 
-## Vincitori già fusi (sprint-beta `beta-*` + vendored)
+1. **Preamble**: strip integrale del boilerplate upstream (~775 righe/skill:
+   adapter note, env-probes, plan-mode, AUQ format, artifacts-sync gbrain,
+   voice/writing-style, behavioral patch, telemetry UX flag). Restano:
+   metodologia, DoD gate, provenance, frontmatter normalizzato.
+2. **gbrain**: strip dai corpi. `gstack-brain-cache` NON assorbito; `.gbrain-source`
+   pins e brain-sync calls rimossi. gbrain = integrazione futura non bloccante.
+3. **Runtime dir**: gli script assorbiti vanno in `runtime/bin/` (convenzione
+   esistente), non `runtime/scripts/`.
+4. **Telemetry**: `gstack-telemetry-log` assorbito (D4 locale); nei corpi restano
+   solo i marker `skill_run` start/end — via eureka/`*-prompted`/warned flags.
+5. **Identità beta cancellate**: nessun `beta-*` nel catalogo — i corpi beta sono
+   solo base di merge. Id canonici = quelli consumer-facing (gstack-* fino a S2).
+6. **Merge policy**: per ogni cluster si prende il meglio di ogni sorgente.
+   ⏸ T5 bloccata in attesa della ricerca utente sulle best practice di merge.
+7. **skillify**: salvato in `~/.agents/skills/gstack-skillify` (stack generico),
+   escluso dall'estensione.
+8. **Memory skills**: `context-save`, `context-restore`, `learn` → ESCLUSE tutte e
+   tre, rinviate allo sprint "memoria persistente" (S5b).
+   ↳ *sub-question aperta*: le chiamate memory inline (`learnings-search`,
+   `decision-log`…) nei corpi delle altre skill — strip coerente col rinvio
+   (proposta) o keep con script assorbiti (D5 originale)?
 
-| Skill | Azione | Motivo | Consumer |
+## Fusioni per overlap (best-of-merge)
+
+| Canonica | Sorgenti | Base merge | Asset da migrare |
 |---|---|---|---|
-| beta-debugging | KW + DoD gate | fusione già fatta; contratto DEBUG REPORT ok; 1561w | investigate.* (id gstack-investigate), develop |
-| beta-code-review | KW + DoD gate | 5 dim + scope drift + quote-gate; verdict parser-ok | develop.review, review.*, ship.review, sprint |
-| beta-qa | KW + DoD gate | triage GREEN/RED/ORANGE dual-channel | develop.qa, qa.*, qa-report, investigate.regression, sprint.qa |
-| beta-security | KW + DoD gate | STRIDE-lite + FP filter + verdict | sprint.devsecops |
-| beta-ship | KW + DoD gate | save-point + pipeline rilascio | develop.ship, ship.*, sprint.ship |
-| grilling | KW (già DoD gate) | interview protocol vendored | develop.plan.s1 |
-| gstack-fix-strategy | KW (già DoD gate) | validate→fix plan | investigate chain (planner step) |
+| `gstack-investigate` | investigate + systematic-debugging | beta-debugging | systematic-debugging: 8 file → `references/` |
+| `gstack-qa` | qa + qa-only + qa-git | beta-qa | `qa/references/*`, `qa/templates/*` |
+| `gstack-review` | review + code-audit-reviewer | beta-code-review | `review/*` (10: checklist, greptile, 7 specialists, TODOS-format) |
+| `gstack-ship` | ship | beta-ship | `ship/sections/*` (8) + TODOS-format |
+| `gstack-cso` | cso + appsec-hardening | beta-security | `cso/sections/audit-phases.md` |
+| `gstack-document` | document-generate + document-release | entrambe | template sezioni + `release-body.md` |
+| `impeccable` | port locale + kedra design-review | impeccable | fold checklist design-review dentro |
 
-## Drop per sussunzione (11)
+## Catalogo finale — 28 skill
 
-| Skill | Assorbita da | Cosa migrare |
-|---|---|---|
-| gstack-investigate | beta-debugging | hook memory inline (se confermati) |
-| systematic-debugging | beta-debugging | 8 file → `references/` |
-| gstack-qa | beta-qa | `qa/references/*`, `qa/templates/*` |
-| gstack-qa-only | beta-qa | — (report-only = mode) |
-| qa-git | beta-qa + beta-ship | — |
-| gstack-review | beta-code-review | `review/*` (10 file: checklist, greptile, 7 specialists, TODOS-format) |
-| code-audit-reviewer | beta-code-review | — |
-| gstack-cso | beta-security | `cso/sections/audit-phases.md` |
-| appsec-hardening | beta-security | — |
-| gstack-ship | beta-ship | `ship/sections/*` (8) + TODOS-format |
-| gstack | — | router obsoleto (routing = orchestratore) |
+### Workflow core (7)
+`gstack-investigate` · `gstack-qa` · `gstack-review` · `gstack-ship` ·
+`gstack-cso` · `grilling` · `gstack-fix-strategy` (vendored, DoD gate già ok)
 
-## Keep-rewrite upstream (15) — strip boilerplate condiviso (~800 righe), metodologia + memory call + `## DoD gate`
+### Plan (5)
+`gstack-office-hours` · `gstack-plan-eng-review` · `gstack-plan-design-review` ·
+`gstack-spec` · `plan-draft` (NEW, estratta da office-hours per develop.plan.s2)
 
-| Skill | Consumer | Note specifiche |
-|---|---|---|
-| gstack-office-hours | manuale (+ sorgente plan-draft, D22) | YC diagnostic + premise challenge; asset `office-hours/sections/design-and-handoff.md` |
-| gstack-plan-eng-review | develop.plan.s3 (registry) | exit-plan-mode gate → adattare (no plan mode su pi) |
-| gstack-plan-ceo-review | manuale / autoplan | ceo-plans su `~/.gstack/projects/` |
-| gstack-plan-design-review | manuale / autoplan | dip "design binary" upstream → neutralizzare |
-| gstack-plan-devex-review | manuale / autoplan | asset `dx-hall-of-fame.md` |
-| gstack-autoplan | manuale | meta-pipeline; Codex dual-voice → degrade; **redesign nativo in S4** |
-| gstack-spec | manuale | redaction gate → `gstack-redact` assorbito |
-| gstack-design-review | manuale | visual QA via browse; overlap c/ impeccable → open Q |
-| gstack-document-generate | develop.document, ship.update-docs | Diataxis |
-| gstack-document-release | develop.document, ship.update-docs | asset `release-body.md` |
-| gstack-context-save | manuale | memory UX; redesign S5b |
-| gstack-context-restore | manuale | idem |
-| gstack-learn | manuale | UI store learnings |
-| gstack-scrape | manuale | usa tool browse `gstack_*` |
-| gstack-skillify | manuale | asset `browser-skill-write.ts`, `~/.gstack/browser-skills/` |
+### Sprint/DDD (8)
+`product-capability` · `system-design` · `adr` · `tasks` ·
+`test-driven-development` · `verification-before-completion` ·
+`docker-manager` · `pipeline-sre`
 
-## Drop candidati / deboli
+### Docs (1)
+`gstack-document`
 
-| Skill | Proposta | Motivo |
-|---|---|---|
-| gstack-retro | **DR** | non wired in nessun workflow; dipende da `gstack-global-discover` mancante; D9 la marca già "non usata" |
-| code-tour | K-manuale (o DR) | formato `.tour` VSCode-specifico; basso valore workflow — a te la scelta |
+### Browser (1)
+`gstack-scrape`
 
-## Keep kedra/vendored/utilities (18) — solo `## DoD gate` + eventuali reference colocati
+### Utility (2)
+`agent-introspection-debugging` · `code-simplification`
 
-`product-capability`, `system-design`, `adr`, `tasks`,
-`test-driven-development` (+anti-patterns ref), `verification-before-completion`,
-`docker-manager`, `pipeline-sre`, `strategic-compact`,
-`agent-introspection-debugging`, `code-simplification`, `add-model`
-(+schema ref + upsert.mjs), `manim-video` (+asset py).
+### Port locali (4)
+`impeccable` · `design-taste-frontend` · `mindrun` · `retro`
 
-## Porting locali T6 (4) + nuova (1)
+## Drop definitivi (19)
 
-| Skill | Azione | Note |
-|---|---|---|
-| impeccable | PORT | 35 ref + 40 script; riscrivere path `.pi/skills/impeccable/` → dir catalogo |
-| design-taste-frontend | PORT | overlap parziale c/ impeccable → open Q (tenere entrambe?) |
-| mindrun | PORT | candidato step pre-implement S4 |
-| retro (locale) | PORT | session retro ≠ gstack-retro |
-| **plan-draft** | **NEW** | estratta da office-hours (D22) per develop.plan.s2 |
+| Skill | Motivo |
+|---|---|
+| systematic-debugging, qa-only, qa-git, code-audit-reviewer, appsec-hardening, document-release, design-review (kedra) | fuse nelle canoniche |
+| gstack-plan-ceo-review, gstack-plan-devex-review | drop utente — lenti review non usate |
+| gstack-autoplan | drop utente — meta-pipeline muore, S4 ridisegna come step |
+| strategic-compact | ridondante col machinery `## HANDOFF` orchestratore |
+| gstack-retro | non wired, dipende da `gstack-global-discover` mancante |
+| code-tour | formato `.tour` VSCode, marginale |
+| add-model, manim-video | fuori scope workflow |
+| gstack-skillify | salvata nello stack generico, fuori dall'estensione |
+| gstack (router) | routing = orchestratore |
+| gstack-context-save, gstack-context-restore, gstack-learn | memory skills — rinviate a sprint memoria persistente |
 
-## Totale catalogo proposto
+## Prossimo passo
 
-5 beta + 2 vendored + 15 keep-rewrite + 13 kedra-keep + 4 port + 1 new ≈ **40 dir**
-(conta precisa dipende da code-tour/retro/design-taste).
-
-## Decisioni aperte (serve tua scelta prima di T5)
-
-1. **Preamble policy**: strip integrale del boilerplate upstream (plan-mode,
-   AUQ format, artifacts-sync gbrain, voice/writing-style, telemetry UX flag)
-   mantenendo solo metodologia + chiamate memory/decision funzionali?
-   *(propongo: sì — ~800 righe morte per skill)*
-2. **Memory calls**: le 15 keep-rewrite conservano `decision-*`/`learnings-*`
-   inline (implica assorbire gli script in runtime)? *(propongo: sì, D5)*
-3. **gbrain machinery**: `gstack-brain-cache` (965 ln, opt-in esterno) e
-   `gstack-brain-sync` nei corpi: strip o assorbire? *(propongo: strip —
-   gbrain resta integrazione futura, non bloccante)*
-4. **Telemetry**: assorbire `gstack-telemetry-log` (D4) mantenendo solo i
-   marker `skill_run` start/end e droppando la UX-instrumentation
-   (eureka, *-prompted, vendoring-warned)? *(propongo: sì)*
-5. **Runtime dir**: assorbire in `runtime/bin/` (convenzione esistente) o
-   creare `runtime/scripts/` come scritto nel piano? *(propongo: `runtime/bin/`)*
-6. **code-tour** e **gstack-retro**: conferma drop/keep come da tabella.
-7. **impeccable vs design-taste-frontend vs gstack-design-review**: tenere
-   tutte e tre (scope diversi) o fondere?
+T5 in attesa della ricerca merge best-practice → poi costruzione catalogo
+`skills/<id>/` con strip + merge + DoD gate + provenance + path rewrite.
