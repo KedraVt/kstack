@@ -88,5 +88,5 @@ Applied on 2026-02-11:
 - **C7** — audit miscounted: catalog is 28 dirs; docs correct.
 - **C8** — convention documented in AGENTS.md (markers = session-level skills only).
 - Mechanical: `docker-manager` `version:` deleted; `tdd` @-link→pointer, AAA spelled out, coverage un-arbitrary'd, runner note added; `gstack-investigate` 95%→most + `Discoveries:` field restored in DEBUG REPORT; `gstack-review` specialists flattened to one level + TODOS-format copied to `gstack-ship/references/`; `AUQ`/`{previous}`/`<base>` shorthands explained; `system-design` got its H1.
-- **Deferred (protected verbatim)**: C3 impeccable↔design-taste boundary, impeccable version/allowed-tools, retro missing DoD+H1+dep, mindrun dead pointers — all require touching the 4 verbatim skills; flagged for user decision.
+- **Protected-skill polish** (user clarified: no merge/no functionality change, refinement welcome) — `design-taste-frontend` got Use-when + NOT vs impeccable + real H1; `impeccable` got a thinned description + NOT vs design-taste + `version`→`metadata` + `allowed-tools` space-separated; `mindrun` repointed to `gstack-investigate`; `retro` got H1 + DoD gate + `writing-for-agents` marked as user-stack dep. All four keep identity and functionality — no merges.
 - Verified: pre-flight 0 failures, suite 309/309 green.
