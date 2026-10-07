@@ -378,7 +378,7 @@ describe("skill ingestion", () => {
 });
 
 describe("skill tiering in orchestrator instructions", () => {
-  test("MAIN phases embed full methodology (sprint-beta unified source by default)", () => {
+  test("MAIN phases embed full methodology (canonical catalog source)", () => {
     const plan = findPhase("develop", "plan");
     assert.equal(plan.execution, "main");
     const instructions = buildPhaseInstructions(plan, makeCtx("develop", 2));

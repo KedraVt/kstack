@@ -6,7 +6,8 @@
 - **Skill strategy (decided)**: Devin activates one skill at a time. If multiple
   skills are needed simultaneously, merge them into one; when sequential is
   enough, switch between skills instead.
-- **`source/` is FROZEN read-only** (S1 precondition). The upstream sync
-  pipeline (`update.sh`, `scripts/{sync,adapt}-skills.ts`, `gen-tools.ts`) was
-  deleted; generated outputs stay committed as-is. Do not edit inside the
-  submodule — it is deleted at the end of S1.
+- **Canonical catalog (post-S1)**: `skills/<id>/` is the flat skill catalog —
+  every skill has `SKILL.md` + colocated `references/` + a literal
+  `## DoD gate` section + `<!-- provenance -->` comment. The old layers
+  (`skills/{gstack,kedra,sprint-beta}`, `skills-distilled`, `source/`) are
+  deleted; `main` stays the stable baseline, work happens on `kstack`.

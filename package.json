@@ -13,7 +13,6 @@
     "lib/",
     "orchestrator/",
     "skills/",
-    "skills-distilled/",
     "agents/"
   ],
   "pi": {
