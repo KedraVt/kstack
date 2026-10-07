@@ -11,7 +11,7 @@ description: >-
   review (use gstack-review) or runtime testing (use gstack-qa).
 metadata:
   version: "1.0.0"
-compatibility: Optional input: system-design_XX.md for attack surface; runtime/bin helpers degrade gracefully.
+compatibility: "Optional input: system-design_XX.md for attack surface; runtime/bin helpers degrade gracefully."
 ---
 
 <!-- provenance: sprint-beta/beta-security (merged base — three-tier, STRIDE, verdict contract) + gstack/gstack-cso (CSO posture audit — modes, phases, trend tracking, IR playbook) + kedra/appsec-hardening (framework, artifact protocol) · merged S1 2026-02-11 -->

@@ -1,4 +1,4 @@
-# Catalog Flaw Audit — `skills/` (27 skills)
+# Catalog Flaw Audit — `skills/` (28 skills; audit initially miscounted 27 — see C7 resolution)
 
 Audit of the canonical flat catalog against `.devin/skills/authoring-skills/references/rulebook.md`.
 Severity: **CRITICAL** (spec-invalid / broken behavior) · **HIGH** (routing failure risk / systemic defect) · **MEDIUM** (real defect, bounded blast radius) · **LOW** (nit / convention drift) · **OK** (no significant flaws).
@@ -16,7 +16,7 @@ Mechanical findings are verified against the files. Behavioral findings (trigger
 | C4 | MEDIUM | **Undeclared doc-ecosystem contract.** `adr`, `system-design`, `tasks`, `product-capability`, `pipeline-sre` require the `*_XX.md` artifact chain (user-story → system-design → ADR-log → tasks) and a kedra role roster (planner, frontend-developer, devops-devsecops) that doesn't exist as skills here. Alone, the skills fire but have nothing to read. No `compatibility` field or requirements note declares this. | `adr` L3/12; `system-design` L3/25; `tasks` L3/24; `pipeline-sre` L10/36; `product-capability` L127 | Add `compatibility:` field or an Inputs/Requires note per skill |
 | C5 | MEDIUM | **Dead cross-scope pointers.** `gstack-scrape`→`gstack-skillify`, `retro`→`writing-for-agents`, `gstack-investigate`→`gstack-skillify` resolve only via user-scope (`~/.agents`), not this catalog — dead if the catalog is shipped alone. `mindrun` names `diagnosing-bugs`/`systematic-debugging` — dead entirely (the skill here is `gstack-investigate`). | `gstack-scrape` L100; `retro` L11; `mindrun` L24; `gstack-investigate` L181 | Repoint to in-catalog names or mark external deps in a Requires note |
 | C6 | LOW | **Undeclared runtime/binary deps.** gstack skills shell out to `runtime/bin/gstack-*`, `runtime/browse|design/dist/*`, `$GSTACK_STATE_ROOT`, `~/.gstack` — all extension-internal, all undocumented in frontmatter (`compatibility` exists for this). | telemetry/setup blocks throughout gstack-* | One `compatibility:` line or a catalog README note |
-| C7 | LOW | **Count drift.** Commit/docs say "28 skills"; catalog contains 27. `gstack-skillify` is the likely missing one (referenced twice). | dir listing | Reconcile bookkeeping or re-add the skill |
+| C7 | LOW | ~~Count drift~~ **AUDIT ERROR** — catalog always had 28; my count of 27 was wrong. The real issue stands separately: `gstack-skillify` is referenced twice but lives in the user stack (see C5). | dir listing | Resolved — docs correct |
 | C8 | LOW | **Observability inconsistency.** `gstack-*` + `plan-draft` emit `skill_run` telemetry markers; kedra ports and vendored skills emit nothing. No policy either way. | presence/absence of `gstack-telemetry-log` | Decide convention; document it |
 
 ---

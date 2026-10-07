@@ -12,7 +12,7 @@ description: >-
   modeling (use gstack-cso), or root-cause debugging (use gstack-investigate).
 metadata:
   version: "1.0.0"
-compatibility: Optional helpers: runtime/bin/gstack-review-read (cross-review dedup) and repo script `bun run slop:diff`; both degrade gracefully when absent.
+compatibility: "Optional helpers: runtime/bin/gstack-review-read (cross-review dedup) and repo script `bun run slop:diff`; both degrade gracefully when absent."
 ---
 
 <!-- provenance: sprint-beta/beta-code-review (merged base — dimensions, calibration, verdict contract) + gstack/gstack-review (fix-first mode, review army, greptile, dedup) + kedra/code-audit-reviewer (severity, status block) · merged S1 2026-02-11 -->

@@ -138,8 +138,8 @@ agent judgment; slot pick via `gstack-next-version` (both in `runtime/bin/`).
 
 - CHANGELOG entry → `references/changelog.md` (targeted edit — never
   regenerate existing content).
-- TODOS.md reconciliation (format: `references/TODOS-format.md` in
-  `gstack-review`'s bundle — or recreate the P0–P4 + Completed structure):
+- TODOS.md reconciliation (format: `references/TODOS-format.md` — or
+  recreate the P0–P4 + Completed structure):
   missing → ask once to create; disorganized → ask once to reorganize
   (preserve all content); else auto-detect completed items (conservative —
   only with clear diff evidence), move to `## Completed` with
@@ -210,6 +210,7 @@ bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry
 | `references/greptile.md` | read | PR has Greptile comments (Step 6) |
 | `references/adversarial.md` | read | adversarial second-opinion pass (Step 6) |
 | `references/changelog.md` | read | writing the CHANGELOG entry (Step 8) |
+| `references/TODOS-format.md` | read | TODOS.md reconciliation (Step 8) |
 | `references/pr-body.md` | read | composing/updating the PR (Step 10) |
 
 ## Hard rules
