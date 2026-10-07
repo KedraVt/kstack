@@ -86,3 +86,34 @@ Rubrica: (a) utile (b) non sovrapposta (c) efficace/non datata
 
 T5 in attesa della ricerca merge best-practice → poi costruzione catalogo
 `skills/<id>/` con strip + merge + DoD gate + provenance + path rewrite.
+
+---
+
+## Stato implementazione — COMPLETATO (2026-02-11, branch kstack)
+
+- **T5 catalogo**: 28 skill canoniche in `skills/<id>/` — 6 merge best-of
+  (investigate, qa, review, ship, cso, document), 5 keep-rewrite upstream
+  (office-hours, plan-eng-review, plan-design-review, spec, scrape),
+  `plan-draft` nuova (D22), 2 vendored port, 10 kedra port, 4 locali verbatim.
+- **T6 locali**: impeccable, design-taste-frontend, mindrun, retro copiate
+  verbatim (diff-verified). `impeccable` referenzia ancora path globali —
+  intenzionale (mandato verbatim).
+- **T7 runtime**: `gstack-telemetry-log`, `gstack-redact(+prepush)`,
+  `runtime/lib/redact-{engine,patterns}.ts` assorbiti; `design.exe` copiato in
+  `runtime/design/dist/` (untracked, provisioned — skill degrada su
+  DESIGN_NOT_AVAILABLE).
+- **T8 orchestrator**: `skills.ts` single-source — `skillPath` →
+  `skills/<dir>/SKILL.md`, `loadSkillGate()` parsa `## DoD gate` (D13), campi
+  `dod`/`betaPath`/`distilledPath` rimossi; sprint id → dir canonica via `dir:`.
+- **T9 cancellazioni**: `skills/{gstack,kedra,sprint-beta}`, `skills-distilled`,
+  `source/` submodule + `.gitmodules` rimossi. `package.json` e `AGENTS.md`
+  aggiornati.
+- **T10 test**: `beta-injection.test.ts` riscritto sul contratto canonico;
+  `orchestrator.test.ts` ripuntato; suite **309/309 verde**.
+- **Memory inline**: risolto — tutte le chiamate `learnings-*`/`decision-*`
+  strippate dai corpi canonici (coerente col rinvio S5b). Script
+  `gstack-learnings-search` resta in `runtime/bin` (inerte finché non torna la
+  memoria).
+- **Commit**: `52a14a6` freeze → `3729e6e` review → `bbf115f` pilot →
+  `9700d85` catalogo → `55d7a79` runtime+orchestrator → `f22bd95` cleanup.
+  `main` intoccato a `a9af432`.
