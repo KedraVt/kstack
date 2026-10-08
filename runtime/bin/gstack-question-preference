@@ -23,13 +23,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-# GSTACK_STATE_ROOT takes precedence over GSTACK_HOME (test isolation per D16).
-GSTACK_HOME="${GSTACK_STATE_ROOT:-${GSTACK_HOME:-$HOME/.gstack}}"
+# KSTACK_STATE_ROOT takes precedence over KSTACK_HOME (test isolation per D16).
+KSTACK_HOME="${KSTACK_STATE_ROOT:-${KSTACK_HOME:-$HOME/.gstack}}"
 eval "$("$SCRIPT_DIR/gstack-slug" 2>/dev/null || true)"
 SLUG="${SLUG:-unknown}"
-PREF_FILE="$GSTACK_HOME/projects/$SLUG/question-preferences.json"
-EVENT_FILE="$GSTACK_HOME/projects/$SLUG/question-events.jsonl"
-mkdir -p "$GSTACK_HOME/projects/$SLUG"
+PREF_FILE="$KSTACK_HOME/projects/$SLUG/question-preferences.json"
+EVENT_FILE="$KSTACK_HOME/projects/$SLUG/question-events.jsonl"
+mkdir -p "$KSTACK_HOME/projects/$SLUG"
 
 CMD="${1:-}"
 shift || true

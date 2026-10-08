@@ -15,19 +15,19 @@
 # invocations queue and serialize.
 #
 # Env:
-#   GSTACK_HOME — override ~/.gstack (aligns with writers).
+#   KSTACK_HOME — override ~/.gstack (aligns with writers).
 
 set -uo pipefail
 
-GSTACK_HOME="${GSTACK_HOME:-$HOME/.gstack}"
-QUEUE="$GSTACK_HOME/.brain-queue.jsonl"
-ALLOWLIST="$GSTACK_HOME/.brain-allowlist"
-PRIVACY_MAP="$GSTACK_HOME/.brain-privacy-map.json"
-SKIP_FILE="$GSTACK_HOME/.brain-skip.txt"
-STATUS_FILE="$GSTACK_HOME/.brain-sync-status.json"
-LAST_PUSH_FILE="$GSTACK_HOME/.brain-last-push"
-LOCK_FILE="$GSTACK_HOME/.brain-sync.lock"
-DISCOVER_CURSOR="$GSTACK_HOME/.brain-discover-cursor"
+KSTACK_HOME="${KSTACK_HOME:-$HOME/.gstack}"
+QUEUE="$KSTACK_HOME/.brain-queue.jsonl"
+ALLOWLIST="$KSTACK_HOME/.brain-allowlist"
+PRIVACY_MAP="$KSTACK_HOME/.brain-privacy-map.json"
+SKIP_FILE="$KSTACK_HOME/.brain-skip.txt"
+STATUS_FILE="$KSTACK_HOME/.brain-sync-status.json"
+LAST_PUSH_FILE="$KSTACK_HOME/.brain-last-push"
+LOCK_FILE="$KSTACK_HOME/.brain-sync.lock"
+DISCOVER_CURSOR="$KSTACK_HOME/.brain-discover-cursor"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_BIN="$SCRIPT_DIR/gstack-config"
@@ -35,7 +35,7 @@ CONFIG_BIN="$SCRIPT_DIR/gstack-config"
 # Remote-specific hint for auth errors (branch on origin URL).
 remote_auth_hint() {
   local url
-  url=$(git -C "$GSTACK_HOME" remote get-url origin 2>/dev/null || echo "")
+  url=$(git -C "$KSTACK_HOME" remote get-url origin 2>/dev/null || echo "")
   case "$url" in
     *github.com*|*@github.*) echo "run: gh auth status (and gh auth refresh if needed)" ;;
     *gitlab*) echo "run: glab auth status" ;;
@@ -66,7 +66,7 @@ PYEOF
 
 # Read config; return 0 if sync active, 1 otherwise.
 sync_active() {
-  if [ ! -d "$GSTACK_HOME/.git" ]; then
+  if [ ! -d "$KSTACK_HOME/.git" ]; then
     return 1
   fi
   local mode
@@ -113,7 +113,7 @@ sys.exit(0)
 # Output: newline-delimited relative paths that should be staged.
 compute_paths_to_stage() {
   local mode="$1"
-  python3 - "$GSTACK_HOME" "$QUEUE" "$ALLOWLIST" "$PRIVACY_MAP" "$SKIP_FILE" "$mode" <<'PYEOF'
+  python3 - "$KSTACK_HOME" "$QUEUE" "$ALLOWLIST" "$PRIVACY_MAP" "$SKIP_FILE" "$mode" <<'PYEOF'
 import sys, json, os, fnmatch, glob
 
 kstack_home, queue, allowlist_path, privacy_path, skip_path, mode = sys.argv[1:7]
@@ -187,7 +187,7 @@ final = []
 for p in sorted(queue_paths):
     if p in skip_lines:
         continue
-    # Must be under GSTACK_HOME root. Reject absolute + reject ../ escape.
+    # Must be under KSTACK_HOME root. Reject absolute + reject ../ escape.
     if p.startswith("/") or ".." in p.split("/"):
         continue
     # Must match at least one allowlist glob.
@@ -260,15 +260,15 @@ subcmd_once() {
     p="${p%$'\r'}"   # Windows: compute_paths_to_stage's python print() emits CRLF;
                      # a trailing CR makes the pathspec match nothing (silent no-stage).
     [ -z "$p" ] && continue
-    git -C "$GSTACK_HOME" add -f -- "$p" 2>/dev/null || true
+    git -C "$KSTACK_HOME" add -f -- "$p" 2>/dev/null || true
   done < "$paths_file"
 
   # Secret-scan staged diff.
   local scan_out
-  scan_out=$(git -C "$GSTACK_HOME" diff --cached 2>/dev/null | secret_scan_stdin || true)
+  scan_out=$(git -C "$KSTACK_HOME" diff --cached 2>/dev/null | secret_scan_stdin || true)
   if [ -n "$scan_out" ]; then
     # Hit — unstage, preserve queue, write loud status.
-    git -C "$GSTACK_HOME" reset HEAD -- . >/dev/null 2>&1 || true
+    git -C "$KSTACK_HOME" reset HEAD -- . >/dev/null 2>&1 || true
     local hint
     hint="secret pattern detected ($scan_out). Remediation: review the staged file, then run: gstack-brain-sync --skip-file <path> OR edit the content."
     write_status "blocked" "$hint"
@@ -281,7 +281,7 @@ subcmd_once() {
   n=$(wc -l < "$paths_file" | tr -d ' ')
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   local msg="sync: $n file(s) | $ts"
-  git -C "$GSTACK_HOME" -c user.email="gstack@localhost" -c user.name="gstack-brain-sync" \
+  git -C "$KSTACK_HOME" -c user.email="gstack@localhost" -c user.name="gstack-brain-sync" \
     commit -q -m "$msg" 2>/dev/null || {
       # Nothing to commit (e.g. all files already committed).
       : > "$QUEUE"
@@ -291,7 +291,7 @@ subcmd_once() {
 
   # Push. On reject, fetch + merge (merge driver handles JSONL) + retry once.
   local push_err
-  push_err=$(git -C "$GSTACK_HOME" push origin HEAD 2>&1 >/dev/null) || {
+  push_err=$(git -C "$KSTACK_HOME" push origin HEAD 2>&1 >/dev/null) || {
     # Check if this is an auth error first — no point retrying.
     if echo "$push_err" | grep -qiE "auth|permission|403|401|forbidden"; then
       local hint
@@ -304,11 +304,11 @@ subcmd_once() {
     fi
 
     # Try a fetch-and-merge + retry.
-    if git -C "$GSTACK_HOME" fetch origin 2>/dev/null; then
+    if git -C "$KSTACK_HOME" fetch origin 2>/dev/null; then
       local branch
-      branch=$(git -C "$GSTACK_HOME" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
-      if git -C "$GSTACK_HOME" merge --no-edit "origin/$branch" >/dev/null 2>&1; then
-        if git -C "$GSTACK_HOME" push origin HEAD 2>/dev/null; then
+      branch=$(git -C "$KSTACK_HOME" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
+      if git -C "$KSTACK_HOME" merge --no-edit "origin/$branch" >/dev/null 2>&1; then
+        if git -C "$KSTACK_HOME" push origin HEAD 2>/dev/null; then
           : > "$QUEUE"
           date -u +%Y-%m-%dT%H:%M:%SZ > "$LAST_PUSH_FILE"
           write_status "ok" "pushed $n file(s) after rebase"
@@ -350,7 +350,7 @@ subcmd_skip_file() {
     echo "Usage: gstack-brain-sync --skip-file <path>" >&2
     exit 1
   fi
-  mkdir -p "$GSTACK_HOME"
+  mkdir -p "$KSTACK_HOME"
   # Avoid duplicate entries.
   if [ -f "$SKIP_FILE" ] && grep -Fxq "$path" "$SKIP_FILE"; then
     echo "already in skip list: $path"
@@ -382,7 +382,7 @@ subcmd_discover_new() {
     exit 0
   fi
   # Walk allowlist globs; enqueue any file where mtime+size differs from cursor.
-  python3 - "$GSTACK_HOME" "$ALLOWLIST" "$DISCOVER_CURSOR" <<'PYEOF' 2>/dev/null || true
+  python3 - "$KSTACK_HOME" "$ALLOWLIST" "$DISCOVER_CURSOR" <<'PYEOF' 2>/dev/null || true
 import sys, os, json, fnmatch
 from datetime import datetime, timezone
 

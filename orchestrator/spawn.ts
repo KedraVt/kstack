@@ -34,12 +34,12 @@ function capOutput(raw: string): string {
 }
 
 /**
- * Best-effort breadcrumb logging to the file in GSTACK_PI_DEBUG. Delegation
+ * Best-effort breadcrumb logging to the file in KSTACK_PI_DEBUG. Delegation
  * bugs historically left zero post-mortem trace; this gives every spawn
  * attempt a persistent trail without depending on the TUI.
  */
 export function debugLog(message: string): void {
-  const p = process.env.GSTACK_PI_DEBUG;
+  const p = process.env.KSTACK_PI_DEBUG;
   if (!p) return;
   try {
     fs.appendFileSync(p, `${new Date().toISOString()} [spawn] ${message}\n`);
@@ -83,10 +83,10 @@ export function resolveTimeoutMs(req: Pick<SpawnRequest, "timeoutMs" | "phaseId"
 
 /**
  * Per-subagent timeout. Default 20 min; override with
- * GSTACK_PI_SUBAGENT_TIMEOUT (seconds, e.g. "300" for 5 min).
+ * KSTACK_PI_SUBAGENT_TIMEOUT (seconds, e.g. "300" for 5 min).
  */
 export function defaultTimeoutMs(): number {
-  const raw = process.env.GSTACK_PI_SUBAGENT_TIMEOUT;
+  const raw = process.env.KSTACK_PI_SUBAGENT_TIMEOUT;
   if (raw) {
     const secs = Number(raw);
     if (Number.isFinite(secs) && secs > 0) return secs * 1000;
@@ -111,7 +111,7 @@ export interface SpawnRequest {
   phaseId?: string;
   /**
    * Model-tier override (plan E4/D10). Wins over the agent definition's own
-   * model when set. Inert unless GSTACK_PI_MODEL_FAST/GSTACK_PI_MODEL_STRONG
+   * model when set. Inert unless KSTACK_PI_MODEL_FAST/KSTACK_PI_MODEL_STRONG
    * are configured (config.modelTierFor) — the default keeps agent defaults.
    */
   modelOverride?: string;
@@ -129,7 +129,7 @@ export interface SpawnRequest {
   onActivity?: (label: string) => void;
   /**
    * STEP 5b: observe-only liveness sink. Called AT MOST ONCE per run when the
-   * JSON event stream has been silent longer than GSTACK_PI_LIVENESS_SEC.
+   * JSON event stream has been silent longer than KSTACK_PI_LIVENESS_SEC.
    * The process is NEVER terminated because of this.
    */
   onLiveness?: (observation: {
@@ -639,7 +639,7 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
         rawOutput,
         incomplete: true,
         timedOut: true,
-        error: `Subagent "${req.agent}" timed out after ${Math.round(timeoutMs / 1000)}s (limit configurable via GSTACK_PI_SUBAGENT_TIMEOUT, in seconds).`,
+        error: `Subagent "${req.agent}" timed out after ${Math.round(timeoutMs / 1000)}s (limit configurable via KSTACK_PI_SUBAGENT_TIMEOUT, in seconds).`,
         exitCode,
         durationMs: Date.now() - started,
       };

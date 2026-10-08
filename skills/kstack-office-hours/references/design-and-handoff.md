@@ -404,7 +404,7 @@ with a narrative arc (not a data table). The arc tells the STORY of their journe
 second person, referencing specific things they said across sessions. Then open it:
 ```bash
 eval "$(~/.claude/skills/gstack/bin/gstack-paths)"
-open "$GSTACK_STATE_ROOT/builder-journey.md"
+open "$KSTACK_STATE_ROOT/builder-journey.md"
 ```
 
 Then proceed to Founder Resources below.

@@ -849,7 +849,7 @@ function findPhaseSafe(phaseId: string) {
 // --- Model tiers (E4/D10, inert by default) -------------------------------------------------
 
 describe("model tiers (E4/D10, inert by default)", () => {
-  const KEYS = ["GSTACK_PI_MODEL_STRONG", "GSTACK_PI_MODEL_FAST"];
+  const KEYS = ["KSTACK_PI_MODEL_STRONG", "KSTACK_PI_MODEL_FAST"];
   let saved: Record<string, string | undefined>;
 
   function setup() {
@@ -879,15 +879,15 @@ describe("model tiers (E4/D10, inert by default)", () => {
   test("STRONG routes judgment phases; FAST everything else; unset side keeps agent default", () => {
     setup();
     try {
-      process.env.GSTACK_PI_MODEL_STRONG = "strong/model";
+      process.env.KSTACK_PI_MODEL_STRONG = "strong/model";
       assert.equal(modelTierFor("implement"), "strong/model");
       assert.equal(modelTierFor("qa-verdict"), "strong/model");
       assert.equal(modelTierFor("explore"), undefined, "FAST unset ⇒ keep agent default");
 
-      process.env.GSTACK_PI_MODEL_FAST = "fast/model";
+      process.env.KSTACK_PI_MODEL_FAST = "fast/model";
       assert.equal(modelTierFor("explore"), "fast/model");
 
-      process.env.GSTACK_PI_MODEL_STRONG = "";
+      process.env.KSTACK_PI_MODEL_STRONG = "";
       assert.equal(modelTierFor("implement"), undefined, "empty env falls back to agent default");
     } finally {
       restore();
@@ -919,9 +919,9 @@ describe("code-review pass-1 fixes", () => {
   });
 
   test("B2: retryTimeoutMs scales the per-phase class timeout, not the global default", () => {
-    const saved = process.env.GSTACK_PI_SUBAGENT_TIMEOUT;
+    const saved = process.env.KSTACK_PI_SUBAGENT_TIMEOUT;
     try {
-      process.env.GSTACK_PI_SUBAGENT_TIMEOUT = "300";
+      process.env.KSTACK_PI_SUBAGENT_TIMEOUT = "300";
       // "verify" class = 900s per TIMEOUT_CLASS_MAP — the retry must scale
       // 900s, not the 300s global default (which would LOWER the limit).
       assert.equal(retryTimeoutMs({ phaseId: "verify" }, 1.5), 900 * 1000 * 1.5);
@@ -930,11 +930,11 @@ describe("code-review pass-1 fixes", () => {
       // No phaseId, no override → global default (here 300s via the env set
       // above; unset it would be the 20-min DEFAULT_TIMEOUT_MS) scaled.
       assert.equal(retryTimeoutMs({}, 1.5), 300 * 1000 * 1.5);
-      delete process.env.GSTACK_PI_SUBAGENT_TIMEOUT;
+      delete process.env.KSTACK_PI_SUBAGENT_TIMEOUT;
       assert.equal(retryTimeoutMs({}, 1.5), 20 * 60 * 1000 * 1.5, "unset env → built-in 20-min default, scaled");
     } finally {
-      if (saved === undefined) delete process.env.GSTACK_PI_SUBAGENT_TIMEOUT;
-      else process.env.GSTACK_PI_SUBAGENT_TIMEOUT = saved;
+      if (saved === undefined) delete process.env.KSTACK_PI_SUBAGENT_TIMEOUT;
+      else process.env.KSTACK_PI_SUBAGENT_TIMEOUT = saved;
     }
   });
 
@@ -994,10 +994,10 @@ describe("code-review pass-1 fixes", () => {
     }
   });
 
-  test("B6: GSTACK_PI_VERDICTS=off parks verdict-bearing phases instead of silently advancing", () => {
-    const saved = process.env.GSTACK_PI_VERDICTS;
+  test("B6: KSTACK_PI_VERDICTS=off parks verdict-bearing phases instead of silently advancing", () => {
+    const saved = process.env.KSTACK_PI_VERDICTS;
     try {
-      process.env.GSTACK_PI_VERDICTS = "off";
+      process.env.KSTACK_PI_VERDICTS = "off";
       const state = sprintState(7); // devsecops-review (verdict-bearing)
       const next = advancePhase(state, "devsecops-review", { status: "completed", summary: "gate ran" }, SPRINT.phases.length, { phases: SPRINT.phases });
       assert.equal(next.status, "paused");
@@ -1005,8 +1005,8 @@ describe("code-review pass-1 fixes", () => {
       assert.equal(next.results["devsecops-review"]?.status, "completed", "the gate did run — it is recorded, then parked");
       assert.equal(next.phaseIndex, 7, "phaseIndex must not advance past the gate");
     } finally {
-      if (saved === undefined) delete process.env.GSTACK_PI_VERDICTS;
-      else process.env.GSTACK_PI_VERDICTS = saved;
+      if (saved === undefined) delete process.env.KSTACK_PI_VERDICTS;
+      else process.env.KSTACK_PI_VERDICTS = saved;
     }
   });
 

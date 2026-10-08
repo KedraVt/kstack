@@ -942,20 +942,20 @@ describe("chain retry policy (STEP 2f)", () => {
 });
 
 describe("optional-phase modes (STEP 2g)", () => {
-  test("GSTACK_PI_OPTIONAL_PHASES resolves ask/auto/skip with ask default", () => {
-    const original = process.env.GSTACK_PI_OPTIONAL_PHASES;
+  test("KSTACK_PI_OPTIONAL_PHASES resolves ask/auto/skip with ask default", () => {
+    const original = process.env.KSTACK_PI_OPTIONAL_PHASES;
     try {
-      delete process.env.GSTACK_PI_OPTIONAL_PHASES;
+      delete process.env.KSTACK_PI_OPTIONAL_PHASES;
       assert.equal(optionalPhases(), "ask");
-      process.env.GSTACK_PI_OPTIONAL_PHASES = "auto";
+      process.env.KSTACK_PI_OPTIONAL_PHASES = "auto";
       assert.equal(optionalPhases(), "auto");
-      process.env.GSTACK_PI_OPTIONAL_PHASES = "skip";
+      process.env.KSTACK_PI_OPTIONAL_PHASES = "skip";
       assert.equal(optionalPhases(), "skip");
-      process.env.GSTACK_PI_OPTIONAL_PHASES = "garbage";
+      process.env.KSTACK_PI_OPTIONAL_PHASES = "garbage";
       assert.equal(optionalPhases(), "ask");
     } finally {
-      if (original === undefined) delete process.env.GSTACK_PI_OPTIONAL_PHASES;
-      else process.env.GSTACK_PI_OPTIONAL_PHASES = original;
+      if (original === undefined) delete process.env.KSTACK_PI_OPTIONAL_PHASES;
+      else process.env.KSTACK_PI_OPTIONAL_PHASES = original;
     }
   });
 });
@@ -1194,18 +1194,18 @@ describe("refutation + QA skip helpers (STEP 4d)", () => {
 });
 
 describe("auto-gate opt-in (STEP 4e)", () => {
-  test("GSTACK_PI_AUTO_GATE_VALIDATED defaults OFF and parses correctly", () => {
-    const original = process.env.GSTACK_PI_AUTO_GATE_VALIDATED;
+  test("KSTACK_PI_AUTO_GATE_VALIDATED defaults OFF and parses correctly", () => {
+    const original = process.env.KSTACK_PI_AUTO_GATE_VALIDATED;
     try {
-      delete process.env.GSTACK_PI_AUTO_GATE_VALIDATED;
+      delete process.env.KSTACK_PI_AUTO_GATE_VALIDATED;
       assert.equal(autoGateValidated(), false);
-      process.env.GSTACK_PI_AUTO_GATE_VALIDATED = "1";
+      process.env.KSTACK_PI_AUTO_GATE_VALIDATED = "1";
       assert.equal(autoGateValidated(), true);
-      process.env.GSTACK_PI_AUTO_GATE_VALIDATED = "off";
+      process.env.KSTACK_PI_AUTO_GATE_VALIDATED = "off";
       assert.equal(autoGateValidated(), false);
     } finally {
-      if (original === undefined) delete process.env.GSTACK_PI_AUTO_GATE_VALIDATED;
-      else process.env.GSTACK_PI_AUTO_GATE_VALIDATED = original;
+      if (original === undefined) delete process.env.KSTACK_PI_AUTO_GATE_VALIDATED;
+      else process.env.KSTACK_PI_AUTO_GATE_VALIDATED = original;
     }
   });
 });
@@ -1235,16 +1235,16 @@ describe("timeout classes (STEP 5a)", () => {
 
   test("per-class env overrides are honored (seconds -> ms)", () => {
     const saved: Record<string, string | undefined> = {};
-    const keys = ["GSTACK_PI_TIMEOUT_EXPLORE", "GSTACK_PI_TIMEOUT_WORK", "GSTACK_PI_TIMEOUT_VERIFY", "GSTACK_PI_SUBAGENT_TIMEOUT"];
+    const keys = ["KSTACK_PI_TIMEOUT_EXPLORE", "KSTACK_PI_TIMEOUT_WORK", "KSTACK_PI_TIMEOUT_VERIFY", "KSTACK_PI_SUBAGENT_TIMEOUT"];
     for (const k of keys) { saved[k] = process.env[k]; delete process.env[k]; }
     try {
       assert.equal(subagentTimeoutFor("explore"), 900 * 1000);
       assert.equal(subagentTimeoutFor("implement"), 1500 * 1000);
       assert.equal(subagentTimeoutFor("review"), 900 * 1000);
       assert.equal(subagentTimeoutFor("totally-unknown-phase"), 1200 * 1000);
-      process.env.GSTACK_PI_TIMEOUT_WORK = "60";
+      process.env.KSTACK_PI_TIMEOUT_WORK = "60";
       assert.equal(subagentTimeoutFor("implement"), 60 * 1000);
-      process.env.GSTACK_PI_TIMEOUT_WORK = "garbage";
+      process.env.KSTACK_PI_TIMEOUT_WORK = "garbage";
       assert.equal(subagentTimeoutFor("implement"), 1500 * 1000, "invalid value falls back to default");
     } finally {
       for (const k of keys) {
@@ -1257,7 +1257,7 @@ describe("timeout classes (STEP 5a)", () => {
 
 describe("numeric config parser (STEP 5a / COR-10)", () => {
   test("numberEnv handles default/override/off/invalid", () => {
-    const NAME = "GSTACK_PI_TEST_NUMBER";
+    const NAME = "KSTACK_PI_TEST_NUMBER";
     const original = process.env[NAME];
     try {
       delete process.env[NAME];
@@ -1280,7 +1280,7 @@ describe("numeric config parser (STEP 5a / COR-10)", () => {
   });
 
   test("liveness threshold default 240s and supports off", () => {
-    const NAME = "GSTACK_PI_LIVENESS_SEC";
+    const NAME = "KSTACK_PI_LIVENESS_SEC";
     const original = process.env[NAME];
     try {
       delete process.env[NAME];
@@ -1296,7 +1296,7 @@ describe("numeric config parser (STEP 5a / COR-10)", () => {
   });
 
   test("token budget default disabled", () => {
-    const NAME = "GSTACK_PI_MAX_RUN_TOKENS";
+    const NAME = "KSTACK_PI_MAX_RUN_TOKENS";
     const original = process.env[NAME];
     try {
       delete process.env[NAME];
@@ -1368,11 +1368,11 @@ describe("runSubagent real spawn path (crash regression)", () => {
 
   // Opt-in end-to-end: pi's CLI boots slower under `bun test` than the 30s
   // command budget allows reliably, so this runs only when explicitly
-  // requested via GSTACK_PI_E2E_SPAWN=1. The crash-class regressions
+  // requested via KSTACK_PI_E2E_SPAWN=1. The crash-class regressions
   // (missing import, nested-scope ReferenceError) are fully covered by the
   // typecheck gate + the pure unit tests in this suite; this test guards
   // the RUNTIME path additionally.
-  if (process.env.GSTACK_PI_E2E_SPAWN === "1") {
+  if (process.env.KSTACK_PI_E2E_SPAWN === "1") {
     test("spawns a real child, parses output, resolves without ReferenceErrors",
       { timeout: 300_000 },
       async () => {

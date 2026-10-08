@@ -28,8 +28,8 @@ One extension, two layers:
 - **Trust boundary note** — dual-channel verification trusts files in the repo root: a malicious repo can pre-plant both channels against a predictable next sprint number. Sprint stamping, anomaly guards, and the hard commit-archive gate raise the bar but do not close within-sprint planting — review gate artifacts before approving.
 - **Bounded loop-backs** — rejected reviews return work to the implementing phase with extracted blocker feedback; after N attempts (configurable) the sprint parks for human decision instead of looping forever. Accepting an exhausted gate ("Accept result — continue past the gate") resets the loop budget, so the next review gate gets a fresh ceiling instead of parking on its first rejection.
 - **Unreadable-verdict park** — if a gate's output can't be parsed into a known verdict, the sprint parks WITHOUT burning an attempt; the panel shows only the failing lines so you can approve/loop/inspect deliberately.
-- **Sprint requires deterministic delegation** — the sprint gates route exclusively on executor-produced verdicts, so the workflow refuses to start while `GSTACK_PI_DETERMINISTIC=off` (both `/gstack sprint` and the `kstack_start` tool explain this). Kill-switch parks (`GSTACK_PI_VERDICTS=off` / `_LOOPBACKS=off`) likewise land in a decision panel offering **Accept / Re-run / Abort**.
-- **Strict BE→FE chain** — implementation runs backend-developer then frontend-developer sequentially per task wave; model tiers (`GSTACK_PI_MODEL_STRONG/FAST`) let judgment phases run on stronger models while mechanical phases stay cheap.
+- **Sprint requires deterministic delegation** — the sprint gates route exclusively on executor-produced verdicts, so the workflow refuses to start while `KSTACK_PI_DETERMINISTIC=off` (both `/gstack sprint` and the `kstack_start` tool explain this). Kill-switch parks (`KSTACK_PI_VERDICTS=off` / `_LOOPBACKS=off`) likewise land in a decision panel offering **Accept / Re-run / Abort**.
+- **Strict BE→FE chain** — implementation runs backend-developer then frontend-developer sequentially per task wave; model tiers (`KSTACK_PI_MODEL_STRONG/FAST`) let judgment phases run on stronger models while mechanical phases stay cheap.
 - **Fixed**: phase instructions are now delivered with `followUp` streaming behavior — eliminates the "Agent is already processing" error that silently dropped phase handoffs.
 - **Raw skill library split** — the bundled skill surface is organized in two folders: `skills/gstack/` (23 cherry-picked gstack skills, manual `/skill:gstack-*` invocation) and `skills/kedra/` (18 full `.agents-clean` methodology skills, verbatim, manual `/skill:<name>` invocation — the whole source library except `acceptance-criteria-backend/-frontend`, which live inside the sub-agent bodies).
 - **Centralized artifact names** — `orchestrator/artifacts.ts` is the single source for every sprint-stamped filename (`qa-artifact_XX.md`, `code-review-artifact_XX.md`, `software-architect-artifact_XX_N.md`, …); verdict verification, task templates and the freeze path all consume it, closing the stamping-drift bug class.
@@ -173,16 +173,16 @@ They coexist with the orchestrator. Use them when you want the raw methodology w
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `GSTACK_BINARY` | Absolute path to the browse binary | Auto-resolved |
-| `GSTACK_ROOT` | Root of a gstack installation (alternative binary source) | Not set |
-| `GSTACK_REPO` | Path to gstack source (overrides submodule for scripts) | `<extension>/source/` |
+| `KSTACK_BINARY` | Absolute path to the browse binary | Auto-resolved |
+| `KSTACK_ROOT` | Root of a gstack installation (alternative binary source) | Not set |
+| `KSTACK_REPO` | Path to gstack source (overrides submodule for scripts) | `<extension>/source/` |
 
 ### Binary resolution order
 
 The extension searches for the browse binary in this order:
 
-1. `$GSTACK_BINARY` (explicit override)
-2. `$GSTACK_ROOT/browse/dist/browse` (standard gstack install)
+1. `$KSTACK_BINARY` (explicit override)
+2. `$KSTACK_ROOT/browse/dist/browse` (standard gstack install)
 3. `<extension>/runtime/browse/dist/browse` (built by update.sh / downloaded at session start)
 4. `../../gstack/browse/dist/browse` (dev sibling layout)
 
@@ -277,7 +277,7 @@ gstack-pi/
 │   ├── skip.ts              Structural-skip guards (root-cause collapse, QA fix loop)
 │   ├── telemetry.ts         Per-step run reports (.gstack/runs)
 │   ├── text.ts              $-safe interpolation
-│   ├── config.ts            Feature flags (GSTACK_PI_*)
+│   ├── config.ts            Feature flags (KSTACK_PI_*)
 │   ├── command.ts           /gstack command handler (+ /gstack next)
 │   └── router.ts            Input intent detection (transform, never block)
 ├── skills/                  Raw skill library, recursive discovery (manual /skill: use)
@@ -332,7 +332,7 @@ State persists across session reloads via pi's `appendEntry` (not sent to LLM co
 
 - `main` — pre-upgrade behavior (advisory subagent hints, no skill injection). Switch with `git checkout main` in the extension folder, then restart pi.
 - `feat/skill-ingestion` — everything documented here.
-- Runtime kill switches (env): `GSTACK_PI_SKILLS=off`, `GSTACK_PI_DETERMINISTIC=off`, `GSTACK_PI_MANUAL_GATES=off`.
+- Runtime kill switches (env): `KSTACK_PI_SKILLS=off`, `KSTACK_PI_DETERMINISTIC=off`, `KSTACK_PI_MANUAL_GATES=off`.
 
 Deferred ideas live in `TODOS.md` (absorbed the old `FUTURE_UPDATES.md`).
 
@@ -348,7 +348,7 @@ Deferred ideas live in `TODOS.md` (absorbed the old `FUTURE_UPDATES.md`).
 
 | Problem | Fix |
 |---------|-----|
-| "gstack browse binary not found" | Run `update.sh` or set `GSTACK_BINARY` |
+| "gstack browse binary not found" | Run `update.sh` or set `KSTACK_BINARY` |
 | "server-node.mjs not found" (Windows) | Run `bash browse/scripts/build-node-server.sh` in the gstack repo |
 | `/gstack` not showing in pi | Ensure the extension is in `~/.pi/agent/extensions/gstack-pi/` with `index.ts` at root |
 | Subagent phases fail | Ensure `~/.pi/agent/agents/` has scout.md, planner.md, worker.md, reviewer.md — plus the sprint specialists (sprint-planner, software-architect, backend-developer, frontend-developer, qa-engineer, devsecops-reviewer) for the sprint workflow. Canonical copies live in this repo's [`agents/`](agents/) and are synced by `update.sh` (existing files backed up, never deleted). If you hand-tuned them, re-apply your changes after a sync or restore from the `.bak-<timestamp>` copy |
@@ -362,7 +362,7 @@ MIT
 
 ## Injection & efficiency
 
-The orchestrator controls WHAT is injected into subagent prompts and HOW chains are orchestrated. All protocols below apply in **deterministic mode** (`GSTACK_PI_DETERMINISTIC=on`, the default). With `GSTACK_PI_DETERMINISTIC=off`, tasks flow through the advisory `subagent`-tool path where `{previous}` stays literal and handoff extraction is never invoked (documented advisory divergence). The `sprint` workflow refuses to start in this mode: its review gates route exclusively on delegation-produced verdicts.
+The orchestrator controls WHAT is injected into subagent prompts and HOW chains are orchestrated. All protocols below apply in **deterministic mode** (`KSTACK_PI_DETERMINISTIC=on`, the default). With `KSTACK_PI_DETERMINISTIC=off`, tasks flow through the advisory `subagent`-tool path where `{previous}` stays literal and handoff extraction is never invoked (documented advisory divergence). The `sprint` workflow refuses to start in this mode: its review gates route exclusively on delegation-produced verdicts.
 
 ### Task contracts (three paths)
 Every delegated task and every main-phase instruction carries a falsifiable pair of blocks in a fixed order:
@@ -399,29 +399,29 @@ CONFIRMED ROOT CAUSE: <one-line cause> | files: <comma-separated file paths>
 the root-cause scout->planner chain collapses to ONE validate-only planner step. Anti-spoofing guards (ALL mandatory, see skip.ts): (a) the marker only counts inside the `## HANDOFF` section, (b) every cited file must exist on disk relative to cwd, (c) the validate step itself is never skippable and the workflow never collapses directly to fix. A leading `REFUTED:` line rebuilds and re-runs the full original chain prefixed with an explicit NOTE. The QA fix phase is structurally skipped when the test phase falsifiably reports zero failures (`allTestsPassed`).
 
 ### Per-class timeouts
-`GSTACK_PI_TIMEOUT_EXPLORE` (default 900s), `GSTACK_PI_TIMEOUT_WORK` (default 1500s), `GSTACK_PI_TIMEOUT_VERIFY` (default 900s); unknown ids fall back to `GSTACK_PI_SUBAGENT_TIMEOUT` (default 1200s). Values are seconds. Every registered phase id maps to exactly one class (`timeoutClassFor`), enforced by test.
+`KSTACK_PI_TIMEOUT_EXPLORE` (default 900s), `KSTACK_PI_TIMEOUT_WORK` (default 1500s), `KSTACK_PI_TIMEOUT_VERIFY` (default 900s); unknown ids fall back to `KSTACK_PI_SUBAGENT_TIMEOUT` (default 1200s). Values are seconds. Every registered phase id maps to exactly one class (`timeoutClassFor`), enforced by test.
 
 ### Environment variables
 
 | variable | default | effect |
 |---|---|---|
-| `GSTACK_PI_SKILLS` | on | skill digest injection |
-| `GSTACK_PI_DETERMINISTIC` | on | executor-spawned subagents; `off` also makes the `sprint` workflow refuse to start (its gates route on delegation verdicts) |
-| `GSTACK_PI_MANUAL_GATES` | on | approval pause after decision phases |
-| `GSTACK_PI_OPTIONAL_PHASES` | ask | `ask` \| `auto` \| `skip` handling of optional phases |
-| `GSTACK_PI_AUTO_GATE_VALIDATED` | off | auto-advance past root-cause gate when validation starts with `VALIDATED:` |
-| `GSTACK_PI_SPRINT` | on | registers the sprint workflow; `off` hides it from menu and router entirely |
-| `GSTACK_PI_LOOPBACKS` | on | sprint loop-back engine; `off` ⇒ negative gate verdicts park in a `/gstack` panel (Accept / Re-run / Abort) instead of retrying |
-| `GSTACK_PI_VERDICTS` | on | deterministic verdict parsing; `off` ⇒ no auto-routing; gates park in a `/gstack` panel (Accept / Re-run / Abort) |
-| `GSTACK_PI_DELEGATION_BUDGET_SEC` | 2700 | wall-clock budget for one phase's whole delegation chain; `off` disables |
-| `GSTACK_PI_SPRINT_MAX_ATTEMPTS` | 4 | consecutive implement-rerun ceiling per review gate (counter resets on gate approval or on "Accept result — continue past the gate") |
-| `GSTACK_PI_ARCH_MAX_ATTEMPTS` | 5 | system-design rerun ceiling after architect rejections (reads `GSTACK_PI_SPRINT_ARCH_MAX_ATTEMPTS` / `GSTACK_PI_ARCH_MAX_ATTEMPTS`) |
-| `GSTACK_PI_MODEL_FAST` / `_STRONG` | unset | model tiers for mechanical vs judgment-heavy phases; unset keeps each agent's own default (inert) |
-| `GSTACK_PI_STRICT_CONTENT` | off | heuristic scan + ASCII-sentinel enveloping of page-content tool output (WP2 defense-in-depth) |
-| `GSTACK_PI_SUBAGENT_TIMEOUT` | 1200 | fallback timeout, seconds |
-| `GSTACK_PI_TIMEOUT_EXPLORE` / `_WORK` / `_VERIFY` | 900 / 1500 / 900 | per-class timeouts, seconds |
-| `GSTACK_PI_LIVENESS_SEC` | 240 | observe-only silence threshold, seconds; `off` disables |
-| `GSTACK_PI_MAX_RUN_TOKENS` | disabled | orderly chain stop after cumulative token usage exceeds it |
+| `KSTACK_PI_SKILLS` | on | skill digest injection |
+| `KSTACK_PI_DETERMINISTIC` | on | executor-spawned subagents; `off` also makes the `sprint` workflow refuse to start (its gates route on delegation verdicts) |
+| `KSTACK_PI_MANUAL_GATES` | on | approval pause after decision phases |
+| `KSTACK_PI_OPTIONAL_PHASES` | ask | `ask` \| `auto` \| `skip` handling of optional phases |
+| `KSTACK_PI_AUTO_GATE_VALIDATED` | off | auto-advance past root-cause gate when validation starts with `VALIDATED:` |
+| `KSTACK_PI_SPRINT` | on | registers the sprint workflow; `off` hides it from menu and router entirely |
+| `KSTACK_PI_LOOPBACKS` | on | sprint loop-back engine; `off` ⇒ negative gate verdicts park in a `/gstack` panel (Accept / Re-run / Abort) instead of retrying |
+| `KSTACK_PI_VERDICTS` | on | deterministic verdict parsing; `off` ⇒ no auto-routing; gates park in a `/gstack` panel (Accept / Re-run / Abort) |
+| `KSTACK_PI_DELEGATION_BUDGET_SEC` | 2700 | wall-clock budget for one phase's whole delegation chain; `off` disables |
+| `KSTACK_PI_SPRINT_MAX_ATTEMPTS` | 4 | consecutive implement-rerun ceiling per review gate (counter resets on gate approval or on "Accept result — continue past the gate") |
+| `KSTACK_PI_ARCH_MAX_ATTEMPTS` | 5 | system-design rerun ceiling after architect rejections (reads `KSTACK_PI_SPRINT_ARCH_MAX_ATTEMPTS` / `KSTACK_PI_ARCH_MAX_ATTEMPTS`) |
+| `KSTACK_PI_MODEL_FAST` / `_STRONG` | unset | model tiers for mechanical vs judgment-heavy phases; unset keeps each agent's own default (inert) |
+| `KSTACK_PI_STRICT_CONTENT` | off | heuristic scan + ASCII-sentinel enveloping of page-content tool output (WP2 defense-in-depth) |
+| `KSTACK_PI_SUBAGENT_TIMEOUT` | 1200 | fallback timeout, seconds |
+| `KSTACK_PI_TIMEOUT_EXPLORE` / `_WORK` / `_VERIFY` | 900 / 1500 / 900 | per-class timeouts, seconds |
+| `KSTACK_PI_LIVENESS_SEC` | 240 | observe-only silence threshold, seconds; `off` disables |
+| `KSTACK_PI_MAX_RUN_TOKENS` | disabled | orderly chain stop after cumulative token usage exceeds it |
 
 Run reports land in `.gstack/runs/<ISO-timestamp>-<workflowId>.json` (per-step durations, tool calls, turns, token usage, handoff levels, incompleteness, timeout class, liveness observations).
 
@@ -443,11 +443,11 @@ Therefore:
 The deterministic delegation runs as a fire-and-forget background chain. Diagnose in this order:
 
 1. **Session breadcrumbs** — every delegation milestone is persisted as a `gstack-delegation-event` session entry (`started`, `retrying`, `completed`, `failed`, `timeout`, `budget-exceeded`, `interrupted`). A `started` with no terminal event followed by an `interrupted` annotation means the host died mid-delegation (crash or restart).
-2. **Debug log** — set `GSTACK_PI_DEBUG=<file>` before launching pi; every spawn attempt, pid, timeout, abort and provider error is appended there.
+2. **Debug log** — set `KSTACK_PI_DEBUG=<file>` before launching pi; every spawn attempt, pid, timeout, abort and provider error is appended there.
 3. **Run reports** — `.gstack/runs/<ISO>-<workflow>.json` carries per-step durations, tool calls, token usage, handoff levels and liveness observations.
 
 **Subagent fails fast with a provider error.** Errors like `Provider finish_reason: network_error` surface in the delegation summary and the failure event. pi auto-retries internally (3 attempts); the orchestrator adds one chain-level retry. If the provider outage persists, switch models (`--model`) and re-run. This is a provider problem, not an orchestrator bug.
 
 **Type safety.** `bun run typecheck` (tsc --noEmit) gates the exact crash class from 2026-08-23 (a function used but never imported — a runtime `ReferenceError` thrown from a timer callback that killed pi; bundlers don't type-check). It also runs as part of `bun test`.
 
-**Real-spawn end-to-end test.** `GSTACK_PI_E2E_SPAWN=1 bun test test/orchestrator.test.ts` spawns a real `pi -p` child through the production `runSubagent` path (opt-in because it needs a healthy provider and takes ~30-60s).
+**Real-spawn end-to-end test.** `KSTACK_PI_E2E_SPAWN=1 bun test test/orchestrator.test.ts` spawns a real `pi -p` child through the production `runSubagent` path (opt-in because it needs a healthy provider and takes ~30-60s).

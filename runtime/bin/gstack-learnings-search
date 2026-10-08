@@ -8,7 +8,7 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 eval "$("$SCRIPT_DIR/gstack-slug" 2>/dev/null)"
-GSTACK_HOME="${GSTACK_HOME:-$HOME/.gstack}"
+KSTACK_HOME="${KSTACK_HOME:-$HOME/.gstack}"
 
 TYPE=""
 QUERY=""
@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-LEARNINGS_FILE="$GSTACK_HOME/projects/$SLUG/learnings.jsonl"
+LEARNINGS_FILE="$KSTACK_HOME/projects/$SLUG/learnings.jsonl"
 
 # Collect cross-project JSONL files separately so the trust gate can distinguish
 # current-project rows from rows loaded from other projects.
@@ -36,7 +36,7 @@ if [ "$CROSS_PROJECT" = true ]; then
   while IFS= read -r f; do
     CROSS_FILES+=("$f")
     [ ${#CROSS_FILES[@]} -ge 5 ] && break
-  done < <(find "$GSTACK_HOME/projects" -name "learnings.jsonl" -not -path "*/$SLUG/*" 2>/dev/null)
+  done < <(find "$KSTACK_HOME/projects" -name "learnings.jsonl" -not -path "*/$SLUG/*" 2>/dev/null)
 fi
 
 if [ ! -f "$LEARNINGS_FILE" ] && [ ${#CROSS_FILES[@]} -eq 0 ]; then
@@ -60,13 +60,13 @@ emit_tagged_file() {
       emit_tagged_file cross "$f"
     done
   fi
-} | GSTACK_SEARCH_TYPE="$TYPE" GSTACK_SEARCH_QUERY="$QUERY" GSTACK_SEARCH_LIMIT="$LIMIT" GSTACK_SEARCH_CROSS="$CROSS_PROJECT" bun -e "
+} | KSTACK_SEARCH_TYPE="$TYPE" KSTACK_SEARCH_QUERY="$QUERY" KSTACK_SEARCH_LIMIT="$LIMIT" KSTACK_SEARCH_CROSS="$CROSS_PROJECT" bun -e "
 const lines = (await Bun.stdin.text()).trim().split('\n').filter(Boolean);
 const now = Date.now();
-const type = process.env.GSTACK_SEARCH_TYPE || '';
-const queryRaw = (process.env.GSTACK_SEARCH_QUERY || '').toLowerCase();
+const type = process.env.KSTACK_SEARCH_TYPE || '';
+const queryRaw = (process.env.KSTACK_SEARCH_QUERY || '').toLowerCase();
 const queryTokens = queryRaw.split(/\s+/).filter(Boolean);
-const limit = parseInt(process.env.GSTACK_SEARCH_LIMIT || '10', 10);
+const limit = parseInt(process.env.KSTACK_SEARCH_LIMIT || '10', 10);
 
 const entries = [];
 for (const taggedLine of lines) {

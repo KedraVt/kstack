@@ -253,7 +253,7 @@ async function startWorkflow(workflowId: string, ctx: ExtensionCommandContext, p
   // the gates would silently degrade to model-say-so advancement (Q2 fix).
   if (workflow.id === "sprint" && !deterministicSubagents()) {
     ctx.ui.notify(
-      `The "sprint" workflow requires deterministic subagent delegation (GSTACK_PI_DETERMINISTIC). It is currently disabled: the review gates would be inert. Re-enable it or pick another workflow.`,
+      `The "sprint" workflow requires deterministic subagent delegation (KSTACK_PI_DETERMINISTIC). It is currently disabled: the review gates would be inert. Re-enable it or pick another workflow.`,
       "warning",
     );
     return;
@@ -404,7 +404,7 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
   }
 
   const reason = state.pausedReason ?? "";
-  // Kill-switch parks (F2 fix): with GSTACK_PI_VERDICTS/_LOOPBACKS off, a
+  // Kill-switch parks (F2 fix): with KSTACK_PI_VERDICTS/_LOOPBACKS off, a
   // completed verdict-bearing gate pauses with verdicts-disabled:/
   // loopback-disabled:. Without a decision surface the only exits were Abort
   // or an endless Resume→re-run→pause loop — the documented "human decides"

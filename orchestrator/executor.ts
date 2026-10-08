@@ -366,7 +366,7 @@ export async function executeCurrentPhase(
       const skipped = advancePhase(
         state,
         phase.id,
-        { status: "skipped", summary: "Auto-skipped: GSTACK_PI_OPTIONAL_PHASES=skip" },
+        { status: "skipped", summary: "Auto-skipped: KSTACK_PI_OPTIONAL_PHASES=skip" },
         workflow.phases.length,
       );
       saveState(pi, skipped);
@@ -602,7 +602,7 @@ export async function runDeterministicDelegation(
         cwd: wfCtx.cwd,
         // STEP 5a: per-class timeout resolved from the phase id.
         phaseId: phase.id,
-        // E4/D10 model tiers: inert unless GSTACK_PI_MODEL_FAST/_STRONG are set.
+        // E4/D10 model tiers: inert unless KSTACK_PI_MODEL_FAST/_STRONG are set.
         modelOverride: modelTierFor(phase.id),
         shouldAbort: () => !alive(),
         onActivity: setStatus,
@@ -673,7 +673,7 @@ export async function runDeterministicDelegation(
       if (totalTokensUsed() > maxRunTokens()) {
         try {
           ctx.ui.notify(
-            `gstack: GSTACK_PI_MAX_RUN_TOKENS exceeded (${totalTokensUsed()} tokens) — stopping the chain orderly.`,
+            `gstack: KSTACK_PI_MAX_RUN_TOKENS exceeded (${totalTokensUsed()} tokens) — stopping the chain orderly.`,
             "warning",
           );
         } catch {

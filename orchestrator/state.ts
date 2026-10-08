@@ -203,7 +203,7 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
     }
 
     if (action.kind === "loop-back" && targetIndex >= 0 && !loopbacksEnabled()) {
-      // GSTACK_PI_LOOPBACKS=off: negative verdicts pause instead of retrying
+      // KSTACK_PI_LOOPBACKS=off: negative verdicts pause instead of retrying
       // (pre-loop behavior; the human decides what happens next).
       next.status = "paused";
       next.pausedReason = `loopback-disabled:${phase.id}`;

@@ -28,10 +28,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-# GSTACK_STATE_ROOT takes precedence over GSTACK_HOME (test isolation per D16).
-GSTACK_HOME="${GSTACK_STATE_ROOT:-${GSTACK_HOME:-$HOME/.gstack}}"
-PROFILE_FILE="$GSTACK_HOME/developer-profile.json"
-LEGACY_FILE="$GSTACK_HOME/builder-profile.jsonl"
+# KSTACK_STATE_ROOT takes precedence over KSTACK_HOME (test isolation per D16).
+KSTACK_HOME="${KSTACK_STATE_ROOT:-${KSTACK_HOME:-$HOME/.gstack}}"
+PROFILE_FILE="$KSTACK_HOME/developer-profile.json"
+LEGACY_FILE="$KSTACK_HOME/builder-profile.jsonl"
 eval "$("$SCRIPT_DIR/gstack-slug" 2>/dev/null || true)"
 SLUG="${SLUG:-unknown}"
 
@@ -55,7 +55,7 @@ do_migrate() {
 
   # Run migration in a temp file, then atomic rename.
   local TMPOUT
-  TMPOUT=$(mktemp "$GSTACK_HOME/developer-profile.json.XXXXXX.tmp")
+  TMPOUT=$(mktemp "$KSTACK_HOME/developer-profile.json.XXXXXX.tmp")
   trap 'rm -f "$TMPOUT"' EXIT
 
   cat "$LEGACY_FILE" | bun -e "
@@ -133,7 +133,7 @@ ensure_profile() {
     return 0
   fi
   # Nothing yet — create a stub.
-  mkdir -p "$GSTACK_HOME"
+  mkdir -p "$KSTACK_HOME"
   cat > "$PROFILE_FILE" <<EOF
 {
   "identity": {},
@@ -182,7 +182,7 @@ do_log_session() {
   ensure_profile
 
   local TMPOUT
-  TMPOUT=$(mktemp "$GSTACK_HOME/developer-profile.json.XXXXXX.tmp")
+  TMPOUT=$(mktemp "$KSTACK_HOME/developer-profile.json.XXXXXX.tmp")
   trap 'rm -f "$TMPOUT"' EXIT
 
   PROFILE_FILE_PATH="$PROFILE_FILE" RECORD_INPUT="$INPUT" TMPOUT_PATH="$TMPOUT" bun -e "
@@ -308,7 +308,7 @@ do_gap() {
 # -----------------------------------------------------------------------
 do_derive() {
   ensure_profile
-  local EVENTS="$GSTACK_HOME/projects/$SLUG/question-log.jsonl"
+  local EVENTS="$KSTACK_HOME/projects/$SLUG/question-log.jsonl"
   local REGISTRY="$ROOT_DIR/scripts/question-registry.ts"
   local SIGNALS="$ROOT_DIR/scripts/psychographic-signals.ts"
   if [ ! -f "$REGISTRY" ] || [ ! -f "$SIGNALS" ]; then
@@ -394,7 +394,7 @@ do_trace() {
     echo "TRACE: missing dimension argument" >&2
     exit 1
   fi
-  local EVENTS="$GSTACK_HOME/projects/$SLUG/question-log.jsonl"
+  local EVENTS="$KSTACK_HOME/projects/$SLUG/question-log.jsonl"
   if [ ! -f "$EVENTS" ]; then
     echo "TRACE: no events for this project"
     return 0

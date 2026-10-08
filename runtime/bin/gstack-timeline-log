@@ -12,8 +12,8 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 eval "$("$SCRIPT_DIR/gstack-slug" 2>/dev/null)"
-GSTACK_HOME="${GSTACK_HOME:-$HOME/.gstack}"
-mkdir -p "$GSTACK_HOME/projects/$SLUG"
+KSTACK_HOME="${KSTACK_HOME:-$HOME/.gstack}"
+mkdir -p "$KSTACK_HOME/projects/$SLUG"
 
 INPUT="$1"
 
@@ -34,7 +34,7 @@ if ! printf '%s' "$INPUT" | bun -e "const j=JSON.parse(await Bun.stdin.text()); 
   " 2>/dev/null) || true
 fi
 
-echo "$INPUT" >> "$GSTACK_HOME/projects/$SLUG/timeline.jsonl"
+echo "$INPUT" >> "$KSTACK_HOME/projects/$SLUG/timeline.jsonl"
 
 # gbrain-sync: enqueue for cross-machine sync (no-op if sync is off).
 "$SCRIPT_DIR/gstack-brain-enqueue" "projects/$SLUG/timeline.jsonl" 2>/dev/null &

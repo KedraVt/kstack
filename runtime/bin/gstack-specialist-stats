@@ -8,8 +8,8 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 eval "$("$SCRIPT_DIR/gstack-slug" 2>/dev/null)"
-GSTACK_HOME="${GSTACK_HOME:-$HOME/.gstack}"
-PROJECT_DIR="$GSTACK_HOME/projects/$SLUG"
+KSTACK_HOME="${KSTACK_HOME:-$HOME/.gstack}"
+PROJECT_DIR="$KSTACK_HOME/projects/$SLUG"
 
 if [ ! -d "$PROJECT_DIR" ]; then
   echo "SPECIALIST_STATS: 0 reviews analyzed"

@@ -545,7 +545,7 @@ Write devsecops/security-review-artifact_{sprint}.md (+ docker-build-report_{spr
   ],
 };
 
-// GSTACK_PI_SPRINT=off hides the sprint workflow from menu and router entirely
+// KSTACK_PI_SPRINT=off hides the sprint workflow from menu and router entirely
 // (kill-switch; every other workflow is unaffected).
 const ALL_WORKFLOWS: Workflow[] = [
   ...(sprintEnabled() ? [sprint] : []),

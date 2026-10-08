@@ -165,7 +165,7 @@ describe("runDeterministicDelegation — fake-spawn integration", () => {
   });
 
   test("the wall-clock budget stops the chain before later steps and reports budget-exceeded", async () => {
-    const NAME = "GSTACK_PI_DELEGATION_BUDGET_SEC";
+    const NAME = "KSTACK_PI_DELEGATION_BUDGET_SEC";
     const original = process.env[NAME];
     process.env[NAME] = "0.05"; // 50ms: the first step runs, the second never starts
     try {
@@ -192,8 +192,8 @@ describe("runDeterministicDelegation — fake-spawn integration", () => {
     }
   });
 
-  test("token usage past GSTACK_PI_MAX_RUN_TOKENS stops the chain after that step", async () => {
-    const NAME = "GSTACK_PI_MAX_RUN_TOKENS";
+  test("token usage past KSTACK_PI_MAX_RUN_TOKENS stops the chain after that step", async () => {
+    const NAME = "KSTACK_PI_MAX_RUN_TOKENS";
     const original = process.env[NAME];
     process.env[NAME] = "100";
     try {
@@ -367,7 +367,7 @@ describe("branch enforcement at sprint verdict gates", () => {
   });
 
   test("architect-gate on main does NOT park — it reviews documents, no task branch exists yet", async () => {
-    const NAME = "GSTACK_PI_DETERMINISTIC";
+    const NAME = "KSTACK_PI_DETERMINISTIC";
     const original = process.env[NAME];
     process.env[NAME] = "off"; // skip real delegation; flow straight to instructions
     try {

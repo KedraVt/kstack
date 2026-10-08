@@ -10,7 +10,7 @@
 #
 # Hygiene rules (enforced by test/codex-hardening.test.ts):
 #   - Never set -e / set -u / trap / IFS= / PATH= in this file.
-#   - All internal vars prefix with _GSTACK_CODEX_.
+#   - All internal vars prefix with _KSTACK_CODEX_.
 #   - All functions prefix with _kstack_codex_.
 #   - No command execution at source time (only function defs).
 

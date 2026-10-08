@@ -82,7 +82,7 @@ describe("WP1 tool expansion", () => {
 
   test("allowlist contains exactly the 65 expected commands", async () => {
     const mod = await import("../lib/commands.generated.ts");
-    const set = new Set<string>(mod.GSTACK_COMMANDS as string[]);
+    const set = new Set<string>(mod.KSTACK_COMMANDS as string[]);
     assert.equal(set.size, 65, `expected 65 commands, got ${set.size}`);
     for (const c of ["chain", "dialog", "perf"]) {
       assert.ok(set.has(c), `missing ${c}`);
@@ -131,13 +131,13 @@ describe("WP1 tool expansion", () => {
 
 // --- Config flag ------------------------------------------------------------
 
-test("GSTACK_PI_STRICT_CONTENT defaults off and honors on/off", async () => {
+test("KSTACK_PI_STRICT_CONTENT defaults off and honors on/off", async () => {
   const cfg = await import("../orchestrator/config.ts");
-  delete process.env.GSTACK_PI_STRICT_CONTENT;
+  delete process.env.KSTACK_PI_STRICT_CONTENT;
   assert.equal(cfg.strictContent(), false);
-  process.env.GSTACK_PI_STRICT_CONTENT = "1";
+  process.env.KSTACK_PI_STRICT_CONTENT = "1";
   assert.equal(cfg.strictContent(), true);
-  process.env.GSTACK_PI_STRICT_CONTENT = "off";
+  process.env.KSTACK_PI_STRICT_CONTENT = "off";
   assert.equal(cfg.strictContent(), false);
-  delete process.env.GSTACK_PI_STRICT_CONTENT;
+  delete process.env.KSTACK_PI_STRICT_CONTENT;
 });

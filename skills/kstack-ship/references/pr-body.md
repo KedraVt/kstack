@@ -100,7 +100,7 @@ you missed it.>
   eval "$(~/.claude/skills/gstack/bin/gstack-paths)"
   eval "$(~/.claude/skills/gstack/bin/gstack-slug)"
   CURRENT_BRANCH=$(git branch --show-current)
-  SPEC_ARCHIVES="$GSTACK_STATE_ROOT/projects/$SLUG/specs"
+  SPEC_ARCHIVES="$KSTACK_STATE_ROOT/projects/$SLUG/specs"
   # Find newest archive whose spec_branch frontmatter matches current branch (or one of its
   # parents — if spec spawned worktree spec/<slug>-$$, the spawned worktree IS where /ship runs).
   SPEC_FILE=$(grep -l "^spec_branch: $CURRENT_BRANCH$" "$SPEC_ARCHIVES"/*.md 2>/dev/null | head -1)

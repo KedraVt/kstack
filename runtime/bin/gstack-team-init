@@ -70,10 +70,10 @@ else
 **Before doing ANY work, verify gstack is installed:**
 
 ```bash
-test -d ~/.claude/skills/gstack/bin && echo "GSTACK_OK" || echo "GSTACK_MISSING"
+test -d ~/.claude/skills/gstack/bin && echo "KSTACK_OK" || echo "KSTACK_MISSING"
 ```
 
-If GSTACK_MISSING: STOP. Do not proceed. Tell the user:
+If KSTACK_MISSING: STOP. Do not proceed. Tell the user:
 
 > gstack is required for all AI-assisted work in this repo.
 > Install it:
@@ -139,9 +139,9 @@ HOOK_EOF
 
   # Add hook to project-level settings.json
   if command -v bun >/dev/null 2>&1; then
-    GSTACK_SETTINGS_PATH="$SETTINGS" bun -e "
+    KSTACK_SETTINGS_PATH="$SETTINGS" bun -e "
       const fs = require('fs');
-      const settingsPath = process.env.GSTACK_SETTINGS_PATH;
+      const settingsPath = process.env.KSTACK_SETTINGS_PATH;
 
       let settings = {};
       try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch {}

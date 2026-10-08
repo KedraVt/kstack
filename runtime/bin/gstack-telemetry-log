@@ -11,25 +11,25 @@
 #     --used-browse true --session-id "12345-1710756600"
 #
 # Env overrides (for testing):
-#   GSTACK_STATE_DIR  — override ~/.gstack state directory
-#   GSTACK_DIR        — override auto-detected gstack root
+#   KSTACK_STATE_DIR  — override ~/.gstack state directory
+#   KSTACK_DIR        — override auto-detected gstack root
 #
 # NOTE: Uses set -uo pipefail (no -e) — telemetry must never exit non-zero
 set -uo pipefail
 
-GSTACK_DIR="${GSTACK_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
-SCRIPT_DIR="$GSTACK_DIR/bin"
+KSTACK_DIR="${KSTACK_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+SCRIPT_DIR="$KSTACK_DIR/bin"
 # Windows git-bash (#1950): pwd yields a POSIX path (/c/Users/...), which Bun
 # on Windows cannot resolve as an ES module specifier in bun -e imports.
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) command -v cygpath >/dev/null 2>&1 && SCRIPT_DIR="$(cygpath -m "$SCRIPT_DIR")" ;;
 esac
-STATE_DIR="${GSTACK_STATE_DIR:-$HOME/.gstack}"
+STATE_DIR="${KSTACK_STATE_DIR:-$HOME/.gstack}"
 ANALYTICS_DIR="$STATE_DIR/analytics"
 JSONL_FILE="$ANALYTICS_DIR/skill-usage.jsonl"
 PENDING_DIR="$ANALYTICS_DIR"  # .pending-* files live here
-CONFIG_CMD="$GSTACK_DIR/bin/gstack-config"
-VERSION_FILE="$GSTACK_DIR/VERSION"
+CONFIG_CMD="$KSTACK_DIR/bin/gstack-config"
+VERSION_FILE="$KSTACK_DIR/VERSION"
 
 # ─── Parse flags ─────────────────────────────────────────────
 SKILL=""
@@ -72,7 +72,7 @@ while [ $# -gt 0 ]; do
 done
 
 # Source: flag > env > default 'live'
-SOURCE="${SOURCE:-${GSTACK_TELEMETRY_SOURCE:-live}}"
+SOURCE="${SOURCE:-${KSTACK_TELEMETRY_SOURCE:-live}}"
 
 # ─── Read telemetry tier ─────────────────────────────────────
 TIER="$("$CONFIG_CMD" get telemetry 2>/dev/null || true)"
@@ -123,7 +123,7 @@ done
 
 # ─── Collect metadata ────────────────────────────────────────
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%S 2>/dev/null || echo "")"
-GSTACK_VERSION="$(cat "$VERSION_FILE" 2>/dev/null | tr -d '[:space:]' || echo "unknown")"
+KSTACK_VERSION="$(cat "$VERSION_FILE" 2>/dev/null | tr -d '[:space:]' || echo "unknown")"
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
 SESSIONS="1"
@@ -252,7 +252,7 @@ SEC_VERDICT_FIELD="null"
 [ -n "$SEC_VERDICT" ] && SEC_VERDICT_FIELD="\"$SEC_VERDICT\""
 
 printf '{"v":1,"ts":"%s","event_type":"%s","skill":"%s","session_id":"%s","kstack_version":"%s","os":"%s","arch":"%s","duration_s":%s,"outcome":"%s","error_class":%s,"error_message":%s,"failed_step":%s,"used_browse":%s,"sessions":%s,"installation_id":%s,"source":"%s","security_url_domain":%s,"security_payload_hash":%s,"security_confidence":%s,"security_layer":%s,"security_verdict":%s,"_repo_slug":"%s","_branch":"%s"}\n' \
-  "$TS" "$EVENT_TYPE" "$SKILL" "$SESSION_ID" "$GSTACK_VERSION" "$OS" "$ARCH" \
+  "$TS" "$EVENT_TYPE" "$SKILL" "$SESSION_ID" "$KSTACK_VERSION" "$OS" "$ARCH" \
   "$DUR_FIELD" "$OUTCOME" "$ERR_FIELD" "$ERR_MSG_FIELD" "$STEP_FIELD" \
   "$BROWSE_BOOL" "${SESSIONS:-1}" \
   "$INSTALL_FIELD" "$SOURCE" \
@@ -260,7 +260,7 @@ printf '{"v":1,"ts":"%s","event_type":"%s","skill":"%s","session_id":"%s","kstac
   "$REPO_SLUG" "$BRANCH" >> "$JSONL_FILE" 2>/dev/null || true
 
 # ─── Trigger sync if tier is not off ─────────────────────────
-SYNC_CMD="$GSTACK_DIR/bin/gstack-telemetry-sync"
+SYNC_CMD="$KSTACK_DIR/bin/gstack-telemetry-sync"
 if [ -x "$SYNC_CMD" ]; then
   "$SYNC_CMD" 2>/dev/null &
 fi

@@ -1,9 +1,9 @@
 /**
- * lib/browse.ts — CLI spawn wrapper for the gstack browse binary.
+ * lib/browse.ts — CLI spawn wrapper for the kstack browse binary.
  *
  * Responsibilities (PLAN §8, §8b, §17):
- *   1. Resolve binary (Conv-A order: GSTACK_BINARY env -> $GSTACK_ROOT/browse/dist/browse
- *      -> ../gstack/browse/dist/browse -> bun run cli.ts fallback -> error).
+ *   1. Resolve binary (Conv-A order: KSTACK_BINARY env -> $KSTACK_ROOT/browse/dist/browse
+ *      -> ../kstack/browse/dist/browse -> bun run cli.ts fallback -> error).
  *   2. Spawn with shell:false, explicit arg arrays (no interpolation).
  *   3. AbortSignal -> child.kill("SIGTERM").
  *   4. timeoutMs (default 60s) -> child.kill("SIGTERM") + normalize exit 124.
@@ -37,18 +37,18 @@ export function resolveBinary(): { path: string } | { error: string } {
     return cachedBinary === null ? { error: cachedError! } : { path: cachedBinary };
   }
 
-  const here = fileURLToPath(new URL(".", import.meta.url)); // gstack-pi/lib/
+  const here = fileURLToPath(new URL(".", import.meta.url)); // kstack-pi/lib/
   const localRuntime = resolve(here, "..", "runtime", "browse", "dist", "browse");
-  const gstackRootGuess = resolve(here, "..", "..", "gstack");
+  const kstackRootGuess = resolve(here, "..", "..", "kstack");
 
   const candidates: { path: string; why: string }[] = [];
-  if (process.env.GSTACK_BINARY) {
-    candidates.push({ path: process.env.GSTACK_BINARY, why: "GSTACK_BINARY env" });
+  if (process.env.KSTACK_BINARY) {
+    candidates.push({ path: process.env.KSTACK_BINARY, why: "KSTACK_BINARY env" });
   }
-  if (process.env.GSTACK_ROOT) {
+  if (process.env.KSTACK_ROOT) {
     candidates.push({
-      path: join(process.env.GSTACK_ROOT, "browse", "dist", "browse"),
-      why: "$GSTACK_ROOT/browse/dist/browse (Conv-A)",
+      path: join(process.env.KSTACK_ROOT, "browse", "dist", "browse"),
+      why: "$KSTACK_ROOT/browse/dist/browse (Conv-A)",
     });
   }
   candidates.push({
@@ -56,8 +56,8 @@ export function resolveBinary(): { path: string } | { error: string } {
     why: "runtime/browse/dist/browse (bundled)",
   });
   candidates.push({
-    path: join(gstackRootGuess, "browse", "dist", "browse"),
-    why: "../gstack/browse/dist/browse (dev)",
+    path: join(kstackRootGuess, "browse", "dist", "browse"),
+    why: "../kstack/browse/dist/browse (dev)",
   });
 
   for (const c of candidates) {
@@ -79,13 +79,13 @@ export function resolveBinary(): { path: string } | { error: string } {
   // ponytail: we do NOT auto-spawn `bun run cli.ts` here — that would hide a
   //   missing build and require bun at runtime. Upgrade path: detect `which bun`
   //   and spawn it when the compiled binary is missing but a source tree exists.
-  const cliTs = join(gstackRootGuess, "browse", "src", "cli.ts");
+  const cliTs = join(kstackRootGuess, "browse", "src", "cli.ts");
   cachedBinary = null;
   cachedError =
-    "gstack browse binary not found. Tried: " +
+    "kstack browse binary not found. Tried: " +
     candidates.map((c) => c.path).join(", ") +
-    ". Fix: export GSTACK_ROOT=/path/to/gstack and run " +
-    "`cd \"$GSTACK_ROOT\" && bun install && bun run build`, or export GSTACK_BINARY=/full/path/browse. " +
+    ". Fix: export KSTACK_ROOT=/path/to/kstack and run " +
+    "`cd \"$KSTACK_ROOT\" && bun install && bun run build`, or export KSTACK_BINARY=/full/path/browse. " +
     "Source fallback available at " + cliTs + " if Bun is on PATH.";
   return { error: cachedError };
 }
@@ -108,7 +108,7 @@ export interface RunResult {
   signal?: string;
 }
 
-/** Spawn a gstack browse subprocess and capture its output. No shell. */
+/** Spawn a kstack browse subprocess and capture its output. No shell. */
 export function runBrowse(
   cmd: string,
   args: string[],
@@ -290,15 +290,15 @@ export function classifyError(stderr: string, _args: string[]): string {
   const s = stderr.toLowerCase();
   // 1. Binary not found (compiled binary missing at resolved path)
   if (/spawn enoent|executable doesn'?t exist|browser was not found/.test(s))
-    return "Browser binary missing. Build it: cd $GSTACK_ROOT && bun install && bun run build.";
+    return "Browser binary missing. Build it: cd $KSTACK_ROOT && bun install && bun run build.";
   // 2. Playwright/Chromium engine missing
   if (/playwright|chromium not installed|err_playwright|executable doesn'?t exist at/.test(s))
-    return "Browser engine missing. Run `bun install` inside the gstack checkout (downloads Chromium).";
+    return "Browser engine missing. Run `bun install` inside the kstack checkout (downloads Chromium).";
   // 3. Daemon port busy (stuck daemon from prior session)
   if (/eaddrinuse|port .* is already in use|listen eacces/.test(s))
-    return "gstack daemon port busy. Remove the stale gstack browse.json state file or kill the stale process.";
+    return "kstack daemon port busy. Remove the stale kstack browse.json state file or kill the stale process.";
   // 4. ENOENT on resolved binary path
   if (/enoent/.test(s))
-    return "Executable not found at resolved path. Rebuild: cd $GSTACK_ROOT && bun run build.";
+    return "Executable not found at resolved path. Rebuild: cd $KSTACK_ROOT && bun run build.";
   return stderr; // fallback: raw, LLM interprets
 }

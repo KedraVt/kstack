@@ -13,7 +13,7 @@ description: >-
   existing plan (use kstack-plan-eng-review).
 metadata:
   version: "1.0.0"
-compatibility: Requires gh CLI for issue filing + runtime/bin/gstack-redact for leak scanning; $GSTACK_STATE_ROOT for the archive dir (defaults to repo .gstack/).
+compatibility: Requires gh CLI for issue filing + runtime/bin/gstack-redact for leak scanning; $KSTACK_STATE_ROOT for the archive dir (defaults to repo .gstack/).
 ---
 
 <!-- provenance: gstack/gstack-spec (5-phase interrogation, dedupe, redaction sink, issue templates) — boilerplate stripped: brain machinery, plan-mode detection, claude-specific spawn adapted · rewritten S1 2026-02-11 -->
@@ -117,7 +117,7 @@ capture `$ISSUE_NUMBER`/`$ISSUE_URL`. No `gh` → print title+body for
 zero-reformatting paste.
 
 **Archive** — re-scan, then atomic write (tmp→rename) to
-`$GSTACK_STATE_ROOT/projects/$SLUG/specs/<ts>-$$-<slug>.md` via
+`$KSTACK_STATE_ROOT/projects/$SLUG/specs/<ts>-$$-<slug>.md` via
 `gstack-paths` + `gstack-slug`, frontmatter carrying `spec_issue_number`,
 `spec_issue_url`, `spec_filed_at`, `spec_branch`, `spec_executed` — the
 `spec_issue_number` field is what `kstack-ship` reads to auto-close the issue

@@ -6,7 +6,7 @@
  * No manual allowlist. Drift risk: if COMMAND_DESCRIPTIONS format changes from
  * an object literal, gen-tools' regex fails loudly — no silent drift.
  */
-export { ALLOWED_COMMANDS, GSTACK_COMMANDS } from "./commands.generated";
+export { ALLOWED_COMMANDS, KSTACK_COMMANDS } from "./commands.generated";
 import { ALLOWED_COMMANDS } from "./commands.generated";
 
 export function isAllowed(cmd: string): boolean {

@@ -12,17 +12,17 @@ function parse(v: string | undefined): boolean | undefined {
 
 /** Inject distilled skill methodology into phase instructions / subagent tasks. */
 export function skillsEnabled(): boolean {
-  return parse(process.env.GSTACK_PI_SKILLS) ?? true;
+  return parse(process.env.KSTACK_PI_SKILLS) ?? true;
 }
 
 /** Spawn subagents directly from the executor instead of asking the model to. */
 export function deterministicSubagents(): boolean {
-  return parse(process.env.GSTACK_PI_DETERMINISTIC) ?? true;
+  return parse(process.env.KSTACK_PI_DETERMINISTIC) ?? true;
 }
 
 /** Pause for user approval after decision phases (plan, root-cause). */
 export function manualGates(): boolean {
-  return parse(process.env.GSTACK_PI_MANUAL_GATES) ?? true;
+  return parse(process.env.KSTACK_PI_MANUAL_GATES) ?? true;
 }
 
 export type OptionalPhasesMode = "ask" | "auto" | "skip";
@@ -34,7 +34,7 @@ export type OptionalPhasesMode = "ask" | "auto" | "skip";
  * abandon the chain.
  */
 export function optionalPhases(): OptionalPhasesMode {
-  const v = process.env.GSTACK_PI_OPTIONAL_PHASES;
+  const v = process.env.KSTACK_PI_OPTIONAL_PHASES;
   if (v === "auto" || v === "skip") return v;
   return "ask";
 }
@@ -47,7 +47,7 @@ export function optionalPhases(): OptionalPhasesMode {
  * before code changes.
  */
 export function autoGateValidated(): boolean {
-  return parse(process.env.GSTACK_PI_AUTO_GATE_VALIDATED) ?? false;
+  return parse(process.env.KSTACK_PI_AUTO_GATE_VALIDATED) ?? false;
 }
 
 /**
@@ -58,19 +58,19 @@ export function autoGateValidated(): boolean {
  * extension-side heuristic layer for users who want defense-in-depth.
  */
 export function strictContent(): boolean {
-  return parse(process.env.GSTACK_PI_STRICT_CONTENT) ?? false;
+  return parse(process.env.KSTACK_PI_STRICT_CONTENT) ?? false;
 }
 
 // --- Sprint workflow kill-switches (MERGE-PLAN §12 / BUG-6) ------------------
 
 /** Register the sprint workflow at all. Off ⇒ hidden from menu/router entirely. */
 export function sprintEnabled(): boolean {
-  return parse(process.env.GSTACK_PI_SPRINT) ?? true;
+  return parse(process.env.KSTACK_PI_SPRINT) ?? true;
 }
 
 /** Loop-back engine. Off ⇒ a negative gate verdict pauses instead of retrying. */
 export function loopbacksEnabled(): boolean {
-  return parse(process.env.GSTACK_PI_LOOPBACKS) ?? true;
+  return parse(process.env.KSTACK_PI_LOOPBACKS) ?? true;
 }
 
 /**
@@ -79,7 +79,7 @@ export function loopbacksEnabled(): boolean {
  * silent advance past a possible rejection).
  */
 export function verdictsEnabled(): boolean {
-  return parse(process.env.GSTACK_PI_VERDICTS) ?? true;
+  return parse(process.env.KSTACK_PI_VERDICTS) ?? true;
 }
 
 // --- Numeric configuration (STEP 5a / COR-06, COR-10) -------------------------
@@ -119,7 +119,7 @@ export type TimeoutClass = "EXPLORE" | "WORK" | "VERIFY";
  * the generic limit, which the cross-cutting test treats as a failure.
  *
  * Defaults (seconds, historical values NOT raised):
- *   EXPLORE=900, WORK=1500, VERIFY=900; fallback GSTACK_PI_SUBAGENT_TIMEOUT=1200.
+ *   EXPLORE=900, WORK=1500, VERIFY=900; fallback KSTACK_PI_SUBAGENT_TIMEOUT=1200.
  */
 const TIMEOUT_CLASS_MAP: Record<string, TimeoutClass> = {
   // develop
@@ -170,41 +170,41 @@ export function timeoutClassFor(phaseId: string): TimeoutClass | null {
 export function subagentTimeoutFor(phaseId: string): number {
   const cls = TIMEOUT_CLASS_MAP[phaseId];
   let sec: number;
-  if (cls === "EXPLORE") sec = numberEnv("GSTACK_PI_TIMEOUT_EXPLORE", 900) as number;
-  else if (cls === "WORK") sec = numberEnv("GSTACK_PI_TIMEOUT_WORK", 1500) as number;
-  else if (cls === "VERIFY") sec = numberEnv("GSTACK_PI_TIMEOUT_VERIFY", 900) as number;
-  else sec = numberEnv("GSTACK_PI_SUBAGENT_TIMEOUT", 1200) as number;
+  if (cls === "EXPLORE") sec = numberEnv("KSTACK_PI_TIMEOUT_EXPLORE", 900) as number;
+  else if (cls === "WORK") sec = numberEnv("KSTACK_PI_TIMEOUT_WORK", 1500) as number;
+  else if (cls === "VERIFY") sec = numberEnv("KSTACK_PI_TIMEOUT_VERIFY", 900) as number;
+  else sec = numberEnv("KSTACK_PI_SUBAGENT_TIMEOUT", 1200) as number;
   return sec * 1000;
 }
 
 /**
- * Sprint loop ceilings (plan B5). GSTACK_PI_SPRINT_MAX_ATTEMPTS bounds
+ * Sprint loop ceilings (plan B5). KSTACK_PI_SPRINT_MAX_ATTEMPTS bounds
  * CONSECUTIVE implement reruns per review gate: the counter resets when a gate
  * approves (state.ts), so devsecops and QA each get a fresh ceiling within the
  * same sprint — worst case ≈ 2× the ceiling total implement runs.
- * GSTACK_PI_SPRINT_ARCH_MAX_ATTEMPTS bounds system-design reruns after
+ * KSTACK_PI_SPRINT_ARCH_MAX_ATTEMPTS bounds system-design reruns after
  * architect rejections.
  */
 export function sprintMaxAttempts(): number {
-  return numberEnv("GSTACK_PI_SPRINT_MAX_ATTEMPTS", 4) as number;
+  return numberEnv("KSTACK_PI_SPRINT_MAX_ATTEMPTS", 4) as number;
 }
 
 export function sprintArchMaxAttempts(): number {
-  return numberEnv("GSTACK_PI_SPRINT_ARCH_MAX_ATTEMPTS", 5) as number;
+  return numberEnv("KSTACK_PI_SPRINT_ARCH_MAX_ATTEMPTS", 5) as number;
 }
 
 // --- Model tiers (E4 / D10): inert unless both env vars are meaningful ------
 
 /**
- * Judgment-heavy phases route to GSTACK_PI_MODEL_STRONG when set; everything
- * else to GSTACK_PI_MODEL_FAST. UNSET envs mean "keep the agent definition's
+ * Judgment-heavy phases route to KSTACK_PI_MODEL_STRONG when set; everything
+ * else to KSTACK_PI_MODEL_FAST. UNSET envs mean "keep the agent definition's
  * own model" — the feature is fully inert by default.
  */
 const STRONG_PHASES = new Set(["implement", "architect-gate", "devsecops-review", "qa-verdict"]);
 
 export function modelTierFor(phaseId: string): string | undefined {
-  const strong = process.env.GSTACK_PI_MODEL_STRONG;
-  const fast = process.env.GSTACK_PI_MODEL_FAST;
+  const strong = process.env.KSTACK_PI_MODEL_STRONG;
+  const fast = process.env.KSTACK_PI_MODEL_FAST;
   if (strong === undefined && fast === undefined) return undefined;
   return STRONG_PHASES.has(phaseId)
     ? (strong || undefined)
@@ -218,7 +218,7 @@ export function modelTierFor(phaseId: string): string | undefined {
  * be made on real data.
  */
 export function livenessThresholdMs(): number | "off" {
-  const sec = numberEnv("GSTACK_PI_LIVENESS_SEC", 240, { allowOff: true });
+  const sec = numberEnv("KSTACK_PI_LIVENESS_SEC", 240, { allowOff: true });
   return sec === "off" ? "off" : sec * 1000;
 }
 
@@ -228,7 +228,7 @@ export function livenessThresholdMs(): number | "off" {
  * exceeds it.
  */
 export function maxRunTokens(): number {
-  return numberEnv("GSTACK_PI_MAX_RUN_TOKENS", Number.POSITIVE_INFINITY) as number;
+  return numberEnv("KSTACK_PI_MAX_RUN_TOKENS", Number.POSITIVE_INFINITY) as number;
 }
 
 /**
@@ -238,6 +238,6 @@ export function maxRunTokens(): number {
  * 45 min; "off" disables.
  */
 export function delegationBudgetMs(): number | "off" {
-  const sec = numberEnv("GSTACK_PI_DELEGATION_BUDGET_SEC", 2700, { allowOff: true });
+  const sec = numberEnv("KSTACK_PI_DELEGATION_BUDGET_SEC", 2700, { allowOff: true });
   return sec === "off" ? "off" : sec * 1000;
 }

@@ -30,7 +30,7 @@ if [ -n "${OPENCLAW_SESSION:-}" ]; then
 fi
 
 # 2. Explicit headless override (set by the eval/E2E harness for determinism).
-if [ -n "${GSTACK_HEADLESS:-}" ]; then
+if [ -n "${KSTACK_HEADLESS:-}" ]; then
   echo "headless"
   exit 0
 fi

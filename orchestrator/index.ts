@@ -229,7 +229,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         // STEP 4e (opt-in): a VALIDATED validate-only diagnosis may auto-advance.
         if (autoGateValidated() && isValidatedStrategy(params.summary)) {
           ctx.ui.notify(
-            `gstack: "${phase.name}" validated — auto-advancing to "${workflow.phases[newState.phaseIndex]?.name ?? "?"}" (GSTACK_PI_AUTO_GATE_VALIDATED).`,
+            `gstack: "${phase.name}" validated — auto-advancing to "${workflow.phases[newState.phaseIndex]?.name ?? "?"}" (KSTACK_PI_AUTO_GATE_VALIDATED).`,
             "info",
           );
           launchPhase(pi, ctx, newState);
@@ -382,7 +382,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         return {
           content: [{
             type: "text" as const,
-            text: `The "sprint" workflow requires deterministic subagent delegation (GSTACK_PI_DETERMINISTIC). It is currently disabled: the review gates would be inert. Re-enable it or use a different workflow.`,
+            text: `The "sprint" workflow requires deterministic subagent delegation (KSTACK_PI_DETERMINISTIC). It is currently disabled: the review gates would be inert. Re-enable it or use a different workflow.`,
           }],
           isError: true,
         };

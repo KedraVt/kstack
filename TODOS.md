@@ -50,7 +50,7 @@ with its trigger for when to build it:
   methodology digests; two dedicated digests (threat-modeling, test-design) would
   tighten gate quality if reviews keep coming back noisy.
 - **Root-artifacts flag** — planning artifacts land in the project root by design
-  (user-visible). A `GSTACK_PI_SPRINT_ARTIFACTS_DIR` env could relocate them for
+  (user-visible). A `KSTACK_PI_SPRINT_ARTIFACTS_DIR` env could relocate them for
   users who hate root clutter; archive already handles either location.
 
 ## BACKLOG
@@ -186,7 +186,7 @@ redoing scout work. Paired requirement: the persisted schema needs an explicit v
 
 ### Learnings memory — CLOSED (verified 2026-08-24; nothing to implement)
 
-Residual future idea: read-side injection into phases (`GSTACK_PI_LEARNINGS`) —
+Residual future idea: read-side injection into phases (`KSTACK_PI_LEARNINGS`) —
 optional; ranking only matters if that ever ships. The writers in `source/bin/`
 are vendored and verified; bun is a runtime dep for skill memory (README
 Requirements covers it).
@@ -236,8 +236,8 @@ consumer: plan-gate rationale persistence and `/gstack retro` (also still open a
     (`~/.pi/agent/agents/*.md`) validating that a wave never mixes conflicting tools
     (git-write, ports/dev-servers, shared `.gstack`); manual annotation as override only;
   - gate handling (`advance:"manual"`) during waves; result merge in `formatDelegationResults`;
-    concurrency via `GSTACK_PI_MAX_PARALLEL` (use the `numberEnv` parser in `orchestrator/config.ts`).
-- **Liveness kill activation** — the observe-only liveness (`GSTACK_PI_LIVENESS_SEC`,
+    concurrency via `KSTACK_PI_MAX_PARALLEL` (use the `numberEnv` parser in `orchestrator/config.ts`).
+- **Liveness kill activation** — the observe-only liveness (`KSTACK_PI_LIVENESS_SEC`,
   spawn.ts) must NEVER terminate processes until data from at least 2 real runs shows
   false-positive rates are acceptable (gaps > 240s are normal during long builds/tests).
   Decide on run-report data in `.gstack/runs/`.
