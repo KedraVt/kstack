@@ -57,6 +57,8 @@ first-task-detect, learnings-search, next-version, paths, pr-title-rewrite.sh,
 question-preference, redact, redact-prepush, repo-mode, review-log,
 review-read, session-kind, slug, specialist-stats, team-init, telemetry-log,
 timeline-log, update-check, version-bump.
+(`team-init` + `update-check` were deleted at T7 as upstream-coupled — the
+post-sweep set is 22 scripts.)
 
 ## Notable single points
 
@@ -79,8 +81,8 @@ timeline-log, update-check, version-bump.
   `gstack-document-release` + `gstack-document-generate` (D-scope-5).
 - `runtime/bin/gstack-telemetry-log`: local JSONL only — NO live Supabase POST
   (`GSTACK_TELEMETRY_SOURCE` read only; sync script absent from tree). D4
-  residual: nothing to disable. Supabase reads live in `gstack-update-check`
-  (version-check GET) — env names rename only.
+  residual: nothing to disable. Supabase reads lived in `gstack-update-check`
+  (version-check GET) — deleted at T7 along with the script.
 - `.gitignore`: `.gstack/` ignore entry → `.kstack/`.
 - `test/beta-injection.test.ts`: deleted wholesale at T2 (D-scope-2) —
   `package.json` `scripts.test` list updated in the same commit.
