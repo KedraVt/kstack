@@ -99,7 +99,7 @@ test("launchPhase reports non-stale errors best-effort", async () => {
 test("launchPhase refuses a duplicate chain for the same workflow phase (2026-08-31 post-mortem)", async () => {
   // Post-mortem: the user's "No" on the optional-phase dialog was recorded and
   // the workflow completed, yet a second chain for the SAME phase — relaunched
-  // via /gstack → Resume while the first dialog was pending — ran the QA
+  // via /kstack → Resume while the first dialog was pending — ran the QA
   // worker 15 seconds later. A phase must never run two concurrent chains.
   const seen: string[] = [];
   const pi = {} as any;
@@ -965,7 +965,7 @@ describe("optional-phase modes (STEP 2g)", () => {
 // chain: the dialog fired mid-stream, stole editor focus, and defaulted to
 // "Yes" on Enter — a user typing "no, skip QA" + Enter LAUNCHED the QA phase
 // they were refusing. The fix parks the workflow at the optional phase and
-// hands the Run/Skip/Abort decision to the foreground /gstack panel.
+// hands the Run/Skip/Abort decision to the foreground /kstack panel.
 
 describe("optional-phase decision gate (STEP 2g v2)", () => {
   const investigate = getWorkflow("investigate")!;
@@ -1434,7 +1434,7 @@ describe("buildResumeContext parked manual gate (2026-09 fix 3)", () => {
     assert.ok(!text.includes("Continue working on the current phase"), `leaked resume body: ${text}`);
     assert.match(text, /PARKED for user approval/);
     assert.match(text, /do NOT call kstack_advance/);
-    assert.match(text, /only \/gstack next/);
+    assert.match(text, /only \/kstack next/);
   });
 
   test("pendingOptional branch still wins over the generic parked branch", () => {
@@ -1594,7 +1594,7 @@ describe("statusLineFor", () => {
 
   test("awaiting_approval: parked for approval vs optional-phase decision", () => {
     const state = { ...makeCtx("sprint", 4).state, status: "awaiting_approval" as const };
-    assert.match(statusLineFor(state, sprint)!, /PARKED for approval.*\/gstack next/);
+    assert.match(statusLineFor(state, sprint)!, /PARKED for approval.*\/kstack next/);
     assert.match(statusLineFor({ ...state, pendingOptional: true }, sprint)!, /PARKED.*Run\/Skip\/Abort/);
   });
 

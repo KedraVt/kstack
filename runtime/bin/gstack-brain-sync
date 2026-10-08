@@ -281,7 +281,7 @@ subcmd_once() {
   n=$(wc -l < "$paths_file" | tr -d ' ')
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   local msg="sync: $n file(s) | $ts"
-  git -C "$KSTACK_HOME" -c user.email="gstack@localhost" -c user.name="gstack-brain-sync" \
+  git -C "$KSTACK_HOME" -c user.email="kstack@localhost" -c user.name="gstack-brain-sync" \
     commit -q -m "$msg" 2>/dev/null || {
       # Nothing to commit (e.g. all files already committed).
       : > "$QUEUE"

@@ -18,7 +18,7 @@ import { allTestsPassed, isRefutedStrategy, isValidatedStrategy } from "../orche
 import { detectGitContext, type ExecFn } from "../orchestrator/git.ts";
 import { silentChildEnv, winPreloadArgs, WIN_HIDE_PRELOAD_PATH } from "../lib/silent-spawn.ts";
 import { escapeMarkers, UNTRUSTED_BEGIN, UNTRUSTED_END } from "../lib/content-security.ts";
-import { buildArgs, registerGstackTools } from "../tools.generated.ts";
+import { buildArgs, registerKstackTools } from "../tools.generated.ts";
 import type { WorkflowContext, WorkflowPhase } from "../orchestrator/types.ts";
 
 // --- Verdict parser hardening ------------------------------------------------
@@ -373,7 +373,7 @@ describe("generated browse tools", () => {
   function collectTools() {
     const tools: Record<string, any> = {};
     const fakePi = { registerTool: (def: any) => { tools[def.name] = def; } };
-    registerGstackTools(fakePi as any);
+    registerKstackTools(fakePi as any);
     return tools;
   }
 
@@ -403,6 +403,6 @@ describe("generated browse tools", () => {
     const tools = collectTools();
     assert.ok(tools["kstack_daemon_status"], "kstack_daemon_status missing");
     assert.ok(tools["kstack_daemon_restart"], "kstack_daemon_restart missing");
-    assert.ok(!tools["kstack_status"], "bare kstack_status must not exist (orchestrator owns /gstack status)");
+    assert.ok(!tools["kstack_status"], "bare kstack_status must not exist (orchestrator owns /kstack status)");
   });
 });

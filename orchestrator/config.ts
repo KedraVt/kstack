@@ -104,7 +104,7 @@ export function numberEnv(
   if (!Number.isFinite(n) || n <= 0 || (min !== undefined && n < min)) {
     if (!warnedOnce.has(name)) {
       warnedOnce.add(name);
-      console.warn(`[gstack] invalid ${name}="${raw}" - falling back to default (${defaultValue})`);
+      console.warn(`[kstack] invalid ${name}="${raw}" - falling back to default (${defaultValue})`);
     }
     return defaultValue;
   }

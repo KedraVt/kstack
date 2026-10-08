@@ -9,7 +9,7 @@ import type { GitContext, WorkflowState } from "./types.ts";
 
 /**
  * Launch the executor with the optional-phase gate disarmed: the user just
- * explicitly approved this phase via the decision panel (or `/gstack next`).
+ * explicitly approved this phase via the decision panel (or `/kstack next`).
  * Without `approvedOptional`, executeCurrentPhase would park the workflow
  * again instead of running the phase.
  */
@@ -32,7 +32,7 @@ export function decisionBlockedByInFlightChain(
 ): boolean {
   if (!isPhaseInFlight(state.workflowId, state.phaseIndex)) return false;
   ctx.ui.notify(
-    `gstack: a delegation chain for phase ${state.phaseIndex + 1} of "${state.workflowId}" is still running — decision refused. Wait for it to finish, or abort the workflow first.`,
+    `kstack: a delegation chain for phase ${state.phaseIndex + 1} of "${state.workflowId}" is still running — decision refused. Wait for it to finish, or abort the workflow first.`,
     "warning",
   );
   return true;
@@ -53,7 +53,7 @@ function abortWorkflow(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: Wo
   invalidateRuntime();
   releasePhaseInFlight(state.workflowId, state.phaseIndex);
   saveState(pi, abortState(state));
-  try { ctx.ui.setStatus("gstack", undefined); } catch { /* stale */ }
+  try { ctx.ui.setStatus("kstack", undefined); } catch { /* stale */ }
   ctx.ui.notify(message, "info");
 }
 
@@ -70,12 +70,12 @@ export function getCompletions(prefix: string) {
   return [...wf, ...verbs];
 }
 
-export async function handleGstackCommand(args: string, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<void> {
+export async function handleKstackCommand(args: string, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<void> {
   const argId = args.trim().toLowerCase();
 
   const activeState = loadActiveState(ctx);
 
-  // Optional-phase decision gate (STEP 2g v2): "/gstack next" while parked at
+  // Optional-phase decision gate (STEP 2g v2): "/kstack next" while parked at
   // an optional phase means "Run it" — the explicit, foreground twin of the
   // panel choice below. Never a background prompt the user can miss.
   if (activeState?.pendingOptional && activeState.status === "awaiting_approval" && argId === "next") {
@@ -88,12 +88,12 @@ export async function handleGstackCommand(args: string, ctx: ExtensionCommandCon
   }
 
   // Sprint human-control panels (plan B7): freeze / unreadable verdict /
-  // numbering anomaly / retry exhaustion. Intercepted for BOTH `/gstack next`
-  // and bare `/gstack`, BEFORE any generic resume path — a single keystroke
+  // numbering anomaly / retry exhaustion. Intercepted for BOTH `/kstack next`
+  // and bare `/kstack`, BEFORE any generic resume path — a single keystroke
   // must never bypass a security freeze or a parked verdict.
   if (activeState && (await handleSprintPanel(activeState, ctx, pi))) return;
 
-  // /gstack next — approve a gated (awaiting_approval) workflow and continue.
+  // /kstack next — approve a gated (awaiting_approval) workflow and continue.
   if (argId === "next") {
     if (!activeState) {
       ctx.ui.notify("No active workflow to advance.", "warning");
@@ -148,7 +148,7 @@ export async function handleGstackCommand(args: string, ctx: ExtensionCommandCon
         saveState(pi, next);
         if (next.status === "completed") {
           writeRunReport(ctx.cwd, activeState.workflowId);
-          ctx.ui.setStatus("gstack", undefined);
+          ctx.ui.setStatus("kstack", undefined);
           ctx.ui.notify(`Workflow "${activeState.workflowId}" completed (optional phase skipped).`, "info");
         } else {
           ctx.ui.notify(`Skipped "${phaseName}" — continuing workflow.`, "info");
@@ -237,7 +237,7 @@ export async function handleGstackCommand(args: string, ctx: ExtensionCommandCon
   const sorted = [...getAllWorkflows()].sort((a, b) => menuScore(b, git) - menuScore(a, git));
   const options = sorted.map((w) => `${w.id} — ${w.description}`);
 
-  const selected = await ctx.ui.select("gstack: What would you like to do?", options);
+  const selected = await ctx.ui.select("kstack: What would you like to do?", options);
   if (!selected) return;
 
   const selectedId = selected.split(" — ")[0];

@@ -1,14 +1,14 @@
 /**
  * lib/schemas.ts — per-command typebox schema overrides (optional sugar).
  *
- * PLAN §4: hand-written typed schemas for ~20 commands. New gstack flags are
+ * PLAN §4: hand-written typed schemas for ~20 commands. New kstack flags are
  * ALWAYS available via `extraArgs` (every schema declares it), so additions
  * upstream are safe. Removals/renames of typed historical flags surface as
  * gen:tools WARNs at build (PLAN §10 cross-check) and require a manual update
  * here. Orphans (schema for a removed command) are discarded by gen:tools.
  *
  * `SCHEMA_FOR` is consumed by tools.generated.ts. Each entry is keyed by the
- * canonical gstack command name (matching COMMAND_DESCRIPTIONS keys). Missing
+ * canonical kstack command name (matching COMMAND_DESCRIPTIONS keys). Missing
  * keys fall back to a bare `{ extraArgs?, timeoutMs? }` shape (lazy default,
  * still allowlist-validated).
  *

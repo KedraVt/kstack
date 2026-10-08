@@ -5,11 +5,11 @@
 #
 # Resolves three roots with explicit fallback chains so skills work the same
 # whether installed as a Claude Code plugin (CLAUDE_PLUGIN_DATA / CLAUDE_PLANS_DIR
-# set), a global ~/.claude/skills/gstack/ install, or a local checkout under
+# set), a global ~/.claude/skills/kstack/ install, or a local checkout under
 # CI / container env where HOME may be unset.
 #
 # Chains:
-#   KSTACK_STATE_ROOT: KSTACK_HOME -> CLAUDE_PLUGIN_DATA (only when CLAUDE_PLUGIN_ROOT=*gstack*) -> $HOME/.gstack -> .gstack
+#   KSTACK_STATE_ROOT: KSTACK_HOME -> CLAUDE_PLUGIN_DATA (only when CLAUDE_PLUGIN_ROOT=*kstack*) -> $HOME/.gstack -> .gstack
 #   PLAN_ROOT:         KSTACK_PLAN_DIR -> CLAUDE_PLANS_DIR -> $HOME/.claude/plans -> .claude/plans
 #   TMP_ROOT:          TMPDIR -> TMP -> .gstack/tmp (and mkdir -p, best-effort)
 #
@@ -18,14 +18,14 @@
 # expansions ("$KSTACK_STATE_ROOT", not $KSTACK_STATE_ROOT).
 set -u
 
-# State root: where gstack writes projects/, sessions/, analytics/.
+# State root: where kstack writes projects/, sessions/, analytics/.
 if [ -n "${KSTACK_HOME:-}" ]; then
   _state_root="$KSTACK_HOME"
-elif [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && echo "${CLAUDE_PLUGIN_ROOT:-}" | grep -qi "gstack"; then
+elif [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && echo "${CLAUDE_PLUGIN_ROOT:-}" | grep -qi "kstack"; then
   # Guard: only trust CLAUDE_PLUGIN_DATA when CLAUDE_PLUGIN_ROOT confirms we are
-  # running as the gstack plugin. Without this, a CLAUDE_PLUGIN_DATA from another
+  # running as the kstack plugin. Without this, a CLAUDE_PLUGIN_DATA from another
   # plugin (e.g. codex) that leaked into the session env via CLAUDE_ENV_FILE would
-  # be picked up, writing all gstack state into the wrong directory.
+  # be picked up, writing all kstack state into the wrong directory.
   _state_root="$CLAUDE_PLUGIN_DATA"
 elif [ -n "${HOME:-}" ]; then
   _state_root="$HOME/.gstack"

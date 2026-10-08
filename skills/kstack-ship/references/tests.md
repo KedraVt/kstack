@@ -263,14 +263,14 @@ Use AskUserQuestion:
     ```bash
     gh issue create \
       --title "Pre-existing test failure: <test-name>" \
-      --body "Found failing on branch <current-branch>. Failure is pre-existing.\n\n**Error:**\n```\n<first 10 lines>\n```\n\n**Last modified by:** <author>\n**Noticed by:** gstack /ship on <date>" \
+      --body "Found failing on branch <current-branch>. Failure is pre-existing.\n\n**Error:**\n```\n<first 10 lines>\n```\n\n**Last modified by:** <author>\n**Noticed by:** kstack /ship on <date>" \
       --assignee "<github-username>"
     ```
   - **If GitLab:**
     ```bash
     glab issue create \
       -t "Pre-existing test failure: <test-name>" \
-      -d "Found failing on branch <current-branch>. Failure is pre-existing.\n\n**Error:**\n```\n<first 10 lines>\n```\n\n**Last modified by:** <author>\n**Noticed by:** gstack /ship on <date>" \
+      -d "Found failing on branch <current-branch>. Failure is pre-existing.\n\n**Error:**\n```\n<first 10 lines>\n```\n\n**Last modified by:** <author>\n**Noticed by:** kstack /ship on <date>" \
       -a "<gitlab-username>"
     ```
 - If neither CLI is available or `--assignee`/`-a` fails (user not in org, etc.), create the issue without assignee and note who should look at it in the body.
@@ -336,12 +336,12 @@ If multiple suites need to run, run them sequentially (each needs a test lane). 
 A plain backgrounded eval lives in the harness's process group and dies to a
 SIGTERM ("polite quit") on a turn boundary, a stopped monitor, or an interruption
 (observed mid-`/ship`: `script terminated by signal SIGTERM`). Run it through
-`~/.claude/skills/gstack/bin/gstack-detach` instead — it survives in its own
+`~/.claude/skills/kstack/bin/gstack-detach` instead — it survives in its own
 session, serializes against other worktrees via a machine lock (no API
 saturation), and writes a guaranteed `### gstack-detach EXIT=<code> ###` sentinel:
 
 ```bash
-~/.claude/skills/gstack/bin/gstack-detach --label ship-evals --lock gstack-evals --timeout 5400 -- <project eval command>
+~/.claude/skills/kstack/bin/gstack-detach --label ship-evals --lock gstack-evals --timeout 5400 -- <project eval command>
 ```
 
 Then poll the printed log path; break on the `EXIT=` sentinel (covers both pass

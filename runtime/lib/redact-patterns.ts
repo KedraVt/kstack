@@ -228,7 +228,7 @@ export const PATTERNS: RedactPattern[] = [
     category: "secret",
     description: "GitLab token (personal/pipeline-trigger/deploy)",
     // glpat- personal access, glptt- pipeline trigger, gldt- deploy token.
-    // gstack drives glab first-class — these were a coverage gap (#1946).
+    // kstack drives glab first-class — these were a coverage gap (#1946).
     regex: /\b(gl(?:pat|ptt|dt)-[A-Za-z0-9_-]{20,})\b/,
   },
   {

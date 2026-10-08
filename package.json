@@ -1,7 +1,7 @@
 {
   "name": "@kedra/gstack-pi",
   "version": "2.1.0",
-  "description": "gstack browser tools + workflow orchestrator for pi coding agent",
+  "description": "kstack browser tools + workflow orchestrator for pi coding agent",
   "license": "MIT",
   "keywords": [
     "pi-package"

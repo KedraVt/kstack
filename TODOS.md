@@ -2,7 +2,7 @@
 
 Single backlog for the pi extension itself — absorbed `FUTURE_UPDATES.md` (deferred
 features & skill integrations) so all not-yet-built work lives in one place.
-The vendored gstack source keeps its own `source/TODOS.md`; this file tracks extension-level work only.
+The vendored kstack source keeps its own `source/TODOS.md`; this file tracks extension-level work only.
 
 ## NEXT UP (designed 2026-09-14 — SHIPPED 2026-09-15)
 
@@ -24,7 +24,7 @@ All three items landed in one commit:
 
 ## INTEGRATION FOLLOW-UPS (feat/sprint-workflow)
 
-### Non-distilled .agents-clean skills — fold into existing gstack skills (D12)
+### Non-distilled .agents-clean skills — fold into existing kstack skills (D12)
 
 > **Update 2026-08-27:** the FULL raw sources of the .agents-clean skills now ship verbatim in
 > `skills/kedra/` (18 of 20 — `acceptance-criteria-backend`/`-frontend` excluded, already living
@@ -36,7 +36,7 @@ None forgotten; each maps to an existing mechanism and lands when its host skill
 
 - `systematic-debugging` → deepen **kstack-investigate** digest (hypothesis-testing cadence overlap; merge unique sections only)
 - `code-audit-reviewer` → fold remaining checklist items into **kstack-review** digest
-- `kstack-code-simplification` → cross-reference **ponytail** `/gstack simplify` (better gate design already tracked here — do not double-inject)
+- `kstack-code-simplification` → cross-reference **ponytail** `/kstack simplify` (better gate design already tracked here — do not double-inject)
 - `kstack-agent-introspection-debugging` → future standalone digest if agent-self-debugging demand appears
 - `code-tour` → raw source shipped at `skills/kedra/code-tour/`; digest/execution integration still future (orthogonal)
 
@@ -55,7 +55,7 @@ with its trigger for when to build it:
 
 ## BACKLOG
 
-### Ponytail integration — gated code-simplification cycle (`/gstack simplify`)
+### Ponytail integration — gated code-simplification cycle (`/kstack simplify`)
 
 **What:** Add a new workflow to `orchestrator/workflows.ts` implementing a bounded,
 gate-protected code-cleanup pass based on [ponytail](https://github.com/DietrichGebert/ponytail)
@@ -103,7 +103,7 @@ existing review/QA gates validate the deletions instead of fighting them.
 
 **Pros:** Counterweight to over-building without touching gate integrity; reuses the
 existing patterns (`advance: manual`, skipWhen, skill ingestion, reviewer delta-review);
-standalone `/gstack simplify` is useful on any dirty tree even outside develop.
+standalone `/kstack simplify` is useful on any dirty tree even outside develop.
 **Cons:** One more workflow to maintain; the digest must track upstream ponytail rule
 changes manually (MIT, pin a version in the digest header).
 
@@ -142,7 +142,7 @@ fewer develop-plan rework cycles = better end-to-end workflow.
 **Files:** `skills-distilled/kstack-office-hours.md` first, then the rest; cross-check against
 phase instructions in `orchestrator/workflows.ts` so digest output matches what gates expect.
 
-### Workflow: `/gstack design` — full design-review cycle
+### Workflow: `/kstack design` — full design-review cycle
 
 Same shape as `develop` / `investigate`: visual audit of the running app → severity-rated
 design findings (spacing, hierarchy, consistency, AI-slop detection) → interactive fix loop
@@ -151,12 +151,12 @@ methodology **composed with the locally installed `kstack-impeccable` skill**
 (`~/.pi/agent/skills/kstack-impeccable`) for frontend quality standards. Needs: browser tools
 (already native), a taste-feedback loop (interactive, like the plan approval gate).
 
-### Workflow: `/gstack secure` — security audit
+### Workflow: `/kstack secure` — security audit
 
 Security audit workflow on the `kstack-cso` methodology: scout diffs → OWASP Top 10 +
 STRIDE checklist phase → findings gate.
 
-### Workflow: `/gstack retro`
+### Workflow: `/kstack retro`
 
 Weekly retro reading session history; depends on the learnings memory below.
 
@@ -165,7 +165,7 @@ Weekly retro reading session history; depends on the learnings memory below.
 Accept a `kstack-spec`-style spec file as `develop`'s goal input, skipping the interview
 when a spec already exists.
 
-### Orchestrator: `/gstack status`
+### Orchestrator: `/kstack status`
 
 Non-interactive printout of the workflow state machine (current phase x/y, results,
 gate/pause state). NOTE — naming: this is a *slash command* over the orchestrator state
@@ -195,7 +195,7 @@ Requirements covers it).
 
 - **`gstack-plan-devex-review`** — promote into planning when building developer-facing
   products (APIs, CLIs, SDKs).
-- **`kstack-plan-design-review`** — promote for UI-heavy work once `/gstack design` exists.
+- **`kstack-plan-design-review`** — promote for UI-heavy work once `/kstack design` exists.
 - **skillify-assisted digests** — use the `gstack-skillify` methodology to semi-automate
   distilling new upstream skills into `skills-distilled/`.
 
@@ -222,7 +222,7 @@ contracts (`bin/gstack-decision-log`: append / `--supersede <id>` / `--redact <i
 `--compact`; event log + bounded `decisions.active.json` snapshot; scope-filtered reads by
 branch/issue; strictly non-interactive; HIGH-secret rejection). Blocked on vendoring
 upstream `lib/gstack-decision.ts` (~200 lines TS + deps: `lib/bin-context`). Highest-value
-consumer: plan-gate rationale persistence and `/gstack retro` (also still open above).
+consumer: plan-gate rationale persistence and `/kstack retro` (also still open above).
 
 ## Efficiency plan follow-ups (deferred by efficiency plan v3.1, preserved as commit `f06870a` in git history — the plan file itself was deleted; everything it contained is either shipped or listed below)
 
@@ -270,7 +270,7 @@ consumer: plan-gate rationale persistence and `/gstack retro` (also still open a
 
 ## Known upstream limitations (documented in the 2026-09 deep review — not fixable in this repo)
 
-These live in the upstream gstack submodule / bundled binary and reappear on
+These live in the upstream kstack submodule / bundled binary and reappear on
 every `update.sh` pull unless fixed upstream:
 
 - **Browse daemon detached spawns lack `windowsHide`** (`browse/src/cli.ts`

@@ -1164,7 +1164,7 @@ describe("forceContinuePastGate (F3): the next gate gets a fresh loop budget", (
 describe("buildResumeContext / activeConstraintLines (Q4)", () => {
   test("plain active state: no constraint lines, standard resume body", () => {
     const text = buildResumeContext(sprintState(7, { status: "active" }));
-    assert.match(text, /\[gstack workflow active:/);
+    assert.match(text, /\[kstack workflow active:/);
     assert.match(text, /\(8\/10\)/);
     assert.ok(!text.includes("CONSTRAINT:"), "a plain review phase carries no extra constraints");
   });
@@ -1207,7 +1207,7 @@ describe("input router (Q4): short inputs still re-anchor during an active workf
     const handler = createInputRouter({} as any);
     const out = handler({ text: "ok", source: "interactive" }, fakeRouterCtx(sprintState(7, { status: "active" }))) as any;
     assert.equal(out.action, "transform");
-    assert.ok(out.text.startsWith("[gstack workflow active:"));
+    assert.ok(out.text.startsWith("[kstack workflow active:"));
     assert.ok(out.text.endsWith("ok"));
   });
 
@@ -1224,7 +1224,7 @@ describe("input router (Q4): short inputs still re-anchor during an active workf
   test("non-interactive and slash inputs are never transformed", () => {
     const handler = createInputRouter({} as any);
     assert.equal(handler({ text: "ok", source: "rpc" }, fakeRouterCtx(sprintState(7, { status: "active" }))).action, "continue");
-    assert.equal(handler({ text: "/gstack", source: "interactive" }, fakeRouterCtx(sprintState(7, { status: "active" }))).action, "continue");
+    assert.equal(handler({ text: "/kstack", source: "interactive" }, fakeRouterCtx(sprintState(7, { status: "active" }))).action, "continue");
   });
 
   test("without an active workflow, short inputs still skip intent matching (unchanged threshold)", () => {
@@ -1284,7 +1284,7 @@ describe("in-flight decision guards (2026-09 fix 4)", () => {
 
   test("the guard is wired into the decision paths that mutate state", () => {
     // Static wiring check: all three decision mutations (optional Run, optional
-    // Skip, manual-gate Approve via /gstack next) must consult the guard before
+    // Skip, manual-gate Approve via /kstack next) must consult the guard before
     // touching state — the 2026-09 race (skip ignored, phase advanced twice)
     // lived exactly in these paths.
     const source = readFileSync(new URL("../orchestrator/command.ts", import.meta.url), "utf-8");
@@ -1294,7 +1294,7 @@ describe("in-flight decision guards (2026-09 fix 4)", () => {
     assert.match(afterRun, /decisionBlockedByInFlightChain/);
     const nextPath = source.slice(source.indexOf("argId === \"next\""), source.indexOf("const git = await detectGitContext"));
     const guardCount = (nextPath.match(/decisionBlockedByInFlightChain/g) ?? []).length;
-    assert.equal(guardCount, 2, "/gstack next must guard both the optional-park and awaiting_approval paths");
+    assert.equal(guardCount, 2, "/kstack next must guard both the optional-park and awaiting_approval paths");
   });
 
   test("every mutating sprint-panel branch is guarded (F4)", () => {

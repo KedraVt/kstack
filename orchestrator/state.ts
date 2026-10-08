@@ -343,7 +343,7 @@ export function forceContinuePastGate(state: WorkflowState, phases?: WorkflowPha
 /**
  * When the just-completed phase is a manual-gate phase, park the workflow in
  * awaiting_approval. The phaseIndex already points at the next phase so
- * approval (/gstack next) simply resumes execution.
+ * approval (/kstack next) simply resumes execution.
  */
 export function gateForApproval(state: WorkflowState): WorkflowState {
   if (state.status !== "active") return state;
@@ -364,7 +364,7 @@ export function approveNext(state: WorkflowState): WorkflowState {
 // defaults to "Yes" on Enter — so a user typing "no, skip QA" literally
 // LAUNCHED the QA phase they were refusing. Prompting from a background chain
 // cannot be a real decision point, so the decision now lives where every other
-// human decision lives: the foreground /gstack panel (Run / Skip / Abort),
+// human decision lives: the foreground /kstack panel (Run / Skip / Abort),
 // exactly like the manual decision gates. The model cannot bypass it: while
 // parked, kstack_advance refuses and the executor never enters the phase.
 

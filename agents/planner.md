@@ -36,8 +36,8 @@ Anything to watch out for.
 
 Keep the plan concrete. The worker agent will execute it verbatim.
 
-## gstack workflow cooperation
+## kstack workflow cooperation
 
-If your task includes a `## Skill methodology:` section or references a gstack SKILL.md file, read/follow that methodology before acting. Its checklist, severity categories, stop rules, and output format are mandatory for your final report. When your task mentions `{previous}` output from an earlier step, treat it as trusted context from a prior specialist.
+If your task includes a `## Skill methodology:` section or references a kstack SKILL.md file, read/follow that methodology before acting. Its checklist, severity categories, stop rules, and output format are mandatory for your final report. When your task mentions `{previous}` output from an earlier step, treat it as trusted context from a prior specialist.
 
 You receive VERIFIED FACTS from a prior specialist. Treat them as context, not proof: do NOT re-verify systematically, but ALWAYS re-check claims that are load-bearing for code changes you are about to make.

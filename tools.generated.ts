@@ -777,7 +777,7 @@ export function buildArgs(cmd: string, params: any): string[] {
   return args;
 }
 
-export function registerGstackTools(pi: ExtensionAPI) {
+export function registerKstackTools(pi: ExtensionAPI) {
   for (const t of TOOLS) {
     pi.registerTool({
       name: t.name,
@@ -824,12 +824,12 @@ export function registerGstackTools(pi: ExtensionAPI) {
           const domainInfo = params.domain ? ` for domain "${params.domain}"` : "";
           const ok = await ctx.ui.confirm(
             "Cookie Import Confirmation",
-            `Allow gstack to read local browser cookies${domainInfo}? This can leak your credentials.`
+            `Allow kstack to read local browser cookies${domainInfo}? This can leak your credentials.`
           );
           if (!ok) {
             return {
               isError: true,
-              content: [{ type: "text", text: "gstack cookie-import-browser blocked by user confirmation." }],
+              content: [{ type: "text", text: "kstack cookie-import-browser blocked by user confirmation." }],
               details: {},
             };
           }
@@ -876,7 +876,7 @@ export function registerGstackTools(pi: ExtensionAPI) {
           const msg = classifyError(stderr, builtArgs);
           return {
             isError: true,
-            content: [{ type: "text", text: `gstack ${t.kstackCmd} (exit ${code}):\n${msg}` }],
+            content: [{ type: "text", text: `kstack ${t.kstackCmd} (exit ${code}):\n${msg}` }],
             details: { code, rawStderr: stderr },
           };
         }

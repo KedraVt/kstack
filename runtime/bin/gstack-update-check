@@ -7,7 +7,7 @@
 #   (nothing)                       — up to date, snoozed, disabled, or check skipped
 #
 # Env overrides (for testing):
-#   KSTACK_DIR          — override auto-detected gstack root
+#   KSTACK_DIR          — override auto-detected kstack root
 #   KSTACK_REMOTE_URL   — override remote VERSION URL (branch-pinned fallback)
 #   KSTACK_REMOTE_REPO  — override remote git URL for ls-remote SHA resolution
 #   KSTACK_STATE_DIR    — override ~/.gstack state directory
@@ -19,8 +19,8 @@ CACHE_FILE="$STATE_DIR/last-update-check"
 MARKER_FILE="$STATE_DIR/just-upgraded-from"
 SNOOZE_FILE="$STATE_DIR/update-snoozed"
 VERSION_FILE="$KSTACK_DIR/VERSION"
-REMOTE_URL="${KSTACK_REMOTE_URL:-https://raw.githubusercontent.com/garrytan/gstack/main/VERSION}"
-REMOTE_REPO="${KSTACK_REMOTE_REPO:-https://github.com/garrytan/gstack.git}"
+REMOTE_URL="${KSTACK_REMOTE_URL:-https://raw.githubusercontent.com/garrytan/kstack/main/VERSION}"
+REMOTE_REPO="${KSTACK_REMOTE_REPO:-https://github.com/garrytan/kstack.git}"
 
 # ─── Force flag (busts cache + snooze for standalone /gstack-upgrade) ──
 if [ "${1:-}" = "--force" ]; then
@@ -35,7 +35,7 @@ if [ "$_UC" = "false" ]; then
 fi
 
 # ─── Migration: fix stale Codex descriptions (one-time) ───────
-# Existing installs may have .agents/skills/gstack/SKILL.md with oversized
+# Existing installs may have .agents/skills/kstack/SKILL.md with oversized
 # descriptions (>1024 chars) that Codex rejects. We can't regenerate from
 # the runtime root (no bun/scripts), so delete oversized files — the next
 # ./setup or /gstack-upgrade will regenerate them properly.
@@ -197,7 +197,7 @@ if [ -z "${KSTACK_REMOTE_URL:-}" ]; then
     git ls-remote "$REMOTE_REPO" refs/heads/main 2>/dev/null || true)"
   _REMOTE_SHA="$(echo "$_LSR_LINE" | awk '{print $1}')"
   if echo "$_REMOTE_SHA" | grep -qE '^[0-9a-f]{40}$'; then
-    _SHA_URL="https://raw.githubusercontent.com/garrytan/gstack/${_REMOTE_SHA}/VERSION"
+    _SHA_URL="https://raw.githubusercontent.com/garrytan/kstack/${_REMOTE_SHA}/VERSION"
     REMOTE="$(curl -sf --max-time 5 "$_SHA_URL" 2>/dev/null || true)"
   fi
 fi

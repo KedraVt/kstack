@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { registerGstackTools } from "./tools.generated";
+import { registerKstackTools } from "./tools.generated";
 import { resolveBinary, invalidateBinaryCache } from "./lib/browse";
 import { isBinaryInstalled, downloadBinary } from "./lib/download";
 import { initOrchestrator } from "./orchestrator/index";
@@ -27,6 +27,6 @@ export default function (pi: ExtensionAPI) {
     });
   }
 
-  registerGstackTools(pi);
+  registerKstackTools(pi);
   initOrchestrator(pi);
 }

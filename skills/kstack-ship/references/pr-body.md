@@ -8,7 +8,7 @@
 
 **Subagent prompt:**
 
-> You are executing the /document-release workflow after a code push. Read the full skill file `${HOME}/.claude/skills/gstack/document-release/SKILL.md` and execute its complete workflow end-to-end, including CHANGELOG clobber protection, doc exclusions, risky-change gates, and named staging. Do NOT attempt to edit the PR body — no PR exists yet. Branch: `<branch>`, base: `<base>`.
+> You are executing the /document-release workflow after a code push. Read the full skill file `${HOME}/.claude/skills/kstack/document-release/SKILL.md` and execute its complete workflow end-to-end, including CHANGELOG clobber protection, doc exclusions, risky-change gates, and named staging. Do NOT attempt to edit the PR body — no PR exists yet. Branch: `<branch>`, base: `<base>`.
 >
 > After completing the workflow, output a single JSON object on the LAST LINE of your response (no other text after it):
 > `{"files_updated":["README.md","CLAUDE.md",...],"commit_sha":"abc1234","pushed":true,"documentation_section":"<markdown block for PR body's ## Documentation section>"}`
@@ -46,7 +46,7 @@ If an **open** PR/MR already exists: **update** the PR body using `gh pr edit --
 **Always update the PR title to start with `v$NEW_VERSION`.** PR titles use the workspace-aware format `v<NEW_VERSION> <type>: <summary>` — version ALWAYS first, no exceptions, no "custom title kept intentionally" escape hatch. The shared helper `bin/gstack-pr-title-rewrite.sh` is the single source of truth for the rule.
 
 1. Read the current title: `CURRENT=$(gh pr view --json title -q .title)` (or `glab mr view -F json | jq -r .title`).
-2. Compute the corrected title: `NEW_TITLE=$(~/.claude/skills/gstack/bin/gstack-pr-title-rewrite.sh "$NEW_VERSION" "$CURRENT")`. The helper handles three cases: title already correct (no-op), title has a different `v<X.Y.Z.W>` prefix (replace it), or title has no version prefix (prepend one).
+2. Compute the corrected title: `NEW_TITLE=$(~/.claude/skills/kstack/bin/gstack-pr-title-rewrite.sh "$NEW_VERSION" "$CURRENT")`. The helper handles three cases: title already correct (no-op), title has a different `v<X.Y.Z.W>` prefix (replace it), or title has no version prefix (prepend one).
 3. If `NEW_TITLE` differs from `CURRENT`, run `gh pr edit --title "$NEW_TITLE"` (or `glab mr update -t "$NEW_TITLE"`).
 4. **Self-check:** re-fetch the title and assert it starts with `v$NEW_VERSION `. If it does not, retry the edit once. If still wrong, surface the failure to the user.
 
@@ -97,8 +97,8 @@ you missed it.>
 
 ## Linked Spec
 <Auto-detect: look for /spec archives matching this branch via:
-  eval "$(~/.claude/skills/gstack/bin/gstack-paths)"
-  eval "$(~/.claude/skills/gstack/bin/gstack-slug)"
+  eval "$(~/.claude/skills/kstack/bin/gstack-paths)"
+  eval "$(~/.claude/skills/kstack/bin/gstack-slug)"
   CURRENT_BRANCH=$(git branch --show-current)
   SPEC_ARCHIVES="$KSTACK_STATE_ROOT/projects/$SLUG/specs"
   # Find newest archive whose spec_branch frontmatter matches current branch (or one of its
@@ -160,20 +160,20 @@ engine WARN-degrades the example credentials those tools quote instead of blocki
 the PR (a live-format credential inside the fence still blocks).
 
 ```bash
-REDACT_VIS=$(~/.claude/skills/gstack/bin/gstack-config get redact_repo_visibility 2>/dev/null)
+REDACT_VIS=$(~/.claude/skills/kstack/bin/gstack-config get redact_repo_visibility 2>/dev/null)
 [ -z "$REDACT_VIS" ] && REDACT_VIS=$(gh repo view --json visibility -q .visibility 2>/dev/null | tr 'A-Z' 'a-z')
 REDACT_VIS="${REDACT_VIS:-unknown}"
 PR_BODY_FILE=$(mktemp)
 cat > "$PR_BODY_FILE" <<'PR_BODY_EOF'
 <PR body from above>
 PR_BODY_EOF
-~/.claude/skills/gstack/bin/gstack-redact --from-file "$PR_BODY_FILE" --repo-visibility "$REDACT_VIS" --self-email "$(git config user.email 2>/dev/null)" --json
+~/.claude/skills/kstack/bin/gstack-redact --from-file "$PR_BODY_FILE" --repo-visibility "$REDACT_VIS" --self-email "$(git config user.email 2>/dev/null)" --json
 case $? in
   3) echo "BLOCKED — credential in PR body. Rotate + redact, do not create the PR."; exit 1 ;;
   2) echo "MEDIUM findings — confirm per finding (sterner on public) before proceeding." ;;
 esac
 # Also scan the title (short, single-line):
-printf '%s' "v$NEW_VERSION <type>: <summary>" | ~/.claude/skills/gstack/bin/gstack-redact --repo-visibility "$REDACT_VIS" --json
+printf '%s' "v$NEW_VERSION <type>: <summary>" | ~/.claude/skills/kstack/bin/gstack-redact --repo-visibility "$REDACT_VIS" --json
 ```
 
 HIGH blocks (exit 3, no skip). MEDIUM → AskUserQuestion (PII subset offers

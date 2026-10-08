@@ -5,7 +5,7 @@
 #   gstack-team-init optional   # gentle CLAUDE.md suggestion, one-time offer
 #   gstack-team-init required   # CLAUDE.md enforcement + PreToolUse hook
 #
-# Run from the root of your team's repo (not from the gstack directory).
+# Run from the root of your team's repo (not from the kstack directory).
 
 set -euo pipefail
 
@@ -14,8 +14,8 @@ MODE="${1:-}"
 if [ "$MODE" != "optional" ] && [ "$MODE" != "required" ]; then
   echo "Usage: gstack-team-init {optional|required}" >&2
   echo "" >&2
-  echo "  optional  — suggest gstack install once per developer (gentle)" >&2
-  echo "  required  — enforce gstack install, block work without it" >&2
+  echo "  optional  — suggest kstack install once per developer (gentle)" >&2
+  echo "  required  — enforce kstack install, block work without it" >&2
   exit 1
 fi
 
@@ -31,76 +31,76 @@ GENERATED=()
 
 # ── Migrate vendored copy if present ──────────────────────────
 
-if [ -d "$REPO_ROOT/.claude/skills/gstack" ] && [ ! -L "$REPO_ROOT/.claude/skills/gstack" ]; then
-  if [ -f "$REPO_ROOT/.claude/skills/gstack/VERSION" ] || [ -d "$REPO_ROOT/.claude/skills/gstack/.git" ]; then
-    echo "  Found vendored gstack copy at $REPO_ROOT/.claude/skills/gstack"
+if [ -d "$REPO_ROOT/.claude/skills/kstack" ] && [ ! -L "$REPO_ROOT/.claude/skills/kstack" ]; then
+  if [ -f "$REPO_ROOT/.claude/skills/kstack/VERSION" ] || [ -d "$REPO_ROOT/.claude/skills/kstack/.git" ]; then
+    echo "  Found vendored kstack copy at $REPO_ROOT/.claude/skills/kstack"
     echo "  Team mode uses the global install — removing vendored copy..."
-    ( cd "$REPO_ROOT" && git rm -r --cached .claude/skills/gstack/ 2>/dev/null ) || true
+    ( cd "$REPO_ROOT" && git rm -r --cached .claude/skills/kstack/ 2>/dev/null ) || true
     if [ -f "$REPO_ROOT/.gitignore" ]; then
-      if ! grep -qF '.claude/skills/gstack/' "$REPO_ROOT/.gitignore" 2>/dev/null; then
-        echo '.claude/skills/gstack/' >> "$REPO_ROOT/.gitignore"
+      if ! grep -qF '.claude/skills/kstack/' "$REPO_ROOT/.gitignore" 2>/dev/null; then
+        echo '.claude/skills/kstack/' >> "$REPO_ROOT/.gitignore"
       fi
     else
-      echo '.claude/skills/gstack/' > "$REPO_ROOT/.gitignore"
+      echo '.claude/skills/kstack/' > "$REPO_ROOT/.gitignore"
     fi
-    rm -rf "$REPO_ROOT/.claude/skills/gstack"
+    rm -rf "$REPO_ROOT/.claude/skills/kstack"
     GENERATED+=(".gitignore")
-    echo "  Removed vendored copy and added .claude/skills/gstack/ to .gitignore"
+    echo "  Removed vendored copy and added .claude/skills/kstack/ to .gitignore"
   fi
 fi
 
 # ── CLAUDE.md snippet ──────────────────────────────────────────
 
 if [ "$MODE" = "optional" ]; then
-  SNIPPET='## gstack (recommended)
+  SNIPPET='## kstack (recommended)
 
-This project uses [gstack](https://github.com/garrytan/gstack) for AI-assisted workflows.
+This project uses [kstack](https://github.com/garrytan/kstack) for AI-assisted workflows.
 Install it for the best experience:
 
 ```bash
-git clone --depth 1 https://github.com/garrytan/gstack.git ~/.claude/skills/gstack
-cd ~/.claude/skills/gstack && ./setup --team
+git clone --depth 1 https://github.com/garrytan/kstack.git ~/.claude/skills/kstack
+cd ~/.claude/skills/kstack && ./setup --team
 ```
 
 Skills like /qa, /ship, /review, /investigate, and /browse become available after install.
-Use /browse for all web browsing. Use ~/.claude/skills/gstack/... for gstack file paths.'
+Use /browse for all web browsing. Use ~/.claude/skills/kstack/... for kstack file paths.'
 else
-  SNIPPET='## gstack (REQUIRED — global install)
+  SNIPPET='## kstack (REQUIRED — global install)
 
-**Before doing ANY work, verify gstack is installed:**
+**Before doing ANY work, verify kstack is installed:**
 
 ```bash
-test -d ~/.claude/skills/gstack/bin && echo "KSTACK_OK" || echo "KSTACK_MISSING"
+test -d ~/.claude/skills/kstack/bin && echo "KSTACK_OK" || echo "KSTACK_MISSING"
 ```
 
 If KSTACK_MISSING: STOP. Do not proceed. Tell the user:
 
-> gstack is required for all AI-assisted work in this repo.
+> kstack is required for all AI-assisted work in this repo.
 > Install it:
 > ```bash
-> git clone --depth 1 https://github.com/garrytan/gstack.git ~/.claude/skills/gstack
-> cd ~/.claude/skills/gstack && ./setup --team
+> git clone --depth 1 https://github.com/garrytan/kstack.git ~/.claude/skills/kstack
+> cd ~/.claude/skills/kstack && ./setup --team
 > ```
 > Then restart your AI coding tool.
 
-Do not skip skills, ignore gstack errors, or work around missing gstack.
+Do not skip skills, ignore kstack errors, or work around missing gstack.
 
-Using gstack skills: After install, skills like /qa, /ship, /review, /investigate,
+Using kstack skills: After install, skills like /qa, /ship, /review, /investigate,
 and /browse are available. Use /browse for all web browsing.
-Use ~/.claude/skills/gstack/... for gstack file paths (the global path).'
+Use ~/.claude/skills/kstack/... for kstack file paths (the global path).'
 fi
 
-# Check if CLAUDE.md already has a gstack section
-if [ -f "$CLAUDE_MD" ] && grep -q "## gstack" "$CLAUDE_MD" 2>/dev/null; then
-  echo "CLAUDE.md already has a gstack section. Skipping CLAUDE.md update."
-  echo "  To replace it, remove the existing ## gstack section and re-run."
+# Check if CLAUDE.md already has a kstack section
+if [ -f "$CLAUDE_MD" ] && grep -q "## kstack" "$CLAUDE_MD" 2>/dev/null; then
+  echo "CLAUDE.md already has a kstack section. Skipping CLAUDE.md update."
+  echo "  To replace it, remove the existing ## kstack section and re-run."
 else
   if [ -f "$CLAUDE_MD" ]; then
     echo "" >> "$CLAUDE_MD"
   fi
   echo "$SNIPPET" >> "$CLAUDE_MD"
   GENERATED+=("CLAUDE.md")
-  echo "  + CLAUDE.md — added gstack $MODE section"
+  echo "  + CLAUDE.md — added kstack $MODE section"
 fi
 
 # ── Required mode: enforcement hook ────────────────────────────
@@ -113,21 +113,21 @@ if [ "$MODE" = "required" ]; then
   mkdir -p "$HOOKS_DIR"
   cat > "$HOOKS_DIR/check-gstack.sh" << 'HOOK_EOF'
 #!/bin/bash
-# Block skill usage when gstack is not installed globally.
+# Block skill usage when kstack is not installed globally.
 
-if [ ! -d "$HOME/.claude/skills/gstack/bin" ]; then
+if [ ! -d "$HOME/.claude/skills/kstack/bin" ]; then
   cat >&2 <<'MSG'
-BLOCKED: gstack is not installed globally.
+BLOCKED: kstack is not installed globally.
 
-gstack is required for AI-assisted work in this repo.
+kstack is required for AI-assisted work in this repo.
 
 Install it:
-  git clone --depth 1 https://github.com/garrytan/gstack.git ~/.claude/skills/gstack
-  cd ~/.claude/skills/gstack && ./setup --team
+  git clone --depth 1 https://github.com/garrytan/kstack.git ~/.claude/skills/kstack
+  cd ~/.claude/skills/kstack && ./setup --team
 
 Then restart your AI coding tool.
 MSG
-  echo '{"permissionDecision":"deny","message":"gstack is required but not installed. See stderr for install instructions."}'
+  echo '{"permissionDecision":"deny","message":"kstack is required but not installed. See stderr for install instructions."}'
   exit 0
 fi
 
@@ -184,9 +184,9 @@ echo ""
 if [ ${#GENERATED[@]} -gt 0 ]; then
   echo "Commit the generated files:"
   echo "  git add ${GENERATED[*]}"
-  echo "  git commit -m \"chore: require gstack for AI-assisted work\""
+  echo "  git commit -m \"chore: require kstack for AI-assisted work\""
 fi
 echo ""
 echo "Each developer then runs:"
-echo "  git clone --depth 1 https://github.com/garrytan/gstack.git ~/.claude/skills/gstack"
-echo "  cd ~/.claude/skills/gstack && ./setup --team"
+echo "  git clone --depth 1 https://github.com/garrytan/kstack.git ~/.claude/skills/kstack"
+echo "  cd ~/.claude/skills/kstack && ./setup --team"

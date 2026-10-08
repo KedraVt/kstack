@@ -187,7 +187,7 @@ export function buildPhaseInstructions(phase: WorkflowPhase, ctx: WorkflowContex
     parts.push("");
   }
 
-  parts.push(`## [gstack workflow: ${ctx.state.workflowId}] Phase: ${phase.name}`);
+  parts.push(`## [kstack workflow: ${ctx.state.workflowId}] Phase: ${phase.name}`);
   parts.push(`**Goal:** ${ctx.state.goal}`);
   parts.push(`**Progress:** Phase ${ctx.state.phaseIndex + 1} of ${totalPhases}`);
   parts.push(`**Branch:** ${ctx.git.branch}`);
@@ -440,7 +440,7 @@ function buildMainInstructions(phase: WorkflowPhase, ctx: WorkflowContext): stri
       `1. Identify what to test: "${c.state.goal}"`,
       `2. Determine the target URL or dev server (ask user if unclear)`,
       `3. Define the test plan: which user flows, which breakpoints`,
-      `4. Ensure the gstack browser binary is available (use the kstack_daemon_status tool)`,
+      `4. Ensure the kstack browser binary is available (use the kstack_daemon_status tool)`,
       `5. Summarize the test plan before proceeding`,
     ].join("\n"),
 
@@ -479,7 +479,7 @@ function buildMainInstructions(phase: WorkflowPhase, ctx: WorkflowContext): stri
       "### Instructions",
       `The user requested a quick action: "${c.state.goal}"`,
       `Determine which single action to perform (QA, review, ship, or investigate) and execute it directly.`,
-      `Use the appropriate gstack tools and workflows. Keep it focused and fast.`,
+      `Use the appropriate kstack tools and workflows. Keep it focused and fast.`,
     ].join("\n"),
 
     // Sprint planning phases (plan D6).
@@ -605,7 +605,7 @@ Stop when: the required flows are covered OR two passes produce no new findings.
 ## CONTEXT
 Goal: {goal} | Branch: {branch}
 
-Use the gstack browser tools to test user flows. Core set: kstack_goto, kstack_snapshot, kstack_click, kstack_fill or kstack_type (form inputs — never declare a form flow tested without exercising its inputs), kstack_wait (settle SPAs before asserting), kstack_console with --errors after each flow (silent JS failures are bugs), kstack_screenshot for evidence; others (kstack_network, kstack_select, kstack_scroll, ...) as needed. Report all bugs found with severity.`,
+Use the kstack browser tools to test user flows. Core set: kstack_goto, kstack_snapshot, kstack_click, kstack_fill or kstack_type (form inputs — never declare a form flow tested without exercising its inputs), kstack_wait (settle SPAs before asserting), kstack_console with --errors after each flow (silent JS failures are bugs), kstack_screenshot for evidence; others (kstack_network, kstack_select, kstack_scroll, ...) as needed. Report all bugs found with severity.`,
     "review": `## DELIVERABLE
 Findings with severity + file:line + concrete failure scenario, a scope check, and a final verdict APPROVE or REQUEST_CHANGES.
 

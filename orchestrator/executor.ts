@@ -152,7 +152,7 @@ export function annotateOrphanedDelegation(pi: ExtensionAPI, ctx: ExtensionConte
  * Duplicate-chain guard (2026-08-31 session post-mortem): the user refused the
  * investigate `regression-qa` phase in the confirm dialog — "Skipped by user"
  * was recorded and the workflow completed — yet a SECOND chain for the same
- * phase (relaunched via /gstack → Resume while the first dialog was still
+ * phase (relaunched via /kstack → Resume while the first dialog was still
  * pending) ran the QA worker 15 seconds later. Each relaunch spawned a new
  * dialog that disposed the previous one (auto-resolving it to "No"), so the
  * refusal only ever governed one of N racing chains, and the last standing
@@ -181,7 +181,7 @@ export function releasePhaseInFlight(workflowId: string, phaseIndex: number): vo
  * Two mechanical blocks, both "the state machine decides, not the model":
  *
  * 1. Manual gate (awaiting_approval): after a decision phase completes, ONLY
- *    /gstack next or the /gstack panel may continue. Without this check a
+ *    /kstack next or the /kstack panel may continue. Without this check a
  *    second kstack_advance in the same turn would record the NEXT phase —
  *    which never ran — as completed, silently bypassing the gate (the parked
  *    state points at a subagent phase with no chain in flight, so the
@@ -196,7 +196,7 @@ export function releasePhaseInFlight(workflowId: string, phaseIndex: number): vo
  */
 export function advanceBlockReason(state: WorkflowState): string | null {
   if (state.status === "awaiting_approval") {
-    return `the workflow is PARKED awaiting user approval (manual decision gate) — only /gstack next or the /gstack panel may continue it`;
+    return `the workflow is PARKED awaiting user approval (manual decision gate) — only /kstack next or the /kstack panel may continue it`;
   }
   // Fail-closed parks (F1 fix): EVERY paused state is a human decision point
   // (security freeze, loop exhaustion, numbering anomaly, unreadable verdict,
@@ -206,12 +206,12 @@ export function advanceBlockReason(state: WorkflowState): string | null {
   if (state.status === "paused") {
     const reason = state.pausedReason ?? "";
     if (state.frozenUntilHuman || reason.startsWith("security-freeze:")) {
-      return `the sprint is FROZEN by a critical/high security rejection — only the /gstack panel (with the exact confirmation phrase) may unfreeze it`;
+      return `the sprint is FROZEN by a critical/high security rejection — only the /kstack panel (with the exact confirmation phrase) may unfreeze it`;
     }
     if (state.verdictPark) {
-      return `the phase's verdict was unreadable — only the /gstack panel may continue, return or abort (no attempt was burned)`;
+      return `the phase's verdict was unreadable — only the /kstack panel may continue, return or abort (no attempt was burned)`;
     }
-    return `the workflow is PAUSED${reason ? ` (${reason})` : ""} — a human decision is pending; only /gstack may resume, re-run or abort it`;
+    return `the workflow is PAUSED${reason ? ` (${reason})` : ""} — a human decision is pending; only /kstack may resume, re-run or abort it`;
   }
   if (isPhaseInFlight(state.workflowId, state.phaseIndex)) {
     return `the subagent delegation for phase ${state.phaseIndex + 1} of "${state.workflowId}" is still running — wait for its results before calling kstack_advance`;
@@ -229,7 +229,7 @@ export function launchPhase(
   if (inFlightPhases.has(key)) {
     try {
       ctx.ui.notify(
-        `gstack: a chain for workflow "${state.workflowId}" phase ${state.phaseIndex + 1} is already running — ignoring the duplicate launch.`,
+        `kstack: a chain for workflow "${state.workflowId}" phase ${state.phaseIndex + 1} is already running — ignoring the duplicate launch.`,
         "warning",
       );
     } catch {
@@ -243,7 +243,7 @@ export function launchPhase(
       const msg = err instanceof Error ? err.message : String(err);
       if (/stale/i.test(msg)) return;
       try {
-        ctx.ui.notify(`gstack error: ${msg}`, "error");
+        ctx.ui.notify(`kstack error: ${msg}`, "error");
       } catch {
         /* context went stale while reporting — nothing left to do */
       }
@@ -288,7 +288,7 @@ export async function executeCurrentPhase(
     writeRunReport(ctx.cwd, state.workflowId);
     saveState(pi, { ...state, status: "completed" });
     try {
-      ctx.ui.setStatus("gstack", undefined);
+      ctx.ui.setStatus("kstack", undefined);
     } catch {
       /* stale ctx */
     }
@@ -307,29 +307,29 @@ export async function executeCurrentPhase(
     if (discovery.anomaly) {
       const parked = { ...state, status: "paused" as const, pausedReason: `anomaly:${discovery.anomaly}` };
       saveState(pi, parked);
-      setGstackStatus(ctx, parked, workflow);
-      notify(`gstack sprint: sprint numbering anomaly — ${discovery.anomaly}. Resolve manually, then resume via /gstack (the panel re-checks the numbering).`, "warning");
+      setKstackStatus(ctx, parked, workflow);
+      notify(`kstack sprint: sprint numbering anomaly — ${discovery.anomaly}. Resolve manually, then resume via /kstack (the panel re-checks the numbering).`, "warning");
       return;
     }
     const numbered = { ...state, sprintNumber: discovery.next };
     saveState(pi, numbered);
     state = numbered;
     wfCtx.state = numbered;
-    notify(`gstack sprint: assigned sprint number ${String(discovery.next).padStart(2, "0")}.`, "info");
+    notify(`kstack sprint: assigned sprint number ${String(discovery.next).padStart(2, "0")}.`, "info");
   }
 
   // Branch enforcement: gates that loop back to "implement" audit the BE/FE
   // chain's diff — meaningless if a specialist committed to main/master
   // (subagents share the host's git tree). architect-gate is deliberately out:
   // it loops to system-design and reviews documents — main is legitimate
-  // there. Fail closed like every other park: the /gstack panel's Resume
+  // there. Fail closed like every other park: the /kstack panel's Resume
   // re-runs this function, which re-detects the branch.
   if (state.workflowId === "sprint" && phase.loopBackTo === "implement" && git.isMainBranch) {
     const parked = { ...state, status: "paused" as const, pausedReason: `branch-violation:${phase.id} on ${git.branch}` };
     saveState(pi, parked);
-    setGstackStatus(ctx, parked, workflow);
+    setKstackStatus(ctx, parked, workflow);
     notify(
-      `gstack sprint: BRANCH VIOLATION — "${phase.id}" is a verdict gate and MASTER_DOD requires work on task/<slug> branches, but HEAD is "${git.branch}". Move the work onto a task branch, then resume via /gstack.`,
+      `kstack sprint: BRANCH VIOLATION — "${phase.id}" is a verdict gate and MASTER_DOD requires work on task/<slug> branches, but HEAD is "${git.branch}". Move the work onto a task branch, then resume via /kstack.`,
       "warning",
     );
     return;
@@ -350,12 +350,12 @@ export async function executeCurrentPhase(
       // kstack_advance returned), stole editor focus, and defaulted to "Yes"
       // on Enter — a user typing "no, skip QA" + Enter literally launched the
       // QA phase they were refusing. A prompt from a background chain is not
-      // a decision point. Park instead: the foreground /gstack panel owns the
+      // a decision point. Park instead: the foreground /kstack panel owns the
       // Run/Skip/Abort decision (command.ts), like every other manual gate.
       const gated = gateOptionalPhase(state);
       saveState(pi, gated);
       notify(
-        `gstack: optional phase "${phase.name}" (${state.phaseIndex + 1}/${workflow.phases.length}) awaits your decision — run /gstack to Run it, Skip it, or Abort.`,
+        `kstack: optional phase "${phase.name}" (${state.phaseIndex + 1}/${workflow.phases.length}) awaits your decision — run /kstack to Run it, Skip it, or Abort.`,
         "info",
       );
       return;
@@ -373,13 +373,13 @@ export async function executeCurrentPhase(
       return executeCurrentPhase(pi, ctx, skipped);
     }
     // mode === "auto", or the user explicitly approved this phase via the
-    // /gstack decision panel (approvedOptional) — fall through and run it.
+    // /kstack decision panel (approvedOptional) — fall through and run it.
   }
 
   // Entry gate for side-effect phases (commit-archive): advance:"manual"
   // alone can only park AFTER the phase completes — far too late when the
   // phase's own delegation commits and archives. Park BEFORE anything runs;
-  // the /gstack approve path flips entryGate to "approved" (cleared by
+  // the /kstack approve path flips entryGate to "approved" (cleared by
   // advancePhase when the phase completes).
   if (
     deterministicSubagents() &&
@@ -390,15 +390,15 @@ export async function executeCurrentPhase(
   ) {
     const gated = gateEntry(state);
     saveState(pi, gated);
-    setGstackStatus(ctx, gated, workflow);
+    setKstackStatus(ctx, gated, workflow);
     notify(
-      `gstack: "${phase.name}" is a human-gated side-effect phase — it has NOT run yet. Approve via /gstack (Run) before it executes.`,
+      `kstack: "${phase.name}" is a human-gated side-effect phase — it has NOT run yet. Approve via /kstack (Run) before it executes.`,
       "info",
     );
     return;
   }
 
-  setGstackStatus(ctx, state, workflow);
+  setKstackStatus(ctx, state, workflow);
 
   // Deterministic mode: the executor spawns subagents itself for subagent
   // phases. Delegation no longer depends on the model choosing to call the
@@ -455,9 +455,9 @@ export async function executeCurrentPhase(
           parkCause,
         );
         saveState(pi, parkedState);
-        setGstackStatus(ctx, parkedState, workflow);
+        setKstackStatus(ctx, parkedState, workflow);
         notify(
-          `gstack sprint: no trustworthy verdict found for "${phase.id}" — pipeline parked for manual review (/gstack next). No retry budget consumed.`,
+          `kstack sprint: no trustworthy verdict found for "${phase.id}" — pipeline parked for manual review (/kstack next). No retry budget consumed.`,
           "warning",
         );
         return;
@@ -494,7 +494,7 @@ export async function executeCurrentPhase(
       }
     }
     // Restore the phase status line (delegation left subagent progress there).
-    setGstackStatus(ctx, state, workflow);
+    setKstackStatus(ctx, state, workflow);
   }
 
   const instructions = buildPhaseInstructions(phase, wfCtx);
@@ -516,7 +516,7 @@ export async function executeCurrentPhase(
     pi.sendUserMessage(delegationPrefix + instructions, { deliverAs: "followUp" });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (!/stale/i.test(msg)) notify(`gstack: failed to deliver phase instructions: ${msg}`, "error");
+    if (!/stale/i.test(msg)) notify(`kstack: failed to deliver phase instructions: ${msg}`, "error");
   }
 }
 
@@ -560,7 +560,7 @@ export async function runDeterministicDelegation(
         });
         try {
           ctx.ui.notify(
-            `gstack: delegation wall-clock budget (${Math.round((budget as number) / 1000)}s) exhausted — stopping phase "${phase.id}" before "${step.agent}".`,
+            `kstack: delegation wall-clock budget (${Math.round((budget as number) / 1000)}s) exhausted — stopping phase "${phase.id}" before "${step.agent}".`,
             "warning",
           );
         } catch {
@@ -575,7 +575,7 @@ export async function runDeterministicDelegation(
       const handoff = extractHandoff(previous, { incomplete: prevIncomplete });
       const task = replaceExact(step.task, /\{previous\}/g, handoff.text || "(no prior output)");
       try {
-        ctx.ui.notify(`gstack: running subagent "${step.agent}"…`, "info");
+        ctx.ui.notify(`kstack: running subagent "${step.agent}"…`, "info");
       } catch {
         /* stale ctx — keep working, notifications are best-effort */
       }
@@ -587,7 +587,7 @@ export async function runDeterministicDelegation(
         try {
           const secs = Math.round((Date.now() - stepStart) / 1000);
           ctx.ui.setStatus(
-            "gstack",
+            "kstack",
             `subagent ${step.agent} (${index + 1}/${steps.length}) · ${secs}s — ${extra}`,
           );
         } catch {
@@ -635,7 +635,7 @@ export async function runDeterministicDelegation(
         });
         try {
           ctx.ui.notify(
-            `gstack: subagent "${step.agent}" failed transiently (${result.timedOut ? "timeout" : `exit ${result.exitCode}`}) — retrying once in ${Math.round(decision.delayMs / 1000)}s with a raised limit…`,
+            `kstack: subagent "${step.agent}" failed transiently (${result.timedOut ? "timeout" : `exit ${result.exitCode}`}) — retrying once in ${Math.round(decision.delayMs / 1000)}s with a raised limit…`,
             "warning",
           );
         } catch {
@@ -673,7 +673,7 @@ export async function runDeterministicDelegation(
       if (totalTokensUsed() > maxRunTokens()) {
         try {
           ctx.ui.notify(
-            `gstack: KSTACK_PI_MAX_RUN_TOKENS exceeded (${totalTokensUsed()} tokens) — stopping the chain orderly.`,
+            `kstack: KSTACK_PI_MAX_RUN_TOKENS exceeded (${totalTokensUsed()} tokens) — stopping the chain orderly.`,
             "warning",
           );
         } catch {
@@ -705,7 +705,7 @@ export async function runDeterministicDelegation(
   // is the only conditional part (plus a visible warning when absent).
   if (shouldReopenFullChain(wasCollapsed, out[out.length - 1]?.result.output)) {
     try {
-      ctx.ui.notify("gstack: root-cause hypothesis REFUTED by validation — rebuilding the full investigation chain.", "warning");
+      ctx.ui.notify("kstack: root-cause hypothesis REFUTED by validation — rebuilding the full investigation chain.", "warning");
     } catch {
       /* stale ctx */
     }
@@ -735,7 +735,7 @@ export async function runDeterministicDelegation(
       } else {
         try {
           ctx.ui.notify(
-            "gstack: could not extract the refuted cause from the validate task — reopening the full chain WITHOUT the 'do not revisit' note.",
+            "kstack: could not extract the refuted cause from the validate task — reopening the full chain WITHOUT the 'do not revisit' note.",
             "warning",
           );
         } catch {
@@ -805,36 +805,36 @@ export function activeConstraintLines(state: WorkflowState, phase?: WorkflowPhas
   const lines: string[] = [];
   if (state.frozenUntilHuman || (state.pausedReason ?? "").startsWith("security-freeze:")) {
     lines.push(
-      "CONSTRAINT: a review gate is FROZEN by a critical/high security rejection. Do NOT work around it and do NOT call kstack_advance — the user must unfreeze via /gstack (exact confirmation phrase).",
+      "CONSTRAINT: a review gate is FROZEN by a critical/high security rejection. Do NOT work around it and do NOT call kstack_advance — the user must unfreeze via /kstack (exact confirmation phrase).",
     );
   }
   if (state.verdictPark) {
     lines.push(
-      "CONSTRAINT: the phase's verdict was UNREADABLE. Do not start new work and do NOT call kstack_advance — the user decides via /gstack (continue / return / abort).",
+      "CONSTRAINT: the phase's verdict was UNREADABLE. Do not start new work and do NOT call kstack_advance — the user decides via /kstack (continue / return / abort).",
     );
   }
   if (state.status === "paused" && state.pausedReason && lines.length === 0) {
     lines.push(
-      `CONSTRAINT: the workflow is PAUSED (${state.pausedReason}) — a human decision is pending via /gstack. Do NOT call kstack_advance.`,
+      `CONSTRAINT: the workflow is PAUSED (${state.pausedReason}) — a human decision is pending via /kstack. Do NOT call kstack_advance.`,
     );
   }
   if (state.status === "paused" && !state.pausedReason && lines.length === 0) {
     lines.push(
-      "CONSTRAINT: the previous phase FAILED — the user decides how to proceed via /gstack (resume re-runs the phase). Do NOT call kstack_advance.",
+      "CONSTRAINT: the previous phase FAILED — the user decides how to proceed via /kstack (resume re-runs the phase). Do NOT call kstack_advance.",
     );
   }
   // Parked-gate fix (2026-09 session): an awaiting_approval state is a manual
   // decision gate. The input router prefixes EVERY user message with the
   // resume context, so a "continue working" body here reads as an instruction
   // to keep going — the exact mechanic that made a parked plan phase implement
-  // the plan instead of waiting for /gstack next.
+  // the plan instead of waiting for /kstack next.
   if (state.status === "awaiting_approval" && state.entryGate === true) {
     lines.push(
-      "CONSTRAINT: the workflow is PARKED BEFORE a human-gated side-effect phase — it has NOT run yet. Do NOT perform the phase's work and do NOT call kstack_advance; the user decides via /gstack (Run / Abort).",
+      "CONSTRAINT: the workflow is PARKED BEFORE a human-gated side-effect phase — it has NOT run yet. Do NOT perform the phase's work and do NOT call kstack_advance; the user decides via /kstack (Run / Abort).",
     );
   } else if (state.status === "awaiting_approval" && !state.pendingOptional) {
     lines.push(
-      "CONSTRAINT: the workflow is PARKED at a decision gate — the completed phase awaits user approval. Do NOT continue the phase, do NOT implement anything, and do NOT call kstack_advance; the user decides via /gstack next. If the user asks for revisions, apply them to the completed phase's output only.",
+      "CONSTRAINT: the workflow is PARKED at a decision gate — the completed phase awaits user approval. Do NOT continue the phase, do NOT implement anything, and do NOT call kstack_advance; the user decides via /kstack next. If the user asks for revisions, apply them to the completed phase's output only.",
     );
   }
   if (phase?.variant === "report-only") {
@@ -851,7 +851,7 @@ export function activeConstraintLines(state: WorkflowState, phase?: WorkflowPhas
 /**
  * Truthful status line for the workflow's current posture: a parked or frozen
  * workflow must never keep showing the last "running" label. Every non-running
- * line names its unlock action (/gstack next vs the /gstack panel). Returns
+ * line names its unlock action (/kstack next vs the /kstack panel). Returns
  * undefined for terminal states so callers can pass the result straight to
  * ctx.ui.setStatus (undefined clears the line).
  */
@@ -861,11 +861,11 @@ export function statusLineFor(state: WorkflowState, workflow: { name: string; ph
   if (state.status === "completed" || state.status === "aborted") return undefined;
   if (state.status === "awaiting_approval") {
     if (state.entryGate === true) {
-      return `${workflow.name}: PARKED — gated phase "${phase?.name ?? "?"}" awaits approval to RUN via /gstack`;
+      return `${workflow.name}: PARKED — gated phase "${phase?.name ?? "?"}" awaits approval to RUN via /kstack`;
     }
     return state.pendingOptional
-      ? `${workflow.name}: PARKED — optional phase "${phase?.name ?? "?"}" awaits Run/Skip/Abort via /gstack`
-      : `${workflow.name}: PARKED for approval — /gstack next`;
+      ? `${workflow.name}: PARKED — optional phase "${phase?.name ?? "?"}" awaits Run/Skip/Abort via /kstack`
+      : `${workflow.name}: PARKED for approval — /kstack next`;
   }
   if (state.status === "paused") {
     const reason = state.pausedReason ?? "";
@@ -883,14 +883,14 @@ export function statusLineFor(state: WorkflowState, workflow: { name: string; ph
                 : reason
                   ? `paused: ${reason}`
                   : "phase failed";
-    return `${workflow.name}: ${cause} ${progress} — /gstack`;
+    return `${workflow.name}: ${cause} ${progress} — /kstack`;
   }
   return `${workflow.name}: ${phase?.name ?? "unknown"} ${progress}`;
 }
 
-export function setGstackStatus(ctx: ExtensionContext, state: WorkflowState, workflow: { name: string; phases: WorkflowPhase[] }): void {
+export function setKstackStatus(ctx: ExtensionContext, state: WorkflowState, workflow: { name: string; phases: WorkflowPhase[] }): void {
   try {
-    ctx.ui.setStatus("gstack", statusLineFor(state, workflow));
+    ctx.ui.setStatus("kstack", statusLineFor(state, workflow));
   } catch {
     /* stale ctx */
   }
@@ -902,7 +902,7 @@ export function buildResumeContext(state: WorkflowState): string {
 
   const phase = workflow.phases[state.phaseIndex];
   const parts: string[] = [];
-  parts.push(`[gstack workflow active: ${workflow.name}]`);
+  parts.push(`[kstack workflow active: ${workflow.name}]`);
   parts.push(`Current phase: ${phase?.name ?? "unknown"} (${state.phaseIndex + 1}/${workflow.phases.length})`);
   parts.push(`Goal: ${state.goal}`);
 
@@ -920,9 +920,9 @@ export function buildResumeContext(state: WorkflowState): string {
 
   if (state.pendingOptional) {
     // Optional-phase decision gate: parked AT the optional phase. The model
-    // must not start it — the user decides via /gstack (Run / Skip / Abort).
+    // must not start it — the user decides via /kstack (Run / Skip / Abort).
     parts.push(
-      `This phase is OPTIONAL and the workflow is PARKED awaiting the user's decision. Do not work on it and do not call kstack_advance — tell the user to run /gstack to Run it, Skip it, or Abort.`,
+      `This phase is OPTIONAL and the workflow is PARKED awaiting the user's decision. Do not work on it and do not call kstack_advance — tell the user to run /kstack to Run it, Skip it, or Abort.`,
     );
     return parts.join("\n");
   }
@@ -934,7 +934,7 @@ export function buildResumeContext(state: WorkflowState): string {
       // literally start the gated work.
       parts.push(
         `The workflow is PARKED BEFORE the human-gated side-effect phase "${phase?.name ?? "the next phase"}" — it has NOT run yet.`,
-        "Do NOT perform that phase's work and do NOT call kstack_advance — only the user's approval via /gstack starts it.",
+        "Do NOT perform that phase's work and do NOT call kstack_advance — only the user's approval via /kstack starts it.",
       );
       return parts.join("\n");
     }
@@ -944,7 +944,7 @@ export function buildResumeContext(state: WorkflowState): string {
     // approval" — and any plan tweak read as "resume and implement".
     parts.push(
       `The workflow is PARKED for user approval BEFORE "${phase?.name ?? "the next phase"}" — the previous (decision) phase is complete and awaits the user's review.`,
-      "Do NOT start or continue any phase, do NOT implement the plan, and do NOT call kstack_advance — only /gstack next (the user) continues the workflow.",
+      "Do NOT start or continue any phase, do NOT implement the plan, and do NOT call kstack_advance — only /kstack next (the user) continues the workflow.",
       "If the user asks for revisions in this turn, apply them to the completed phase's output only, then stop and remain parked.",
     );
     return parts.join("\n");
@@ -957,7 +957,7 @@ export function buildResumeContext(state: WorkflowState): string {
     // work the park exists to stop (a branch violation forbids work on main,
     // not just the advance call).
     parts.push(
-      `The workflow is PAUSED (${state.pausedReason ?? "phase failed"}) — only /gstack resumes, re-runs or aborts it. Do not continue work and do NOT call kstack_advance.`,
+      `The workflow is PAUSED (${state.pausedReason ?? "phase failed"}) — only /kstack resumes, re-runs or aborts it. Do not continue work and do NOT call kstack_advance.`,
     );
     return parts.join("\n");
   }

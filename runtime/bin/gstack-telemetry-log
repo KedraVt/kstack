@@ -12,7 +12,7 @@
 #
 # Env overrides (for testing):
 #   KSTACK_STATE_DIR  — override ~/.gstack state directory
-#   KSTACK_DIR        — override auto-detected gstack root
+#   KSTACK_DIR        — override auto-detected kstack root
 #
 # NOTE: Uses set -uo pipefail (no -e) — telemetry must never exit non-zero
 set -uo pipefail

@@ -1,11 +1,11 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { handleGstackCommand, getCompletions } from "./command.ts";
+import { handleKstackCommand, getCompletions } from "./command.ts";
 import { createInputRouter } from "./router.ts";
 import { loadActiveState, saveState, advancePhase, gateForApproval, createState } from "./state.ts";
 import type { AdvanceOptions } from "./state.ts";
 import { getWorkflow, getWorkflowIds } from "./workflows.ts";
-import { launchPhase, invalidateRuntime, advanceBlockReason, setGstackStatus } from "./executor.ts";
+import { launchPhase, invalidateRuntime, advanceBlockReason, setKstackStatus } from "./executor.ts";
 import { manualGates, autoGateValidated, optionalPhases, deterministicSubagents } from "./config.ts";
 import { parsePlanFileMarker, buildPhaseInstructions } from "./templates.ts";
 import { detectGitContext } from "./git.ts";
@@ -40,11 +40,11 @@ export function initOrchestrator(pi: ExtensionAPI): void {
     }
   }
 
-  pi.registerCommand("gstack", {
+  pi.registerCommand("kstack", {
     description: "Guided workflow orchestrator: develop, investigate, qa, ship, review (next: approve gated phase)",
     getArgumentCompletions: getCompletions,
     handler: async (args: string, ctx) => {
-      await handleGstackCommand(args, ctx as any, pi);
+      await handleKstackCommand(args, ctx as any, pi);
     },
   });
 
@@ -54,13 +54,13 @@ export function initOrchestrator(pi: ExtensionAPI): void {
     name: "kstack_advance",
     label: "Advance Workflow",
     description:
-      "Signal completion of the current gstack workflow phase. ALWAYS call this yourself when a phase's work is done — never tell the user to run commands instead. On decision phases the workflow pauses for user approval after this call; the orchestrator handles that.",
-    promptSnippet: "Advance the active gstack workflow to the next phase",
+      "Signal completion of the current kstack workflow phase. ALWAYS call this yourself when a phase's work is done — never tell the user to run commands instead. On decision phases the workflow pauses for user approval after this call; the orchestrator handles that.",
+    promptSnippet: "Advance the active kstack workflow to the next phase",
     promptGuidelines: [
-      "Only call kstack_advance when a gstack workflow phase is active",
+      "Only call kstack_advance when a kstack workflow phase is active",
       "Provide a concise 2-3 sentence summary of what was accomplished",
       "Use status 'failed' if the phase could not be completed",
-      "Never ask the user to run /gstack or any other command to progress — calling this tool IS the progression mechanism",
+      "Never ask the user to run /kstack or any other command to progress — calling this tool IS the progression mechanism",
     ],
     parameters: Type.Object({
       summary: Type.String({ description: "2-3 sentence summary of what was accomplished in this phase" }),
@@ -69,7 +69,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext): Promise<any> {
       const state = loadActiveState(ctx);
       if (!state) {
-        return { content: [{ type: "text" as const, text: "No active gstack workflow. Start one with /gstack." }] };
+        return { content: [{ type: "text" as const, text: "No active kstack workflow. Start one with /kstack." }] };
       }
 
       const workflow = getWorkflow(state.workflowId);
@@ -82,7 +82,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         return {
           content: [{
             type: "text" as const,
-            text: `gstack: workflow "${state.workflowId}" has no phase at index ${state.phaseIndex} (status: ${state.status}) — the persisted state is inconsistent; resolve via /gstack.`,
+            text: `kstack: workflow "${state.workflowId}" has no phase at index ${state.phaseIndex} (status: ${state.status}) — the persisted state is inconsistent; resolve via /kstack.`,
           }],
           isError: true,
         };
@@ -91,26 +91,26 @@ export function initOrchestrator(pi: ExtensionAPI): void {
       // Optional-phase decision gate (STEP 2g v2): while the workflow is parked
       // at an optional phase awaiting the user's Run/Skip/Abort decision, the
       // model can neither complete nor skip the phase via kstack_advance — the
-      // decision belongs exclusively to the /gstack panel.
+      // decision belongs exclusively to the /kstack panel.
       if (state.pendingOptional) {
         return {
           content: [{
             type: "text" as const,
-            text: `The workflow is parked at the optional phase "${phase?.name ?? "?"}" awaiting an explicit user decision (Run / Skip / Abort) via /gstack. Do NOT call kstack_advance again and do not start the phase — the user decides.`,
+            text: `The workflow is parked at the optional phase "${phase?.name ?? "?"}" awaiting an explicit user decision (Run / Skip / Abort) via /kstack. Do NOT call kstack_advance again and do not start the phase — the user decides.`,
           }],
         };
       }
 
       // Advance-block guard (audit fix): the state machine, not the model,
       // decides when a phase may be recorded. Two cases are refused: a parked
-      // manual gate (only /gstack next continues it) and an in-flight
+      // manual gate (only /kstack next continues it) and an in-flight
       // delegation (its results, not a model summary, complete the phase).
       const blocked = advanceBlockReason(state);
       if (blocked) {
         return {
           content: [{
             type: "text" as const,
-            text: `gstack: ${blocked}. Do NOT call kstack_advance again.`,
+            text: `kstack: ${blocked}. Do NOT call kstack_advance again.`,
           }],
         };
       }
@@ -140,7 +140,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
               newState.planFile = planFile;
             } else {
               ctx.ui.notify(
-                `gstack: plan summary reported "${planFile}" but the file does not exist — falling back to the default plan path.`,
+                `kstack: plan summary reported "${planFile}" but the file does not exist — falling back to the default plan path.`,
                 "warning",
               );
             }
@@ -159,7 +159,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         newState.status === "active" &&
         state.entryGate !== "approved";
       if (!willManualGate) saveState(pi, newState);
-      setGstackStatus(ctx, newState, workflow);
+      setKstackStatus(ctx, newState, workflow);
 
       // D3 security freeze surfaced to both model and user.
       if (newState.frozenUntilHuman) {
@@ -167,7 +167,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         return {
           content: [{
             type: "text" as const,
-            text: `SECURITY FREEZE: ${info?.severity ?? "critical/high"} severity security rejection in "${phase.id}". The pipeline is FROZEN — no further automated work. A human security panel must review ${info?.artifactPath ?? "devsecops/security-review-artifact.md"}; only /gstack next can unfreeze after that review. Do NOT attempt fixes or call kstack_advance again.`,
+            text: `SECURITY FREEZE: ${info?.severity ?? "critical/high"} severity security rejection in "${phase.id}". The pipeline is FROZEN — no further automated work. A human security panel must review ${info?.artifactPath ?? "devsecops/security-review-artifact.md"}; only /kstack next can unfreeze after that review. Do NOT attempt fixes or call kstack_advance again.`,
           }],
           isError: false,
         };
@@ -177,7 +177,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         return {
           content: [{
             type: "text" as const,
-            text: `Retry budget exhausted (${newState.pausedReason}). Workflow paused for human decision — review the latest artifacts with the user; /gstack next continues past this gate manually.`,
+            text: `Retry budget exhausted (${newState.pausedReason}). Workflow paused for human decision — review the latest artifacts with the user; /kstack next continues past this gate manually.`,
           }],
         };
       }
@@ -217,19 +217,19 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         return {
           content: [{
             type: "text" as const,
-            text: `Phase "${phase.name}" done — workflow PARKED for a human decision: ${cause}. Do NOT call kstack_advance again; the user resolves it via /gstack.`,
+            text: `Phase "${phase.name}" done — workflow PARKED for a human decision: ${cause}. Do NOT call kstack_advance again; the user resolves it via /kstack.`,
           }],
         };
       }
 
       // Manual gate: decision phases park in awaiting_approval until the user
-      // runs /gstack next. The model cannot bypass this — only /gstack next
+      // runs /kstack next. The model cannot bypass this — only /kstack next
       // resumes execution.
       if (willManualGate) {
         // STEP 4e (opt-in): a VALIDATED validate-only diagnosis may auto-advance.
         if (autoGateValidated() && isValidatedStrategy(params.summary)) {
           ctx.ui.notify(
-            `gstack: "${phase.name}" validated — auto-advancing to "${workflow.phases[newState.phaseIndex]?.name ?? "?"}" (KSTACK_PI_AUTO_GATE_VALIDATED).`,
+            `kstack: "${phase.name}" validated — auto-advancing to "${workflow.phases[newState.phaseIndex]?.name ?? "?"}" (KSTACK_PI_AUTO_GATE_VALIDATED).`,
             "info",
           );
           launchPhase(pi, ctx, newState);
@@ -242,16 +242,16 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         }
         const gated = gateForApproval(newState);
         saveState(pi, gated);
-        setGstackStatus(ctx, gated, workflow);
+        setKstackStatus(ctx, gated, workflow);
         const nextPhase = workflow.phases[gated.phaseIndex];
         ctx.ui.notify(
-          `gstack: "${phase.name}" complete — review the output, then run /gstack next to proceed to "${nextPhase?.name ?? "?"}".`,
+          `kstack: "${phase.name}" complete — review the output, then run /kstack next to proceed to "${nextPhase?.name ?? "?"}".`,
           "info",
         );
         return {
           content: [{
             type: "text" as const,
-            text: `Phase "${phase.name}" recorded. This was a decision phase: the workflow is now PAUSED for user approval. Present your results clearly. Do NOT call kstack_advance again and do not start the next phase — the user decides when to continue with /gstack next.`,
+            text: `Phase "${phase.name}" recorded. This was a decision phase: the workflow is now PAUSED for user approval. Present your results clearly. Do NOT call kstack_advance again and do not start the next phase — the user decides when to continue with /kstack next.`,
           }],
         };
       }
@@ -267,7 +267,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
       // — tell the model so it does not expect the phase to run on its own.
       const decisionNote =
         nextPhase?.optional && optionalPhases() === "ask"
-          ? ` This phase is OPTIONAL: the workflow will pause and the user decides via /gstack whether to run "${nextPhase.name}". Do not call kstack_advance for it.`
+          ? ` This phase is OPTIONAL: the workflow will pause and the user decides via /kstack whether to run "${nextPhase.name}". Do not call kstack_advance for it.`
           : "";
       return {
         content: [{
@@ -285,17 +285,17 @@ export function initOrchestrator(pi: ExtensionAPI): void {
     name: "kstack_phase",
     label: "Show Phase Instructions",
     description:
-      "Re-fetch the full instructions for the current gstack workflow phase. Call this when the phase's instructions are no longer in your context (e.g. after compaction).",
-    promptSnippet: "Re-fetch the current gstack phase's full instructions",
+      "Re-fetch the full instructions for the current kstack workflow phase. Call this when the phase's instructions are no longer in your context (e.g. after compaction).",
+    promptSnippet: "Re-fetch the current kstack phase's full instructions",
     promptGuidelines: [
-      "Call kstack_phase only when a gstack workflow is active and the current phase's instructions are missing from your context",
+      "Call kstack_phase only when a kstack workflow is active and the current phase's instructions are missing from your context",
       "The output is a pure function of the persisted workflow state — it is never stale",
     ],
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx: ExtensionContext): Promise<any> {
       const state = loadActiveState(ctx);
       if (!state) {
-        return { content: [{ type: "text" as const, text: "No active gstack workflow. Start one with /gstack." }] };
+        return { content: [{ type: "text" as const, text: "No active kstack workflow. Start one with /kstack." }] };
       }
       const workflow = getWorkflow(state.workflowId);
       if (!workflow) {
@@ -349,8 +349,8 @@ export function initOrchestrator(pi: ExtensionAPI): void {
     name: "kstack_start",
     label: "Start Workflow",
     description:
-      "Start a gstack guided workflow programmatically. Workflows: develop | investigate | qa | qa-report | ship | review | quick | sprint. Use when a task matches one of these pipelines and no workflow is currently active.",
-    promptSnippet: "Start a gstack workflow (develop, investigate, qa, qa-report, ship, review, quick, sprint)",
+      "Start a kstack guided workflow programmatically. Workflows: develop | investigate | qa | qa-report | ship | review | quick | sprint. Use when a task matches one of these pipelines and no workflow is currently active.",
+    promptSnippet: "Start a kstack workflow (develop, investigate, qa, qa-report, ship, review, quick, sprint)",
     parameters: Type.Object({
       workflow: Type.String({ description: "Workflow id: develop | investigate | qa | qa-report | ship | review | quick | sprint" }),
       goal: Type.String({ description: "What the workflow should accomplish" }),
@@ -390,7 +390,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
       const state = createState(workflow.id, params.goal);
       saveState(pi, state);
       ensureRun(state.workflowId); // STEP 0 telemetry: start accumulating
-      ctx.ui.notify(`gstack: starting ${workflow.name} (${workflow.phases.length} phases)`, "info");
+      ctx.ui.notify(`kstack: starting ${workflow.name} (${workflow.phases.length} phases)`, "info");
       // Non-blocking: phase instructions arrive as a follow-up message once
       // any deterministic subagent work for the first phase has completed.
       launchPhase(pi, ctx, state);

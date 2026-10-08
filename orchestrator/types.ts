@@ -30,7 +30,7 @@ export interface WorkflowPhase {
   /**
    * Advancement policy. "auto" (default): the workflow proceeds as soon as the
    * phase completes via kstack_advance. "manual": after completion the
-   * workflow enters awaiting_approval and only `/gstack next` moves it on.
+   * workflow enters awaiting_approval and only `/kstack next` moves it on.
    */
   advance?: "auto" | "manual";
   /**
@@ -147,7 +147,7 @@ export interface WorkflowState {
   /**
    * Optional-phase decision gate (STEP 2g v2): the workflow is parked at an
    * `optional` phase awaiting an explicit human Run/Skip/Abort decision in the
-   * /gstack panel. Never set for KSTACK_PI_OPTIONAL_PHASES=auto|skip, and
+   * /kstack panel. Never set for KSTACK_PI_OPTIONAL_PHASES=auto|skip, and
    * cleared the moment the user decides. While set, kstack_advance refuses to
    * touch the phase — the model cannot bypass the gate.
    */
@@ -155,7 +155,7 @@ export interface WorkflowState {
   /**
    * Entry gate for side-effect phases (commit-archive): `true` = parked
    * BEFORE the gated phase runs, awaiting an explicit human Run/Abort via
-   * /gstack; `"approved"` = approved once — the executor proceeds and
+   * /kstack; `"approved"` = approved once — the executor proceeds and
    * advancePhase clears the marker when the phase completes.
    */
   entryGate?: true | "approved";
