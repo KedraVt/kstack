@@ -9,7 +9,7 @@ node_modules/
 bun.lock
 # state dirs: legacy pre-rename + current (char class covers both, keeps the audit clean)
 .[gk]stack/
-# runtime/ binaries are provisioned by update.sh / auto-download — never commit them
+# runtime/ binaries are provisioned by session-start auto-download — never commit them
 runtime/
 
 # mindrun QA artifacts (temporary, never committed)

@@ -2,7 +2,6 @@
 
 Single backlog for the pi extension itself — absorbed `FUTURE_UPDATES.md` (deferred
 features & skill integrations) so all not-yet-built work lives in one place.
-The vendored kstack source keeps its own `source/TODOS.md`; this file tracks extension-level work only.
 
 ## NEXT UP (designed 2026-09-14 — SHIPPED 2026-09-15)
 
@@ -26,19 +25,18 @@ All three items landed in one commit:
 
 ### Non-distilled .agents-clean skills — fold into existing kstack skills (D12)
 
-> **Update 2026-08-27:** the FULL raw sources of the .agents-clean skills now ship verbatim in
-> `skills/kedra/` (18 of 20 — `acceptance-criteria-backend`/`-frontend` excluded, already living
-> in the sub-agent bodies) for manual `/skill:` invocation. The disposition below still governs
-> the **digest-injection** side: which methodology the workflows inject and which mechanisms
-> absorb it.
+> **Update 2026-10-08 (post-S1):** the layered `skills/kedra/` dir referenced here was
+> deleted in S1-T9 — per-skill dispositions were resolved by `Kstack/review-table.md`
+> and the survivors merged into the canonical `skills/kstack-*/` catalog. The items
+> below are the residual follow-ups that the review table did NOT absorb.
 
 None forgotten; each maps to an existing mechanism and lands when its host skill next evolves:
 
-- `systematic-debugging` → deepen **kstack-investigate** digest (hypothesis-testing cadence overlap; merge unique sections only)
-- `code-audit-reviewer` → fold remaining checklist items into **kstack-review** digest
+- `systematic-debugging` → deepen **kstack-investigate** SKILL.md (hypothesis-testing cadence overlap; merge unique sections only)
+- `code-audit-reviewer` → fold remaining checklist items into **kstack-review** SKILL.md
 - `kstack-code-simplification` → cross-reference **ponytail** `/kstack simplify` (better gate design already tracked here — do not double-inject)
-- `kstack-agent-introspection-debugging` → future standalone digest if agent-self-debugging demand appears
-- `code-tour` → raw source shipped at `skills/kedra/code-tour/`; digest/execution integration still future (orthogonal)
+- `kstack-agent-introspection-debugging` → future standalone skill if agent-self-debugging demand appears
+- `code-tour` → dropped in the S1 review (`.tour` VSCode format, marginal — see review-table); nothing left to integrate
 
 Deferred from the sprint-workflow integration (D12) — deliberate scope cuts, each
 with its trigger for when to build it:
@@ -46,8 +44,8 @@ with its trigger for when to build it:
 - **Parallel task waves (E3)** — `implement` currently runs strict BE→FE sequential
   chains per wave. Independent backend tasks could fan out concurrently once
   branch-per-task merge discipline is mechanically enforced.
-- **Two niche digests** — the devsecops-review and qa-verdict phases reuse adjacent
-  methodology digests; two dedicated digests (threat-modeling, test-design) would
+- **Two niche skills** — the devsecops-review and qa-verdict phases reuse adjacent
+  methodology skills; two dedicated skills (threat-modeling, test-design) would
   tighten gate quality if reviews keep coming back noisy.
 - **Root-artifacts flag** — planning artifacts land in the project root by design
   (user-visible). A `KSTACK_PI_SPRINT_ARTIFACTS_DIR` env could relocate them for
@@ -77,7 +75,7 @@ Also insert an `optional: true` `simplify` phase into the `develop` workflow bet
 `implement` and `qa`, with `skipWhen` on empty diff, so the full cycle becomes
 implement → simplify → review → qa → ship.
 
-Ship a distilled methodology digest (~2K tokens, `skills-distilled/`) containing the
+Ship a canonical catalog skill (`skills/kstack-simplify/SKILL.md`, ~2K tokens) containing the
 ladder, the never-cut list (input validation at trust boundaries, data-loss error
 handling, security, accessibility, anything explicitly requested), the `ponytail:`
 ceiling-comment convention, and the delete-list output format — so the extension stays
@@ -104,8 +102,8 @@ existing review/QA gates validate the deletions instead of fighting them.
 **Pros:** Counterweight to over-building without touching gate integrity; reuses the
 existing patterns (`advance: manual`, skipWhen, skill ingestion, reviewer delta-review);
 standalone `/kstack simplify` is useful on any dirty tree even outside develop.
-**Cons:** One more workflow to maintain; the digest must track upstream ponytail rule
-changes manually (MIT, pin a version in the digest header).
+**Cons:** One more workflow to maintain; the skill must track upstream ponytail rule
+changes manually (MIT, pin a version in the skill header).
 
 **Context / where to start:**
 - Upstream ruleset: https://raw.githubusercontent.com/DietrichGebert/ponytail/main/skills/ponytail/SKILL.md
@@ -114,33 +112,34 @@ changes manually (MIT, pin a version in the digest header).
   `pi install git:github.com/DietrichGebert/ponytail`
 - Files: `orchestrator/workflows.ts` (new `simplify` workflow + optional develop phase),
   `orchestrator/router.ts` + menu (intent patterns: /\b(simplify|clean ?up|delete[- ]list|dead code)\b/i),
-  `skills-distilled/kstack-simplify.md` (new digest).
+  `skills/kstack-simplify/SKILL.md` (new canonical skill).
 - Design sketched in session of 2026-08-23 (see conversation summary in `.kstack/plans/` if persisted).
 
-### Skill digest improvements — especially `kstack-office-hours`
+### Skill output-contract improvements — especially `kstack-office-hours`
 
-**What:** Review and improve all `skills-distilled/*.md` digests so they steer agent behavior
-more reliably inside workflows. Priority: `kstack-office-hours.md` (planning-phase quality gate).
+**What:** Review and improve the canonical `skills/kstack-*/SKILL.md` files so they steer agent
+behavior more reliably inside workflows. Priority: `kstack-office-hours` (planning-phase
+quality gate).
 
-> **Update 2026-09-14:** the canonical catalog is the only injected source
-> (the digest-vs-full switch was removed in S2). The office-hours
-> output-contract critique applies to what ships.
-> The registry `dod` lines are injected either way.
+> **Update 2026-10-08 (post-S1/S2):** the digest layer is gone — `skills-distilled/` was deleted
+> and the canonical SKILL.md is the only injected source. The `## DoD gate` parsed from each
+> SKILL.md is what verification phases and repeat deliveries receive (D13). The output-contract
+> critique below now applies to the canonical files.
 
 Pain points to address:
-- Office-hours digest is persona-heavy (YC partner voice) but light on **workflow integration**:
+- Office-hours is persona-heavy (YC partner voice) but light on **workflow integration**:
   when to smart-skip, how to converge to a plan artifact, what handoff format the next phase
-  (`develop.plan`) actually consumes. Digest should specify its output contract, not just its posture.
+  (`develop.plan`) actually consumes. The skill should specify its output contract, not just its posture.
 - Missing exit criteria: no explicit "session done when X" condition, so planning phases can loop.
-- Other digests: audit each for the same gap — do they define inputs, output shape, and stop
+- Other skills: audit each for the same gap — do they define inputs, output shape, and stop
   conditions, or only tone?
 
-**Why:** Digests are injected into subagent prompts every session; vague ones cost tokens AND
+**Why:** Skill bodies are injected into subagent prompts every session; vague ones cost tokens AND
 produce mushy plans that downstream gates reject → retry loops. Sharper office-hours output =
 fewer develop-plan rework cycles = better end-to-end workflow.
 
-**Files:** `skills-distilled/kstack-office-hours.md` first, then the rest; cross-check against
-phase instructions in `orchestrator/workflows.ts` so digest output matches what gates expect.
+**Files:** `skills/kstack-office-hours/SKILL.md` first, then the rest; cross-check against
+phase instructions in `orchestrator/workflows.ts` so skill output matches what gates expect.
 
 ### Workflow: `/kstack design` — full design-review cycle
 
@@ -187,23 +186,25 @@ redoing scout work. Paired requirement: the persisted schema needs an explicit v
 ### Learnings memory — CLOSED (verified 2026-08-24; nothing to implement)
 
 Residual future idea: read-side injection into phases (`KSTACK_PI_LEARNINGS`) —
-optional; ranking only matters if that ever ships. The writers in `source/bin/`
-are vendored and verified; bun is a runtime dep for skill memory (README
-Requirements covers it).
+optional; ranking only matters if that ever ships. The writers in `runtime/bin/`
+(kstack-learnings-search et al.) are vendored and verified; bun is a runtime dep for
+skill memory (README Requirements covers it).
 
 ### Skill promotions
 
 - **`kstack-plan-devex-review`** — promote into planning when building developer-facing
   products (APIs, CLIs, SDKs).
 - **`kstack-plan-design-review`** — promote for UI-heavy work once `/kstack design` exists.
-- **skillify-assisted digests** — use the `kstack-skillify` methodology to semi-automate
-  distilling new upstream skills into `skills-distilled/`.
+- **skillify-assisted skill authoring** — use the `kstack-skillify` methodology to semi-automate
+  porting new upstream skills into the `skills/` catalog.
 
 ### Browse commands tier-3 (deferred from the WP1 regeneration)
 
 Deferred during planning (2026-08-24) to keep the tool surface minimal; revisit when a
-real workflow needs them. All are supported by the browse binary — adding one is an
-`INCLUDE` entry in `scripts/gen-tools.ts` plus a `buildArgs` case:
+real workflow needs them. All are supported by the browse binary — adding one means a
+new registration in `tools.generated.ts` + a `buildArgs`/`commands.generated.ts` entry
+(the `scripts/gen-tools.ts` generator was removed in the S1 freeze; the generated files
+are now hand-maintained):
 
 - **`watch`** — snapshot on DOM mutation; removes wait+retry churn on SPA re-renders.
   Worth it only once SPA QA volume justifies it.
@@ -270,8 +271,9 @@ consumer: plan-gate rationale persistence and `/kstack retro` (also still open a
 
 ## Known upstream limitations (documented in the 2026-09 deep review — not fixable in this repo)
 
-These live in the upstream kstack submodule / bundled binary and reappear on
-every `update.sh` pull unless fixed upstream:
+These live in the upstream project / bundled browse binary — not fixable in
+this repo. `update.sh` and the `source/` submodule were deleted in S1, so they now
+track only the pinned binary release (`lib/download.ts`):
 
 - **Browse daemon detached spawns lack `windowsHide`** (`browse/src/cli.ts`
   node launcher, `security.ts` telemetry spawn, `bun-polyfill.cjs` drops the
@@ -293,6 +295,6 @@ every `update.sh` pull unless fixed upstream:
 
 ## Notes
 
-- All 23 bundled skills remain invocable manually via `/skill:kstack-*` regardless of wiring.
-- Digests must stay verbatim-stable across releases where possible — provider prompt caches
-  key on exact prefixes.
+- All 28 bundled skills remain invocable manually via `/skill:kstack-*` regardless of wiring.
+- Canonical SKILL.md files should stay verbatim-stable across releases where possible —
+  provider prompt caches key on exact prefixes.

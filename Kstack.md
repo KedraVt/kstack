@@ -50,8 +50,8 @@ dettagliato via grilling prima dell'esecuzione e questo file si aggiorna.
 
 | Sprint | Titolo | Stato |
 |--------|--------|-------|
-| S1 | Catalogo skill unico | **dettagliato** |
-| S2 | Indipendenza + rebrand | **dettagliato** |
+| S1 | Catalogo skill unico | **eseguito** |
+| S2 | Indipendenza + rebrand | **eseguito** (restano rename repo GitHub + dir estensione — manuali, D16) |
 | S3 | Step model + pilota | **dettagliato** |
 | S4 | Revisione + migrazione workflow | **dettagliato** |
 | S5a | Evolution — foundation hardening | **dettagliato** |

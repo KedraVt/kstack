@@ -190,6 +190,23 @@ On Windows, `.exe` is appended automatically.
 re-downloads automatically on the next session start when the pinned release
 tag changes (`lib/download.ts`).
 
+<!-- audit-exempt: pre-rename names in this section are intentional migration notes -->
+### Upgrading from gstack-pi
+
+The extension was renamed gstack → kstack (command `/kstack`, tools `kstack_*`,
+env `KSTACK_*`, skills `kstack-*`). Install it as a separate extension dir —
+`~/.pi/agent/extensions/kstack-pi` — and remove the old `gstack-pi` one.
+
+State lives in two places, both renamed: `.kstack/` inside each target repo
+(`plans/`, `sprints/`, `runs/`) and `~/.kstack` for session-level data
+(sessions, analytics, learnings; overridable via `KSTACK_HOME`). **No data
+migration ships yet** — `~/.kstack` starts clean, the old `~/.gstack` and
+`.gstack/` dirs are left untouched, and persisted pre-rename workflow sessions
+simply don't resume (the state entry type changed). A migration script
+(`kstack-migrate`) is planned for a later sprint. A legacy
+`<!-- gstack:begin -->` managed block in a repo's AGENTS.md is upgraded in
+place by `/kstack init`.
+
 ## Architecture
 
 ```
@@ -350,7 +367,7 @@ the root-cause scout->planner chain collapses to ONE validate-only planner step.
 | `KSTACK_PI_VERDICTS` | on | deterministic verdict parsing; `off` ⇒ no auto-routing; gates park in a `/kstack` panel (Accept / Re-run / Abort) |
 | `KSTACK_PI_DELEGATION_BUDGET_SEC` | 2700 | wall-clock budget for one phase's whole delegation chain; `off` disables |
 | `KSTACK_PI_SPRINT_MAX_ATTEMPTS` | 4 | consecutive implement-rerun ceiling per review gate (counter resets on gate approval or on "Accept result — continue past the gate") |
-| `KSTACK_PI_ARCH_MAX_ATTEMPTS` | 5 | system-design rerun ceiling after architect rejections (reads `KSTACK_PI_SPRINT_ARCH_MAX_ATTEMPTS` / `KSTACK_PI_ARCH_MAX_ATTEMPTS`) |
+| `KSTACK_PI_SPRINT_ARCH_MAX_ATTEMPTS` | 5 | system-design rerun ceiling after architect rejections |
 | `KSTACK_PI_MODEL_FAST` / `_STRONG` | unset | model tiers for mechanical vs judgment-heavy phases; unset keeps each agent's own default (inert) |
 | `KSTACK_PI_STRICT_CONTENT` | off | heuristic scan + ASCII-sentinel enveloping of page-content tool output (WP2 defense-in-depth) |
 | `KSTACK_PI_SUBAGENT_TIMEOUT` | 1200 | fallback timeout, seconds |
