@@ -6,10 +6,10 @@
 - **Skill strategy (decided)**: Devin activates one skill at a time. If multiple
   skills are needed simultaneously, merge them into one; when sequential is
   enough, switch between skills instead.
-- **Canonical catalog (post-S1)**: `skills/<id>/` is the flat skill catalog —
-  every skill has `SKILL.md` + colocated `references/` + a literal
-  `## DoD gate` section + `<!-- provenance -->` comment. The old layers
-  (`skills/{kstack,kedra,sprint-beta}`, `skills-distilled`, `source/`) are
+- **Canonical catalog (post-S1)**: `skills/kstack-<id>/` is the flat skill
+  catalog — every skill has `SKILL.md` + colocated `references/` + a literal
+  `## DoD gate` section + `<!-- provenance -->` comment. The pre-S1 layered
+  skill dirs, `skills-distilled/`, `source/`, `update.sh` and `scripts/` are
   deleted; `main` stays the stable baseline, work happens on `kstack`.
 - **Telemetry convention**: only session-level `kstack-*`/`plan-*` skills emit
   `skill_run` markers via `runtime/bin/kstack-telemetry-log`. kedra ports,

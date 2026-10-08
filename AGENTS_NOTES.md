@@ -2,16 +2,16 @@
 
 ## Where the agent files live
 
-Canonical, versioned copies live in this repo at `agents/*.md`. `update.sh`
-syncs them into `~/.pi/agent/agents/` (backing up existing files to
-`.bak-<timestamp>` first, never deleting). If you hand-tuned deployed copies,
-re-apply your changes after a sync.
+Canonical, versioned copies live in this repo at `agents/*.md`. Copy them
+into `~/.pi/agent/agents/` manually (back up existing files first, never
+delete). If you hand-tuned deployed copies, re-apply your changes after a
+sync.
 
 > **History:** this file previously claimed agent definitions were NOT
 > versioned here and described a mirror-test premise. That was stale: the
 > canonical files ARE in `agents/` and had already drifted from deployed copies
 > before the deep review (2026-09). The deployed `~/.pi/agent/agents/` may lag
-> `agents/` until the next `update.sh` run — keep that in mind when debugging
+> `agents/` until the next manual sync — keep that in mind when debugging
 > "the prompt says X but the subagent did Y".
 
 ## Shared contract (all workflow subagents)

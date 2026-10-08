@@ -3,7 +3,7 @@
 Browser automation + guided workflow orchestrator for the [pi](https://github.com/earendil-works/pi) coding agent.
 
 One extension, two layers:
-- **65 native browser tools** — headless Chromium via kstack, ~100ms/command (chain batches N commands into one call)
+- **65 native browser tools** — headless Chromium, ~100ms/command (chain batches N commands into one call)
 - **Workflow orchestrator** — `/kstack` command that guides you through develop, investigate, QA, ship, and review pipelines
 
 ## What's new (feat/skill-ingestion branch)
@@ -11,7 +11,7 @@ One extension, two layers:
 - **Deterministic subagents** — specialists (scout/planner/worker/reviewer) are spawned by the orchestrator itself in isolated `pi` processes; delegation no longer depends on the model's discretion. The `subagent` tool remains for ad-hoc use.
 - **Interactive plan cycle** — scout explores → you are interviewed (grilling protocol rounds with recommended answers + office-hours judgment + eng-review rigor, ≤5 questions/round) → plan written to `.kstack/plans/<slug>.md` → your approval gate (`/kstack next`) → worker implements from the plan file.
 - **Manual decision gates** — `develop.plan` and `investigate.root-cause` pause for user approval before code is touched. Optional phases (e.g. `investigate.regression-qa`) park the same way: the workflow pauses and the `/kstack` panel asks you to **Run / Skip / Abort** — no background Yes-defaulted dialog you can answer by accident.
-- **Skill ingestion** — distilled methodology digests (~2K tokens) from kstack's SKILL.md files are injected by the workflow itself: full digest to whoever does the work, compact DoD+best-practices gates for verification and repeats.
+- **Skill ingestion** — the canonical `skills/<id>/SKILL.md` is injected by the workflow itself: full methodology to whoever does the work, compact DoD+best-practices gates for verification and repeats.
 - **Documentation phases** — optional doc-update phase on `develop` and `ship` (Diataxis coverage map, chained generation for missing docs).
 - **`qa-report` workflow** — full QA methodology, report-only, never modifies code.
 - **`kstack_start` tool** — programmatic workflow entry point (usable by any agent, including subagents).
@@ -31,30 +31,28 @@ One extension, two layers:
 - **Sprint requires deterministic delegation** — the sprint gates route exclusively on executor-produced verdicts, so the workflow refuses to start while `KSTACK_PI_DETERMINISTIC=off` (both `/kstack sprint` and the `kstack_start` tool explain this). Kill-switch parks (`KSTACK_PI_VERDICTS=off` / `_LOOPBACKS=off`) likewise land in a decision panel offering **Accept / Re-run / Abort**.
 - **Strict BE→FE chain** — implementation runs backend-developer then frontend-developer sequentially per task wave; model tiers (`KSTACK_PI_MODEL_STRONG/FAST`) let judgment phases run on stronger models while mechanical phases stay cheap.
 - **Fixed**: phase instructions are now delivered with `followUp` streaming behavior — eliminates the "Agent is already processing" error that silently dropped phase handoffs.
-- **Raw skill library split** — the bundled skill surface is organized in two folders: `skills/kstack/` (23 cherry-picked kstack skills, manual `/skill:kstack-*` invocation) and `skills/kedra/` (18 full `.agents-clean` methodology skills, verbatim, manual `/skill:<name>` invocation — the whole source library except `acceptance-criteria-backend/-frontend`, which live inside the sub-agent bodies).
+- **Unified skill catalog** — 28 skills in a flat `skills/kstack-*/` layout, all manually invocable via `/skill:kstack-*`.
 - **Centralized artifact names** — `orchestrator/artifacts.ts` is the single source for every sprint-stamped filename (`qa-artifact_XX.md`, `code-review-artifact_XX.md`, `software-architect-artifact_XX_N.md`, …); verdict verification, task templates and the freeze path all consume it, closing the stamping-drift bug class.
 - **D4 park causes** — an unreadable-verdict park now records *why* in `pausedReason` (`no-verdict` / `artifact-mismatch` / `unroutable`) and the panel names the cause for triage; no attempt is burned either way.
-- **Runtime binaries untracked** — `runtime/` is gitignored and provisioned on demand (session-start download / `update.sh`); ~197MB of browse daemon binaries were dropped from the git index.
+- **Runtime binaries untracked** — `runtime/` is gitignored and provisioned on demand (session-start download); ~197MB of browse daemon binaries were dropped from the git index.
 - **Delegation test harness** — `runDeterministicDelegation` accepts an injected `spawnFn`; `test/executor-delegation.test.ts` exercises the real chain engine (HANDOFF threading, retry, budgets, REFUTED reopen, circuit breakers) with fake spawns.
 
 ## Requirements
 
 - [pi](https://github.com/earendil-works/pi) >= 0.82.0
-- For updates **and skill memory scripts**: [Bun](https://bun.sh) >= 1.3.0 + Git Bash (Windows). The bundled skills' operational-memory preamble (`kstack-telemetry-log`, `kstack-learnings-log`, `kstack-question-log`, …) executes bash wrappers from `source/bin/` that validate via `bun -e` — verified working 2026-08-24 (write → search roundtrip, fail-loud validation, latest-wins dedup). Without bun those calls fail silently (`|| true` guards) and memory writes are dropped; the orchestrator itself is unaffected.
+- For skill memory scripts: [Bun](https://bun.sh) >= 1.3.0 + Git Bash (Windows). The bundled skills' operational-memory preamble (`runtime/bin/kstack-telemetry-log`, `kstack-slug`, `kstack-redact`, `kstack-review-log`, `kstack-developer-profile`, …) executes bash wrappers that validate via `bun -e`. Without bun those calls fail silently (`|| true` guards) and memory writes are dropped; the orchestrator itself is unaffected.
 
 ## Installation
 
-### 1. Clone with submodules
+### 1. Clone
 
 ```bash
-git clone --recurse-submodules https://github.com/YOUR_USER/kstack-pi ~/.pi/agent/extensions/kstack-pi
+git clone https://github.com/YOUR_USER/kstack-pi ~/.pi/agent/extensions/kstack-pi
 ```
 
 Pi auto-discovers extensions in `~/.pi/agent/extensions/`. No settings.json changes needed.
 
-The browse binary is not committed (`runtime/` is gitignored): it downloads automatically at the first `session_start` (`lib/download.ts`) or is provisioned by `update.sh`.
-
-The `source/` submodule (~69MB) contains the kstack repo. It's only needed for updates — you can skip it on first clone with `--no-recurse-submodules` and fetch it later when you want to update.
+The browse binary is not committed (`runtime/` is gitignored): it downloads automatically at the first `session_start` (`lib/download.ts`).
 
 ### 2. Verify
 
@@ -68,6 +66,7 @@ Open pi in any project. Type `/kstack` — you should see the workflow menu.
 /kstack              # Interactive menu (context-aware, sorted by git state)
 /kstack ship         # Start a specific workflow directly
 /kstack investigate  # Bug debugging pipeline
+/kstack init         # Install/refresh the managed kstack rules block in AGENTS.md
 ```
 
 The menu adapts to your git context:
@@ -109,18 +108,14 @@ The workflow decides when skill knowledge applies — the model never has to gue
 - Every mapped phase injects the canonical `skills/<id>/SKILL.md` — a missing catalog file degrades to the compact DoD gate so a run never breaks.
 - Main phases embed the methodology; subagent phases receive it inside their task string while orchestrator instructions carry only the compact **DoD + best-practices gate**
 - Repeated deliveries within one run degrade to the DoD gate (~40% skill-token savings)
-- Wired skills: investigate, qa, review, ship, office-hours, plan-eng-review, document-release (+generate), grilling, plus the sprint family (capability, system-design, adr, tasks, tdd, verification, appsec, docker, qa, pipeline). All 41 bundled skills stay manually invocable via `/skill:` (23 under the `kstack-` prefix, 18 kedra skills under their own name).
+- Wired skills: investigate, qa, review, ship, office-hours, plan-eng-review, document-release (+generate), grilling, plus the sprint family (capability, system-design, adr, tasks, tdd, verification, appsec, docker, qa, pipeline). All 28 bundled skills stay manually invocable via `/skill:kstack-*`.
 
-### Raw skill library (`skills/kstack/` + `skills/kedra/`)
+### Skill catalog (`skills/`)
 
-Pi's recursive discovery (`pi-agent-core` harness) loads `SKILL.md` files at any depth, so both families coexist under one `"skills": ["./skills"]` root:
-
-| Folder | Contents | Invocation | Source |
-|---|---|---|---|
-| `skills/kstack/` | 23 cherry-picked kstack skills (router nested at `gstack/kstack/`) | `/skill:kstack-qa`, `/skill:kstack-spec`, … | upstream kstack, adapted by `scripts/adapt-skills.ts` |
-| `skills/kedra/` | 18 full `.agents-clean` skills — sprint methodology, process discipline (Iron Laws), security/infra, code quality | `/skill:systematic-debugging`, `/skill:adr`, `/skill:tasks`, … | `C:\Users\Mattia\Desktop\.agents-clean\skills\`, copied verbatim 2026-08-27 |
-
-`kedra/` ships the FULL source methodology. Deliberately excluded: `acceptance-criteria-backend` and `acceptance-criteria-frontend` — already folded into the `backend-developer`/`frontend-developer` sub-agent bodies (TODOS D12). Companion files (e.g. `testing-anti-patterns.md`, `systematic-debugging` reference material) are copied too — pi resolves skill-relative paths against the skill's own directory.
+28 skills in a flat `skills/kstack-<id>/` layout — each with `SKILL.md`, colocated
+`references/`, and a `## DoD gate` section. Pi's recursive discovery loads them under
+one `"skills": ["./skills"]` root; invoke manually via `/skill:kstack-qa`,
+`/skill:kstack-spec`, … The orchestrator's wired phases embed the same canonical files.
 
 ### Automatic routing
 
@@ -153,21 +148,23 @@ WP1 additions: `kstack_chain` runs a JSON array of `[cmd, ...args]` batches in O
 call (payload via stdin; output enveloped as untrusted web content), `kstack_dialog`
 reads the daemon's dialog ring buffer, `kstack_perf` returns page metrics, and
 `kstack_daemon_status` / `kstack_daemon_restart` expose daemon health and recovery
-(the `daemon-` prefix distinguishes them from the orchestrator's own `/kstack status`).
+(the `daemon-` infix distinguishes them from the orchestrator tools).
 
 Full list: see `tools.generated.ts` (65 commands from the kstack browse CLI).
 
-### Skills (41)
+### Skills (28)
 
-Two families, two folders:
+Flat catalog, uniform `kstack-` prefix:
 
 ```
 skills/
-├── gstack/   23 cherry-picked kstack skills   → /skill:kstack-qa, /skill:kstack-ship, /skill:kstack-spec, ...
-└── kedra/    18 .agents-clean methodology     → /skill:systematic-debugging, /skill:tdd (test-driven-development), ...
+├── kstack-qa/        SKILL.md + references/  → /skill:kstack-qa
+├── kstack-ship/                             → /skill:kstack-ship
+├── kstack-spec/                             → /skill:kstack-spec
+└── … 25 more                                → /skill:kstack-*
 ```
 
-They coexist with the orchestrator. Use them when you want the raw methodology without the guided pipeline. Registry skills referenced by the orchestrator's digest injection resolve their deep-dive SKILL.md under `skills/kstack/<id>/` (see `orchestrator/skills.ts`).
+They coexist with the orchestrator. Use them when you want the raw methodology without the guided pipeline. Registry skills referenced by the orchestrator's digest injection resolve their SKILL.md under `skills/kstack-<id>/` (see `orchestrator/skills.ts`).
 
 ## Environment Variables
 
@@ -175,7 +172,6 @@ They coexist with the orchestrator. Use them when you want the raw methodology w
 |----------|---------|---------|
 | `KSTACK_BINARY` | Absolute path to the browse binary | Auto-resolved |
 | `KSTACK_ROOT` | Root of a kstack installation (alternative binary source) | Not set |
-| `KSTACK_REPO` | Path to kstack source (overrides submodule for scripts) | `<extension>/source/` |
 
 ### Binary resolution order
 
@@ -183,70 +179,16 @@ The extension searches for the browse binary in this order:
 
 1. `$KSTACK_BINARY` (explicit override)
 2. `$KSTACK_ROOT/browse/dist/browse` (standard kstack install)
-3. `<extension>/runtime/browse/dist/browse` (built by update.sh / downloaded at session start)
-4. `../../kstack/browse/dist/browse` (dev sibling layout)
+3. `<extension>/runtime/browse/dist/browse` (downloaded at session start)
+4. `../kstack/browse/dist/browse` (dev sibling layout)
 
 On Windows, `.exe` is appended automatically.
 
 ## Updating
 
-```bash
-# Full update: pull kstack submodule, rebuild binary, sync skills + bin scripts
-bash ~/.pi/agent/extensions/kstack-pi/update.sh
-
-# Rebuild without pulling (local patches in source/)
-bash ~/.pi/agent/extensions/kstack-pi/update.sh --skip-pull
-
-# Update the submodule to latest upstream manually
-cd ~/.pi/agent/extensions/kstack-pi/source && git pull origin main
-```
-
-The script also detects new upstream features (skills, tools, bin scripts) not yet included in the extension and prints them:
-
-```
-╔══════════════════════════════════════════════════════════╗
-║  NEW FEATURES AVAILABLE UPSTREAM — update extension!    ║
-╚══════════════════════════════════════════════════════════╝
-
-  [skill] kstack-canary
-  [tool]  kstack_handoff
-  [bin]   kstack-analytics
-```
-
-To include new skills: add them to `SKILLS=` in `update.sh`.
-To include new tools: run `bun run scripts/gen-tools.ts`.
-
-### Skill adaptation pipeline
-
-`scripts/adapt-skills.ts` translates freshly-pulled upstream SKILL.md files (written for Claude Code) into the pi form bundled in `skills/kstack/`: frontmatter rebuild, Pi adapter note, and path mapping to this extension's `runtime/bin`, `source/bin` and `source/`. It runs automatically as step 8 of `update.sh`; standalone usage:
-
-```bash
-bun run scripts/adapt-skills.ts --check          # dry-run: report diffs, write nothing
-bun run scripts/adapt-skills.ts kstack-cso ...   # restrict to specific skills
-```
-
-The root `kstack` router skill is hand-maintained and never regenerated.
-
-### Backups
-
-A pre-migration snapshot of `skills/` and `update.sh` (before the runtime-path decoupling from the legacy adapter install) is kept at:
-
-```
-%TEMP%\opencode\kstack-pi-backup-20260824\
-```
-
-This is temporary storage: it can be deleted once you're satisfied with the adapted skills (a fresh backup is always one `git checkout` away — see `git log -- skills/`).
-
-## Regenerating tools
-
-When kstack adds new browse commands:
-
-```bash
-cd ~/.pi/agent/extensions/kstack-pi
-bun run scripts/gen-tools.ts
-```
-
-This regenerates `tools.generated.ts` and `lib/commands.generated.ts` from `source/browse/src/commands.ts`.
+`git pull` in the extension directory, then restart pi. The browse binary
+re-downloads automatically on the next session start when the pinned release
+tag changes (`lib/download.ts`).
 
 ## Architecture
 
@@ -278,22 +220,16 @@ kstack-pi/
 │   ├── telemetry.ts         Per-step run reports (.kstack/runs)
 │   ├── text.ts              $-safe interpolation
 │   ├── config.ts            Feature flags (KSTACK_PI_*)
-│   ├── command.ts           /kstack command handler (+ /kstack next)
+│   ├── command.ts           /kstack command handler (+ /kstack next, /kstack init)
+│   ├── init.ts              /kstack init — managed AGENTS.md rules block
 │   └── router.ts            Input intent detection (transform, never block)
-├── skills/                  Raw skill library, recursive discovery (manual /skill: use)
-│   ├── gstack/              23 cherry-picked kstack skills (router at gstack/kstack/)
-│   └── kedra/               18 .agents-clean methodology skills, verbatim full sources
-├── skills-distilled/        Distilled methodology digests (~2K tokens each) + vendored grilling protocol
-├── scripts/
-│   ├── gen-tools.ts         Regenerate tools from source/ commands
-│   └── sync-skills.ts       Re-sync skills with path rewriting
-├── test/
-│   ├── orchestrator.test.ts  Unit tests (state machine, gates, workflows, tiering, intents)
-│   ├── sprint.test.ts        Sprint workflow tests (verdicts, routing, loop engine, parks)
-│   └── executor-delegation.test.ts  Fake-spawn integration tests over runDeterministicDelegation
+├── runtime/
+│   └── bin/                 kstack-* helper scripts (bash, memory + telemetry)
+├── skills/kstack-*/         Flat catalog — 28 skills, recursive discovery (manual /skill: use)
+├── agents/                  Canonical specialist agent definitions (sync to ~/.pi/agent/agents/)
+├── test/                    bun test suites (orchestrator, sprint, delegation, boundaries)
 ├── TODOS.md                 Backlog: deferred features, skill integrations, follow-ups
-├── update.sh                Pull submodule + build + deploy + feature detection
-└── .gitignore               Excludes runtime/ (built artifacts)
+└── .gitignore               Excludes runtime/ build artifacts (dist binaries)
 ```
 
 ### How the orchestrator works
@@ -330,8 +266,7 @@ State persists across session reloads via pi's `appendEntry` (not sent to LLM co
 
 ## Branches & feature flags
 
-- `main` — pre-upgrade behavior (advisory subagent hints, no skill injection). Switch with `git checkout main` in the extension folder, then restart pi.
-- `feat/skill-ingestion` — everything documented here.
+- `main` — stable baseline. Development happens on `kstack`.
 - Runtime kill switches (env): `KSTACK_PI_SKILLS=off`, `KSTACK_PI_DETERMINISTIC=off`, `KSTACK_PI_MANUAL_GATES=off`.
 
 Deferred ideas live in `TODOS.md` (absorbed the old `FUTURE_UPDATES.md`).
@@ -348,10 +283,10 @@ Deferred ideas live in `TODOS.md` (absorbed the old `FUTURE_UPDATES.md`).
 
 | Problem | Fix |
 |---------|-----|
-| "kstack browse binary not found" | Run `update.sh` or set `KSTACK_BINARY` |
+| "kstack browse binary not found" | Restart pi (auto-download) or set `KSTACK_BINARY` |
 | "server-node.mjs not found" (Windows) | Run `bash browse/scripts/build-node-server.sh` in the kstack repo |
 | `/kstack` not showing in pi | Ensure the extension is in `~/.pi/agent/extensions/kstack-pi/` with `index.ts` at root |
-| Subagent phases fail | Ensure `~/.pi/agent/agents/` has scout.md, planner.md, worker.md, reviewer.md — plus the sprint specialists (sprint-planner, software-architect, backend-developer, frontend-developer, qa-engineer, devsecops-reviewer) for the sprint workflow. Canonical copies live in this repo's [`agents/`](agents/) and are synced by `update.sh` (existing files backed up, never deleted). If you hand-tuned them, re-apply your changes after a sync or restore from the `.bak-<timestamp>` copy |
+| Subagent phases fail | Ensure `~/.pi/agent/agents/` has scout.md, planner.md, worker.md, reviewer.md — plus the sprint specialists (sprint-planner, software-architect, backend-developer, frontend-developer, qa-engineer, devsecops-reviewer) for the sprint workflow. Canonical copies live in this repo's [`agents/`](agents/) — copy them to `~/.pi/agent/agents/` manually |
 | Skills not loading | Pi requires `"skills": ["./skills"]` in a package.json, or project `.pi/settings.json` |
 
 ## License

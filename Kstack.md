@@ -39,6 +39,12 @@ dettagliato via grilling prima dell'esecuzione e questo file si aggiorna.
 | D29 | Ordine S5b | **Eval → DAG → memory → resto** | pass^k + trajectory-diff prima (misura prima di ottimizzare); poi DAG executor; poi memory sleep-phase; poi judge/CodeAct/blast-radius |
 | D30 | Research report | **Salvato** | `Kstack/research-report.md` — fonte delle scelte S5 |
 | D31 | Memory backend | **Configurabile + pluggabile** | `memory.enabled` si/no indipendente dal backend — workflow identico con memory off. Due livelli: ledger append-only = store canonico verbatim per decisioni/verdict (epistemic markers, git-audit); sopra, backend pluggabile `local` (FTS su JSONL, default zero-dep) o `supermemory` (engine self-hosted opt-in, NO fork — binary closed-source; kstack auto-spawn/stop per run; pin v0.0.9+ per loopback+auth; MCP hosted escluso salvo scelta utente) |
+| D32 | Scope env rename (S2) | **TUTTI `GSTACK_*` → `KSTACK_*`** | non solo `_PI_`: root/home/state/remote/search/redact/supabase + prefix literals (`"GSTACK_PI_"`, `"GSTACK_CODEX_"`); ogni consumer è in questo repo — niente contratto mezzo-brandizzato |
+| D33 | SKILL_INJECTION (S2) | **Eliminata, non rinominata** | stub post-S1 no-op: env read, `skillInjectionMode()`, tipo `SkillInjectionMode`, `_mode` param e `beta-injection.test.ts` rimossi |
+| D34 | Skill id prefix (S2) | **`kstack-` uniforme su tutto il catalogo** | incluse le portate locali (`impeccable`, `mindrun`, `retro`, `design-taste-frontend`) e gli id non prefissati (`adr`, `tasks`, …) |
+| D35 | Migrazione dati (S2) | **NON in S2 — backlog S6** | `~/.kstack` parte pulita; i vecchi `.gstack/` restano in place; task `kstack-migrate` dopo S5b; niente shim lazy — le entry `gstack-wf-state` sono ignorate → sessioni pre-rename abortiscono pulite (D14 regge) |
+| D36 | Dir document (S2) | **`skills/kstack-document/` condivisa** | una dir, due registry id (`kstack-document-release`/`-generate`) via `dir:` — invariante "una dir per SKILL.md" regge |
+| D37 | Env authority (S2) | **`KSTACK_*` unica sorgente** | niente fallback dual-read sui nomi vecchi; il codice legge solo `KSTACK_*` |
 
 ## Skeleton sprint
 
@@ -204,50 +210,58 @@ kstack; dati utente migrati; regole globali installabili via `/kstack init`.
 
 ### Tasks
 
-- [ ] **T1 — Baseline.** `bun test` verde pre-sweep + checklist grep-driven
+- [x] **T1 — Baseline.** `bun test` verde pre-sweep + checklist grep-driven
   della superficie (rigenerata dal codice, non dal piano).
-- [ ] **T2 — Skill id.** Rename dir + registry `skills.ts` + cross-refs nel
+- [x] **T2 — Skill id.** Rename dir + registry `skills.ts` + cross-refs nel
   testo skill + riferimenti in `agents/*.md`.
-- [ ] **T3 — Tool names.** Orchestratore (3) + browse (65): script one-off
+- [x] **T3 — Tool names.** Orchestratore (3) + browse (65): script one-off
   su `tools.generated.ts`, `lib/commands.generated.ts`, call sites in
   templates/agent defs/test.
-- [ ] **T4 — Env.** `GSTACK_PI_*`→`KSTACK_PI_*` in `config.ts` + callers +
-  test (rename letterale, infix `_PI_` conservato).
-- [ ] **T5 — Comando.** `/gstack`→`/kstack`; sotto-comandi esistenti
+- [x] **T4 — Env.** `GSTACK_PI_*`→`KSTACK_PI_*` in `config.ts` + callers +
+  test (rename letterale, infix `_PI_` conservato). Ampliato a TUTTI i
+  `GSTACK_*` (D32).
+- [x] **T5 — Comando.** `/gstack`→`/kstack`; sotto-comandi esistenti
   (`next`, status…) preservati; niente alias (D14).
-- [ ] **T6 — State/data.** Entry type → `kstack-wf-state` con campo
-  `version`; `.gstack/`→`.kstack/` nei path dell'orchestratore; script di
-  migrazione `~/.gstack`→`~/.kstack` + `.gstack/`→`.kstack/` nelle repo;
-  version-check che abortisce pulito le sessioni pre-rename.
-- [ ] **T7 — Script rename.** `runtime/**/gstack-*`→`kstack-*` corpi
-  inclusi; shebang/usage text; call-site nelle skill.
-- [ ] **T8 — Identità.** `package.json` → `@kedra/kstack-pi`; repo
+- [x] **T6 — State/data.** Entry type → `kstack-wf-state` con campo
+  `version` (bump a 3); `.gstack/`→`.kstack/` nei path dell'orchestratore;
+  entry pre-rename ignorate → sessioni abortiscono pulite. Migrazione dati
+  rimandata a S6 (D35).
+- [x] **T7 — Script rename.** `runtime/**/gstack-*`→`kstack-*` corpi
+  inclusi; shebang/usage text; call-site nelle skill. Deviazione:
+  `gstack-update-check` e `gstack-team-init` eliminati (macchinari
+  upstream-coupled senza caller — stessa regola di update.sh in S1).
+- [x] **T8 — Identità.** `package.json` → `@kedra/kstack-pi`; repo
   GitHub rinominato (redirect automatico); `download.ts` RELEASE_BASE
   aggiornato al primo release kstack (fino ad allora punta al release
   v2.0.0 esistente, ridiretto); dir estensione rinominata — step manuale
   a fine sprint.
-- [ ] **T9 — `/kstack init`.** Sotto-comando che scrive il managed block
+- [x] **T9 — `/kstack init`.** Sotto-comando che scrive il managed block
   `<!-- kstack:begin -->…<!-- kstack:end -->` in AGENTS.md della repo
   corrente. Contenuto baseline: verdict format `KEY == VALUE`, contratto
   `## HANDOFF`, Iron Law (no fix senza root cause),
   verification-before-completion, vincoli report-only, red line sicurezza.
-  Idempotente: update se il blocco esiste.
-- [ ] **T10 — Docs + test.** Sweep README/AGENTS*/AGENTS_NOTES; fix test
+  Idempotente: update se il blocco esiste; upgrade dei blocchi legacy
+  `<!-- gstack:begin -->`.
+- [x] **T10 — Docs + test.** Sweep README/AGENTS*/AGENTS_NOTES; fix test
   stringhe; `bun test` verde.
 
 ### DoD sprint
 
 - `rg -i gstack` sul codice dell'estensione = 0 (esclusi provenance
-  comment e changelog).
-- Migrazione dati testata su fixture (`~/.gstack` finto → `~/.kstack`).
-- `/kstack init` idempotente: second-run = no-op.
-- `bun test` verde.
+  comment e changelog; RELEASE_BASE URL finché il repo non è rinominato —
+  commento in `lib/download.ts`).
+- Migrazione dati rimandata a S6 (D35): il task `kstack-migrate` è
+  tracciato nel backlog, test su fixture previsto lì.
+- `/kstack init` idempotente: second-run = no-op. ✅
+- `bun test` verde. ✅
 
 ### Aperto
 
 - Contenuto esatto del managed block: baseline ora, evolve in S3 con
   verdict/step format.
 - Timing rename repo GitHub + dir estensione: manuale, a fine sprint.
+- Post-merge: `graft reindex` nel worktree; RELEASE_BASE flippa al primo
+  release `kstack-pi`.
 
 ## S3 — Step model + pilota
 
@@ -511,6 +525,10 @@ interfaccia → push.
   S4 — D9/D25).
 - Endpoint telemetry proprio (D4) se mai desiderato.
 - A2A/adapter remoti solo se serviranno agenti esterni.
+- **Migrazione dati pre-rename** (D35, dopo S5b): script `kstack-migrate`
+  che sposta `~/.gstack`→`~/.kstack` (analytics, decisions, learnings) e
+  `.gstack/`→`.kstack/` nelle repo target (plans/, sprints/, runs/) —
+  con test su fixture.
 
 ### Evitare (registrato dalla ricerca — non perdere tempo)
 
