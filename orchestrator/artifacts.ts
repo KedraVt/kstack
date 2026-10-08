@@ -108,7 +108,7 @@ export function softwareArchitectArtifactName(sprint: SprintRef, seq: number | s
 
 /**
  * Durable on-disk outputs a subagent phase leaves behind — used by the
- * gstack_phase tool to point at the record when the delegation results
+ * kstack_phase tool to point at the record when the delegation results
  * (delivered via followUp message) are no longer in context.
  */
 export function phaseArtifactPaths(phaseId: string, cwd: string, sprint?: SprintRef): string[] {

@@ -63,7 +63,7 @@ visited, nothing left silently assumed.
 Workflow adaptation: when the frontier is empty (or the question cap is
 reached), write the converged understanding to the plan/artifact the workflow
 expects (e.g. `.gstack/plans/{plan_file}` or the sprint's user-story) and call
-`gstack_advance` — the workflow's approval gate takes over from there. Do not
+`kstack_advance` — the workflow's approval gate takes over from there. Do not
 start implementing.
 
 ## DoD gate (verification)

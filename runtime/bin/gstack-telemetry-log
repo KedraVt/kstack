@@ -107,13 +107,13 @@ for PFILE in "$PENDING_DIR"/.pending-*; do
     P_SKILL="$(echo "$PENDING_DATA" | grep -o '"skill":"[^"]*"' | head -1 | awk -F'"' '{print $4}')"
     P_TS="$(echo "$PENDING_DATA" | grep -o '"ts":"[^"]*"' | head -1 | awk -F'"' '{print $4}')"
     P_SID="$(echo "$PENDING_DATA" | grep -o '"session_id":"[^"]*"' | head -1 | awk -F'"' '{print $4}')"
-    P_VER="$(echo "$PENDING_DATA" | grep -o '"gstack_version":"[^"]*"' | head -1 | awk -F'"' '{print $4}')"
+    P_VER="$(echo "$PENDING_DATA" | grep -o '"kstack_version":"[^"]*"' | head -1 | awk -F'"' '{print $4}')"
     P_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
     P_ARCH="$(uname -m)"
 
     # Write the stale event as outcome: unknown
     mkdir -p "$ANALYTICS_DIR"
-    printf '{"v":1,"ts":"%s","event_type":"skill_run","skill":"%s","session_id":"%s","gstack_version":"%s","os":"%s","arch":"%s","duration_s":null,"outcome":"unknown","error_class":null,"used_browse":false,"sessions":1}\n' \
+    printf '{"v":1,"ts":"%s","event_type":"skill_run","skill":"%s","session_id":"%s","kstack_version":"%s","os":"%s","arch":"%s","duration_s":null,"outcome":"unknown","error_class":null,"used_browse":false,"sessions":1}\n' \
       "$P_TS" "$P_SKILL" "$P_SID" "$P_VER" "$P_OS" "$P_ARCH" >> "$JSONL_FILE" 2>/dev/null || true
   fi
 done
@@ -251,7 +251,7 @@ SEC_LAYER_FIELD="null"
 SEC_VERDICT_FIELD="null"
 [ -n "$SEC_VERDICT" ] && SEC_VERDICT_FIELD="\"$SEC_VERDICT\""
 
-printf '{"v":1,"ts":"%s","event_type":"%s","skill":"%s","session_id":"%s","gstack_version":"%s","os":"%s","arch":"%s","duration_s":%s,"outcome":"%s","error_class":%s,"error_message":%s,"failed_step":%s,"used_browse":%s,"sessions":%s,"installation_id":%s,"source":"%s","security_url_domain":%s,"security_payload_hash":%s,"security_confidence":%s,"security_layer":%s,"security_verdict":%s,"_repo_slug":"%s","_branch":"%s"}\n' \
+printf '{"v":1,"ts":"%s","event_type":"%s","skill":"%s","session_id":"%s","kstack_version":"%s","os":"%s","arch":"%s","duration_s":%s,"outcome":"%s","error_class":%s,"error_message":%s,"failed_step":%s,"used_browse":%s,"sessions":%s,"installation_id":%s,"source":"%s","security_url_domain":%s,"security_payload_hash":%s,"security_confidence":%s,"security_layer":%s,"security_verdict":%s,"_repo_slug":"%s","_branch":"%s"}\n' \
   "$TS" "$EVENT_TYPE" "$SKILL" "$SESSION_ID" "$GSTACK_VERSION" "$OS" "$ARCH" \
   "$DUR_FIELD" "$OUTCOME" "$ERR_FIELD" "$ERR_MSG_FIELD" "$STEP_FIELD" \
   "$BROWSE_BOOL" "${SESSIONS:-1}" \

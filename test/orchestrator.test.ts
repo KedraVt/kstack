@@ -130,7 +130,7 @@ test("launchPhase refuses a duplicate chain for the same workflow phase (2026-08
 // --- Audit follow-up: same racing class, other cycles -------------------------
 
 test("advanceBlockReason refuses a model advance on a parked manual gate", () => {
-  // Second gstack_advance in the same turn after a decision phase: the parked
+  // Second kstack_advance in the same turn after a decision phase: the parked
   // state points at the NEXT phase (a subagent phase with no chain in flight),
   // so without this block the advance would record a phase that never ran as
   // completed — mechanically bypassing develop.plan / investigate.root-cause.
@@ -138,7 +138,7 @@ test("advanceBlockReason refuses a model advance on a parked manual gate", () =>
   assert.match(advanceBlockReason(state) ?? "", /PARKED awaiting user approval/);
 });
 
-test("advanceBlockReason blocks gstack_advance while a delegation chain is in flight", async () => {
+test("advanceBlockReason blocks kstack_advance while a delegation chain is in flight", async () => {
   // Mid-delegation user input makes the router tell the model to "continue the
   // current phase"; an advance accepted then records the phase completed
   // before its work exists, and the follow-up advance after the real chain
@@ -1433,7 +1433,7 @@ describe("buildResumeContext parked manual gate (2026-09 fix 3)", () => {
     const text = buildResumeContext(state);
     assert.ok(!text.includes("Continue working on the current phase"), `leaked resume body: ${text}`);
     assert.match(text, /PARKED for user approval/);
-    assert.match(text, /do NOT call gstack_advance/);
+    assert.match(text, /do NOT call kstack_advance/);
     assert.match(text, /only \/gstack next/);
   });
 
@@ -1550,13 +1550,13 @@ describe("compaction guard — resume prefix contract", () => {
     const prefix = buildResumeContext(makeCtx("investigate", 0).state); // reproduce = main
     assert.ok(prefix.includes("## DELIVERABLE"), "main-phase contract missing from resume prefix");
     assert.ok(prefix.includes("## STOP CONDITION"), "main-phase stop condition missing");
-    assert.ok(prefix.includes("gstack_phase"), "tier-2 pointer missing");
+    assert.ok(prefix.includes("kstack_phase"), "tier-2 pointer missing");
   });
 
   test("active subagent phase: no contract (delegation results self-heal), pointer still present", () => {
     const prefix = buildResumeContext(makeCtx("investigate", 1).state); // root-cause = subagent
     assert.ok(!prefix.includes("## DELIVERABLE"), "subagent phases must not carry the main contract");
-    assert.ok(prefix.includes("gstack_phase"));
+    assert.ok(prefix.includes("kstack_phase"));
   });
 
   test("parked gate: neither contract nor pointer", () => {
@@ -1564,7 +1564,7 @@ describe("compaction guard — resume prefix contract", () => {
     const prefix = buildResumeContext(state);
     assert.ok(prefix.includes("PARKED"));
     assert.ok(!prefix.includes("## DELIVERABLE"));
-    assert.ok(!prefix.includes("gstack_phase"));
+    assert.ok(!prefix.includes("kstack_phase"));
   });
 
   test("paused state: PAUSED, never the contradictory continue-working tail (mindrun F1)", () => {
@@ -1574,7 +1574,7 @@ describe("compaction guard — resume prefix contract", () => {
     assert.ok(prefix.includes("PAUSED"), "paused posture must be stated");
     assert.ok(!prefix.includes("Continue working"), "paused prefix must not invite continued work");
     assert.ok(!prefix.includes("## DELIVERABLE"));
-    assert.ok(!prefix.includes("gstack_phase"));
+    assert.ok(!prefix.includes("kstack_phase"));
   });
 
   test("sprint contracts interpolate the assigned sprint number", () => {
@@ -1626,7 +1626,7 @@ describe("statusLineFor", () => {
   });
 });
 
-describe("gstack_phase tool", () => {
+describe("kstack_phase tool", () => {
   function fakePiWithState(state: unknown) {
     const tools = new Map<string, any>();
     const pi: any = {
@@ -1650,7 +1650,7 @@ describe("gstack_phase tool", () => {
     const state = { ...makeCtx("sprint", 7).state, status: "paused" as const, pausedReason: "branch-violation:devsecops-review on main", sprintNumber: 7 };
     const { pi, tools, ctx } = fakePiWithState(state);
     initOrchestrator(pi);
-    const res = await tools.get("gstack_phase").execute("t", {}, undefined, undefined, ctx);
+    const res = await tools.get("kstack_phase").execute("t", {}, undefined, undefined, ctx);
     const text = res.content[0].text;
     assert.ok(text.startsWith("[workflow paused: branch-violation:devsecops-review on main"), "posture header missing");
     assert.ok(text.includes("### On-disk record"), "artifact section missing");
@@ -1661,7 +1661,7 @@ describe("gstack_phase tool", () => {
   test("active main phase: instructions, no posture header, no record section", async () => {
     const { pi, tools, ctx } = fakePiWithState(makeCtx("sprint", 3).state); // system-design = main
     initOrchestrator(pi);
-    const res = await tools.get("gstack_phase").execute("t", {}, undefined, undefined, ctx);
+    const res = await tools.get("kstack_phase").execute("t", {}, undefined, undefined, ctx);
     const text = res.content[0].text;
     assert.ok(text.includes("Phase: System Design"));
     assert.ok(!text.startsWith("[workflow"), "active phase must not carry the reference-only header");
@@ -1671,7 +1671,7 @@ describe("gstack_phase tool", () => {
   test("unknown workflowId gets its own message (not 'no current phase')", async () => {
     const { pi, tools, ctx } = fakePiWithState({ workflowId: "legacy-x", phaseIndex: 0, status: "active", goal: "g", results: {} });
     initOrchestrator(pi);
-    const res = await tools.get("gstack_phase").execute("t", {}, undefined, undefined, ctx);
+    const res = await tools.get("kstack_phase").execute("t", {}, undefined, undefined, ctx);
     assert.ok(res.content[0].text.includes('Unknown workflow "legacy-x"'));
   });
 });

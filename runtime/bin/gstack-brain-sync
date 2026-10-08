@@ -116,7 +116,7 @@ compute_paths_to_stage() {
   python3 - "$GSTACK_HOME" "$QUEUE" "$ALLOWLIST" "$PRIVACY_MAP" "$SKIP_FILE" "$mode" <<'PYEOF'
 import sys, json, os, fnmatch, glob
 
-gstack_home, queue, allowlist_path, privacy_path, skip_path, mode = sys.argv[1:7]
+kstack_home, queue, allowlist_path, privacy_path, skip_path, mode = sys.argv[1:7]
 
 def load_lines(path):
     try:
@@ -198,7 +198,7 @@ for p in sorted(queue_paths):
     if not mode_allows(cls, mode):
         continue
     # Must exist on disk — can't stage what isn't there.
-    if not os.path.exists(os.path.join(gstack_home, p)):
+    if not os.path.exists(os.path.join(kstack_home, p)):
         continue
     final.append(p)
 
@@ -386,9 +386,9 @@ subcmd_discover_new() {
 import sys, os, json, fnmatch
 from datetime import datetime, timezone
 
-gstack_home, allowlist_path, cursor_path = sys.argv[1:4]
-queue_path = os.path.join(gstack_home, ".brain-queue.jsonl")
-skip_path = os.path.join(gstack_home, ".brain-skip.txt")
+kstack_home, allowlist_path, cursor_path = sys.argv[1:4]
+queue_path = os.path.join(kstack_home, ".brain-queue.jsonl")
+skip_path = os.path.join(kstack_home, ".brain-skip.txt")
 
 def load_lines(path):
     try:
@@ -419,8 +419,8 @@ cursor = load_cursor(cursor_path)
 new_cursor = dict(cursor)
 to_enqueue = []
 
-# Walk all files under gstack_home, match against allowlist.
-for root, dirs, files in os.walk(gstack_home):
+# Walk all files under kstack_home, match against allowlist.
+for root, dirs, files in os.walk(kstack_home):
     # Skip .git and .brain-* state files.
     if ".git" in root.split(os.sep):
         continue
@@ -430,7 +430,7 @@ for root, dirs, files in os.walk(gstack_home):
         # separators on Windows, which never match the forward-slash allowlist
         # globs (e.g. "projects/*/learnings.jsonl"), so discovery silently
         # enqueued nothing under projects/ on Windows. Normalize to "/".
-        rel = os.path.relpath(full, gstack_home).replace(os.sep, "/")
+        rel = os.path.relpath(full, kstack_home).replace(os.sep, "/")
         if rel.startswith(".brain-"):
             continue
         if not any(fnmatch.fnmatchcase(rel, pat) for pat in allowlist):

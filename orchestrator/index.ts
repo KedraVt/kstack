@@ -51,13 +51,13 @@ export function initOrchestrator(pi: ExtensionAPI): void {
   pi.on("input", createInputRouter(pi) as any);
 
   pi.registerTool({
-    name: "gstack_advance",
+    name: "kstack_advance",
     label: "Advance Workflow",
     description:
       "Signal completion of the current gstack workflow phase. ALWAYS call this yourself when a phase's work is done — never tell the user to run commands instead. On decision phases the workflow pauses for user approval after this call; the orchestrator handles that.",
     promptSnippet: "Advance the active gstack workflow to the next phase",
     promptGuidelines: [
-      "Only call gstack_advance when a gstack workflow phase is active",
+      "Only call kstack_advance when a gstack workflow phase is active",
       "Provide a concise 2-3 sentence summary of what was accomplished",
       "Use status 'failed' if the phase could not be completed",
       "Never ask the user to run /gstack or any other command to progress — calling this tool IS the progression mechanism",
@@ -90,13 +90,13 @@ export function initOrchestrator(pi: ExtensionAPI): void {
 
       // Optional-phase decision gate (STEP 2g v2): while the workflow is parked
       // at an optional phase awaiting the user's Run/Skip/Abort decision, the
-      // model can neither complete nor skip the phase via gstack_advance — the
+      // model can neither complete nor skip the phase via kstack_advance — the
       // decision belongs exclusively to the /gstack panel.
       if (state.pendingOptional) {
         return {
           content: [{
             type: "text" as const,
-            text: `The workflow is parked at the optional phase "${phase?.name ?? "?"}" awaiting an explicit user decision (Run / Skip / Abort) via /gstack. Do NOT call gstack_advance again and do not start the phase — the user decides.`,
+            text: `The workflow is parked at the optional phase "${phase?.name ?? "?"}" awaiting an explicit user decision (Run / Skip / Abort) via /gstack. Do NOT call kstack_advance again and do not start the phase — the user decides.`,
           }],
         };
       }
@@ -110,7 +110,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         return {
           content: [{
             type: "text" as const,
-            text: `gstack: ${blocked}. Do NOT call gstack_advance again.`,
+            text: `gstack: ${blocked}. Do NOT call kstack_advance again.`,
           }],
         };
       }
@@ -167,7 +167,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         return {
           content: [{
             type: "text" as const,
-            text: `SECURITY FREEZE: ${info?.severity ?? "critical/high"} severity security rejection in "${phase.id}". The pipeline is FROZEN — no further automated work. A human security panel must review ${info?.artifactPath ?? "devsecops/security-review-artifact.md"}; only /gstack next can unfreeze after that review. Do NOT attempt fixes or call gstack_advance again.`,
+            text: `SECURITY FREEZE: ${info?.severity ?? "critical/high"} severity security rejection in "${phase.id}". The pipeline is FROZEN — no further automated work. A human security panel must review ${info?.artifactPath ?? "devsecops/security-review-artifact.md"}; only /gstack next can unfreeze after that review. Do NOT attempt fixes or call kstack_advance again.`,
           }],
           isError: false,
         };
@@ -217,7 +217,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         return {
           content: [{
             type: "text" as const,
-            text: `Phase "${phase.name}" done — workflow PARKED for a human decision: ${cause}. Do NOT call gstack_advance again; the user resolves it via /gstack.`,
+            text: `Phase "${phase.name}" done — workflow PARKED for a human decision: ${cause}. Do NOT call kstack_advance again; the user resolves it via /gstack.`,
           }],
         };
       }
@@ -251,7 +251,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         return {
           content: [{
             type: "text" as const,
-            text: `Phase "${phase.name}" recorded. This was a decision phase: the workflow is now PAUSED for user approval. Present your results clearly. Do NOT call gstack_advance again and do not start the next phase — the user decides when to continue with /gstack next.`,
+            text: `Phase "${phase.name}" recorded. This was a decision phase: the workflow is now PAUSED for user approval. Present your results clearly. Do NOT call kstack_advance again and do not start the next phase — the user decides when to continue with /gstack next.`,
           }],
         };
       }
@@ -267,7 +267,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
       // — tell the model so it does not expect the phase to run on its own.
       const decisionNote =
         nextPhase?.optional && optionalPhases() === "ask"
-          ? ` This phase is OPTIONAL: the workflow will pause and the user decides via /gstack whether to run "${nextPhase.name}". Do not call gstack_advance for it.`
+          ? ` This phase is OPTIONAL: the workflow will pause and the user decides via /gstack whether to run "${nextPhase.name}". Do not call kstack_advance for it.`
           : "";
       return {
         content: [{
@@ -282,13 +282,13 @@ export function initOrchestrator(pi: ExtensionAPI): void {
   // compaction the model can re-fetch it here. Read-only and deterministic
   // (pure function of the persisted state), so it can never be stale.
   pi.registerTool({
-    name: "gstack_phase",
+    name: "kstack_phase",
     label: "Show Phase Instructions",
     description:
       "Re-fetch the full instructions for the current gstack workflow phase. Call this when the phase's instructions are no longer in your context (e.g. after compaction).",
     promptSnippet: "Re-fetch the current gstack phase's full instructions",
     promptGuidelines: [
-      "Call gstack_phase only when a gstack workflow is active and the current phase's instructions are missing from your context",
+      "Call kstack_phase only when a gstack workflow is active and the current phase's instructions are missing from your context",
       "The output is a pure function of the persisted workflow state — it is never stale",
     ],
     parameters: Type.Object({}),
@@ -317,7 +317,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
       }
       const git = await detectGitContext(ctx.cwd);
       // A parked workflow still answers — but the instructions end with "call
-      // gstack_advance", which the park forbids. Lead with the posture.
+      // kstack_advance", which the park forbids. Lead with the posture.
       const posture =
         state.status === "active"
           ? ""
@@ -346,7 +346,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
   // extension too, any agent (main or spawned) can bootstrap a workflow by
   // calling this tool — no slash command required.
   pi.registerTool({
-    name: "gstack_start",
+    name: "kstack_start",
     label: "Start Workflow",
     description:
       "Start a gstack guided workflow programmatically. Workflows: develop | investigate | qa | qa-report | ship | review | quick | sprint. Use when a task matches one of these pipelines and no workflow is currently active.",

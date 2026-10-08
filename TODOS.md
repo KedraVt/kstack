@@ -11,11 +11,11 @@ All three items landed in one commit:
 1. **Compaction guard — tiers 1+2** — tier 1: `buildResumeContext` re-anchors
    the current phase's DELIVERABLE/STOP CONDITION contract (`mainContractFor`,
    narrowed to `Pick<WorkflowContext,"state">`) for `execution:"main"` +
-   `status:"active"` only. Tier 2: `gstack_phase` read-only tool returns
+   `status:"active"` only. Tier 2: `kstack_phase` read-only tool returns
    `buildPhaseInstructions(current phase)`; one pointer line in the prefix.
 2. **setStatus parked-state upgrade** — `statusLineFor(state, workflow)` maps
    every status to a truthful line with its unlock action; wired after
-   `saveState` in `gstack_advance` and on the executor's anomaly/D4 park paths.
+   `saveState` in `kstack_advance` and on the executor's anomaly/D4 park paths.
 3. **Branch enforcement** — `executeCurrentPhase` parks fail-closed
    (`pausedReason:"branch-violation:<phase> on <branch>"` + panel Resume/Abort)
    when a sprint gate that audits developer output (`loopBackTo:"implement"`)
@@ -170,7 +170,7 @@ when a spec already exists.
 Non-interactive printout of the workflow state machine (current phase x/y, results,
 gate/pause state). NOTE — naming: this is a *slash command* over the orchestrator state
 machine and is unrelated to the browser-daemon health tool planned as
-`gstack_daemon_status` (upgrade-plan WP1, commit `1cae721`); the `daemon-` prefix on the tool side is the
+`kstack_daemon_status` (upgrade-plan WP1, commit `1cae721`); the `daemon-` prefix on the tool side is the
 deliberate disambiguator.
 
 > **Rescoped 2026-09-14:** the setStatus upgrade (NEXT UP) covers the interactive
@@ -283,7 +283,7 @@ every `update.sh` pull unless fixed upstream:
 - **Chain "stops at first error" doc** — upstream `commands.ts` claims it;
   `meta-commands.ts` actually runs the whole batch. Our tool description and
   schema now tell the truth locally.
-- **`gstack_download` release asset** is pinned to `v2.0.0` (package is 2.1.0)
+- **`kstack_download` release asset** is pinned to `v2.0.0` (package is 2.1.0)
   and lacks the server sidecars some commands expect — bump the release tag or
   ship the sidecars before relying on the download fallback on fresh machines.
 - **pi dist child-process calls miss `windowsHide`** (`exec.js`, `tools/grep.js`,

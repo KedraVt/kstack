@@ -377,32 +377,32 @@ describe("generated browse tools", () => {
     return tools;
   }
 
-  test("cookie-import-browser is denied inside gstack_chain (consent bypass)", async () => {
+  test("cookie-import-browser is denied inside kstack_chain (consent bypass)", async () => {
     const tools = collectTools();
-    const chain = tools["gstack_chain"];
-    assert.ok(chain, "gstack_chain not registered");
+    const chain = tools["kstack_chain"];
+    assert.ok(chain, "kstack_chain not registered");
     const res = await chain.execute("id", { commands: [["cookie-import-browser", "chrome"]] }, undefined, undefined, { ui: { confirm: async () => true } });
     assert.equal(res.isError, true);
     assert.match(res.content[0].text, /consent/i);
   });
 
-  test("handoff is denied inside gstack_chain (side-effectful visibility)", async () => {
+  test("handoff is denied inside kstack_chain (side-effectful visibility)", async () => {
     const tools = collectTools();
-    const res = await tools["gstack_chain"].execute("id", { commands: [["handoff"]] }, undefined, undefined, { ui: {} });
+    const res = await tools["kstack_chain"].execute("id", { commands: [["handoff"]] }, undefined, undefined, { ui: {} });
     assert.equal(res.isError, true);
   });
 
   test("upload without a target is rejected (required-target validation)", async () => {
     const tools = collectTools();
-    const res = await tools["gstack_upload"].execute("id", { files: ["a.png"] }, undefined, undefined, { ui: {} });
+    const res = await tools["kstack_upload"].execute("id", { files: ["a.png"] }, undefined, undefined, { ui: {} });
     assert.equal(res.isError, true);
     assert.match(res.content[0].text, /Target required/);
   });
 
-  test("daemon status tool registered under gstack_daemon_status", () => {
+  test("daemon status tool registered under kstack_daemon_status", () => {
     const tools = collectTools();
-    assert.ok(tools["gstack_daemon_status"], "gstack_daemon_status missing");
-    assert.ok(tools["gstack_daemon_restart"], "gstack_daemon_restart missing");
-    assert.ok(!tools["gstack_status"], "bare gstack_status must not exist (orchestrator owns /gstack status)");
+    assert.ok(tools["kstack_daemon_status"], "kstack_daemon_status missing");
+    assert.ok(tools["kstack_daemon_restart"], "kstack_daemon_restart missing");
+    assert.ok(!tools["kstack_status"], "bare kstack_status must not exist (orchestrator owns /gstack status)");
   });
 });

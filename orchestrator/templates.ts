@@ -128,7 +128,7 @@ export function isValidPlanFile(value: string): boolean {
 }
 
 /**
- * Extract the `PLAN FILE: <path>` marker from the plan phase's gstack_advance
+ * Extract the `PLAN FILE: <path>` marker from the plan phase's kstack_advance
  * summary. Iterates EVERY occurrence and returns the first VALID one — the
  * first match alone is shadowed by the prompt's own template fragments
  * (mindrun F3: a summary echoing "end with PLAN FILE: <path>" before the real
@@ -167,7 +167,7 @@ export function resolvePlanFilePath(ctx: Pick<WorkflowContext, "state">): string
 export function planInstructionsFor(_ctx: Pick<WorkflowContext, "state">): string {
   return [
     `The plan file lives under \`${PLAN_DIR}/\` — YOU choose the filename: a short kebab-case slug (3-6 words) capturing the plan's essence (e.g. \`${PLAN_DIR}/auth-refresh-rotation.md\`), not a generic echo of the goal.`,
-    `End your gstack_advance summary with the line \`PLAN FILE: ${PLAN_DIR}/<your-slug>.md\` — the exact path of the file you actually wrote.`,
+    `End your kstack_advance summary with the line \`PLAN FILE: ${PLAN_DIR}/<your-slug>.md\` — the exact path of the file you actually wrote.`,
   ].join(" ");
 }
 
@@ -241,21 +241,21 @@ export function buildPhaseInstructions(phase: WorkflowPhase, ctx: WorkflowContex
 
 /**
  * Advancement contract — one uniform rule so the model never improvises:
- * always end the phase by calling gstack_advance yourself; never defer to the
+ * always end the phase by calling kstack_advance yourself; never defer to the
  * user. Whether the workflow continues automatically or pauses for approval
  * after that call is decided by the orchestrator, not the model.
  */
 function buildAdvancementRule(phase: WorkflowPhase): string {
   const lines = [
     "---",
-    "When this phase is complete, YOU call the `gstack_advance` tool with a 2-3 sentence summary of what was accomplished and status \"completed\". Never ask the user to run a command to continue — the workflow handles progression.",
+    "When this phase is complete, YOU call the `kstack_advance` tool with a 2-3 sentence summary of what was accomplished and status \"completed\". Never ask the user to run a command to continue — the workflow handles progression.",
     // STEP 4a (COR-01): the marker must survive into the SUMMARY — skip.ts
     // reads results[phase].summary, not the report body.
-    "If your report ends with a `CONFIRMED ROOT CAUSE:` line, you MUST include that exact line verbatim in your gstack_advance summary.",
+    "If your report ends with a `CONFIRMED ROOT CAUSE:` line, you MUST include that exact line verbatim in your kstack_advance summary.",
   ];
   if (manualGates() && phase.advance === "manual") {
     lines.push(
-      "This phase is a DECISION PHASE: after you call gstack_advance, the workflow will pause so the user can review your output before the next phase starts. Present your results clearly and completely — the user's approval depends on them.",
+      "This phase is a DECISION PHASE: after you call kstack_advance, the workflow will pause so the user can review your output before the next phase starts. Present your results clearly and completely — the user's approval depends on them.",
     );
   }
   lines.push("If the phase failed, use status \"failed\" and explain why.");
@@ -398,7 +398,7 @@ function buildMainInstructions(phase: WorkflowPhase, ctx: WorkflowContext): stri
       "- Apply office-hours judgment: challenge vague premises, demand specificity, push for the narrowest shippable scope.",
       "- Apply engineering rigor: blast radius, hidden assumptions, edge cases, test strategy; complexity gate at 8+ files or 2+ new services.",
       "",
-      "**Termination**: when the frontier is empty (or answers are exhausted), write the converged plan following the Plan file contract in the skill gates below — " + planInstructionsFor(c) + " Summarize the plan briefly to the user, then call gstack_advance. Do NOT start implementing.",
+      "**Termination**: when the frontier is empty (or answers are exhausted), write the converged plan following the Plan file contract in the skill gates below — " + planInstructionsFor(c) + " Summarize the plan briefly to the user, then call kstack_advance. Do NOT start implementing.",
     ].join("\n"),
 
     "understand": (c) => [
@@ -421,7 +421,7 @@ function buildMainInstructions(phase: WorkflowPhase, ctx: WorkflowContext): stri
       `4. Document: exact steps to reproduce, expected vs actual behavior`,
       `5. If you cannot reproduce, state what you tried and what's needed`,
       "",
-      "If your report ends with a `CONFIRMED ROOT CAUSE:` line, you MUST include that exact line verbatim in your gstack_advance summary.",
+      "If your report ends with a `CONFIRMED ROOT CAUSE:` line, you MUST include that exact line verbatim in your kstack_advance summary.",
     ].join("\n"),
 
     "verify": (c) => [
@@ -440,7 +440,7 @@ function buildMainInstructions(phase: WorkflowPhase, ctx: WorkflowContext): stri
       `1. Identify what to test: "${c.state.goal}"`,
       `2. Determine the target URL or dev server (ask user if unclear)`,
       `3. Define the test plan: which user flows, which breakpoints`,
-      `4. Ensure the gstack browser binary is available (use the gstack_daemon_status tool)`,
+      `4. Ensure the gstack browser binary is available (use the kstack_daemon_status tool)`,
       `5. Summarize the test plan before proceeding`,
     ].join("\n"),
 
@@ -562,8 +562,8 @@ function buildSubagentInstructions(phase: WorkflowPhase, ctx: WorkflowContext): 
   }
 
   parts.push("");
-  parts.push("After the subagent completes, review its output and call `gstack_advance` with a summary.");
-  parts.push("If the subagent fails, call `gstack_advance` with status \"failed\" and explain what went wrong.");
+  parts.push("After the subagent completes, review its output and call `kstack_advance` with a summary.");
+  parts.push("If the subagent fails, call `kstack_advance` with status \"failed\" and explain what went wrong.");
 
   return parts.join("\n");
 }
@@ -605,7 +605,7 @@ Stop when: the required flows are covered OR two passes produce no new findings.
 ## CONTEXT
 Goal: {goal} | Branch: {branch}
 
-Use the gstack browser tools to test user flows. Core set: gstack_goto, gstack_snapshot, gstack_click, gstack_fill or gstack_type (form inputs — never declare a form flow tested without exercising its inputs), gstack_wait (settle SPAs before asserting), gstack_console with --errors after each flow (silent JS failures are bugs), gstack_screenshot for evidence; others (gstack_network, gstack_select, gstack_scroll, ...) as needed. Report all bugs found with severity.`,
+Use the gstack browser tools to test user flows. Core set: kstack_goto, kstack_snapshot, kstack_click, kstack_fill or kstack_type (form inputs — never declare a form flow tested without exercising its inputs), kstack_wait (settle SPAs before asserting), kstack_console with --errors after each flow (silent JS failures are bugs), kstack_screenshot for evidence; others (kstack_network, kstack_select, kstack_scroll, ...) as needed. Report all bugs found with severity.`,
     "review": `## DELIVERABLE
 Findings with severity + file:line + concrete failure scenario, a scope check, and a final verdict APPROVE or REQUEST_CHANGES.
 
@@ -641,7 +641,7 @@ Prior findings:
 {findings_summary}
 
 Apply minimal, targeted fixes. Run tests after each fix. Report what was fixed.
-If your report ends with a \`CONFIRMED ROOT CAUSE:\` line, you MUST include that exact line verbatim in your gstack_advance summary.`,
+If your report ends with a \`CONFIRMED ROOT CAUSE:\` line, you MUST include that exact line verbatim in your kstack_advance summary.`,
     "test": `## DELIVERABLE
 Test commands identified + pass/fail counts + failure details.
 
@@ -684,7 +684,7 @@ Stop when: the required adjacent flows are covered OR two passes produce no new 
 ## CONTEXT
 Goal: {goal} | Branch: {branch}
 
-Use browser tools to test adjacent functionality — same core set as the qa phase (gstack_goto, gstack_snapshot, gstack_click, gstack_fill/gstack_type, gstack_wait, gstack_console --errors). Verify the fix didn't break other flows.`,
+Use browser tools to test adjacent functionality — same core set as the qa phase (kstack_goto, kstack_snapshot, kstack_click, kstack_fill/kstack_type, kstack_wait, kstack_console --errors). Verify the fix didn't break other flows.`,
     "document": `## DELIVERABLE
 A DOC REPORT block (files reviewed, updated, generated, remaining gaps) plus doc updates committed as their own atomic commit.
 

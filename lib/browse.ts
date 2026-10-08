@@ -266,7 +266,7 @@ export function cap(
       CAP +
       "/" +
       total +
-      " chars. Batch output too large for one result: re-run the interesting sub-command individually (e.g. gstack_snapshot / gstack_text with a narrower --selector), or split the batch.]\n";
+      " chars. Batch output too large for one result: re-run the interesting sub-command individually (e.g. kstack_snapshot / kstack_text with a narrower --selector), or split the batch.]\n";
   } else {
     const scope = p.selector ?? p.ref ?? "(full document)";
     hint =
@@ -276,7 +276,7 @@ export function cap(
       total +
       " chars. Last selector scope: " +
       scope +
-      ". Re-run with a narrower --selector targeting the remaining region, or use gstack_attrs/gstack_inspect to find the next anchor.]\n";
+      ". Re-run with a narrower --selector targeting the remaining region, or use kstack_attrs/kstack_inspect to find the next anchor.]\n";
   }
   return { body: head + hint, truncated: true };
 }

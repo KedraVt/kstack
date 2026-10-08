@@ -71,7 +71,7 @@ describe("content-security (WP2)", () => {
 test("tools.generated.ts wires the strict-content hook into every tool's execute", () => {
   const src = readFileSync(new URL("../tools.generated.ts", import.meta.url), "utf8");
   assert.ok(src.includes('from "./lib/content-security"'), "missing content-security import");
-  assert.ok(src.includes("strictContent() && PAGE_CONTENT_COMMANDS.has(t.gstackCmd)"), "missing strict hook condition");
+  assert.ok(src.includes("strictContent() && PAGE_CONTENT_COMMANDS.has(t.kstackCmd)"), "missing strict hook condition");
   assert.match(src, /let finalBody = body;/);
 });
 
@@ -91,10 +91,10 @@ describe("WP1 tool expansion", () => {
 
   test("daemon tools carry disambiguated names but map to plain CLI commands", () => {
     const src = generatedSrc();
-    assert.match(src, /name: "gstack_daemon_status"/);
-    assert.match(src, /name: "gstack_daemon_restart"/);
-    assert.match(src, /gstackCmd: "status"/);
-    assert.match(src, /gstackCmd: "restart"/);
+    assert.match(src, /name: "kstack_daemon_status"/);
+    assert.match(src, /name: "kstack_daemon_restart"/);
+    assert.match(src, /kstackCmd: "status"/);
+    assert.match(src, /kstackCmd: "restart"/);
   });
 
   test("buildArgs(chain) returns [] — payload travels via stdin, not argv", async () => {
@@ -105,7 +105,7 @@ describe("WP1 tool expansion", () => {
 
   test("chain execute validates sub-commands and serializes via stdin", () => {
     const src = generatedSrc();
-    assert.ok(src.includes('if (t.gstackCmd === "chain") {'), "missing chain special case");
+    assert.ok(src.includes('if (t.kstackCmd === "chain") {'), "missing chain special case");
     assert.ok(src.includes("!isAllowed(c[0])"), "missing per-sub-command allowlist validation");
     assert.ok(src.includes("JSON.stringify(params.commands)"), "missing stdin serialization");
     assert.ok(src.includes("runOpts.timeoutMs = 120000"), "missing 120s batch default timeout");

@@ -24,11 +24,11 @@ source ~/.claude/skills/gstack/bin/gstack-codex-probe 2>/dev/null || true
 if [ "$_CODEX_CFG" = "disabled" ]; then
   _CODEX_MODE="disabled"
 elif ! command -v codex >/dev/null 2>&1; then
-  _CODEX_MODE="not_installed"; _gstack_codex_log_event "codex_cli_missing" 2>/dev/null || true
-elif ! _gstack_codex_auth_probe >/dev/null 2>&1; then
-  _CODEX_MODE="not_authed"; _gstack_codex_log_event "codex_auth_failed" 2>/dev/null || true
+  _CODEX_MODE="not_installed"; _kstack_codex_log_event "codex_cli_missing" 2>/dev/null || true
+elif ! _kstack_codex_auth_probe >/dev/null 2>&1; then
+  _CODEX_MODE="not_authed"; _kstack_codex_log_event "codex_auth_failed" 2>/dev/null || true
 else
-  _CODEX_MODE="ready"; _gstack_codex_version_check 2>/dev/null || true
+  _CODEX_MODE="ready"; _kstack_codex_version_check 2>/dev/null || true
 fi
 echo "CODEX_MODE: $_CODEX_MODE"
 ```

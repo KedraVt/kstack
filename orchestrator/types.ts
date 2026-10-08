@@ -29,7 +29,7 @@ export interface WorkflowPhase {
   variant?: string;
   /**
    * Advancement policy. "auto" (default): the workflow proceeds as soon as the
-   * phase completes via gstack_advance. "manual": after completion the
+   * phase completes via kstack_advance. "manual": after completion the
    * workflow enters awaiting_approval and only `/gstack next` moves it on.
    */
   advance?: "auto" | "manual";
@@ -148,7 +148,7 @@ export interface WorkflowState {
    * Optional-phase decision gate (STEP 2g v2): the workflow is parked at an
    * `optional` phase awaiting an explicit human Run/Skip/Abort decision in the
    * /gstack panel. Never set for GSTACK_PI_OPTIONAL_PHASES=auto|skip, and
-   * cleared the moment the user decides. While set, gstack_advance refuses to
+   * cleared the moment the user decides. While set, kstack_advance refuses to
    * touch the phase — the model cannot bypass the gate.
    */
   pendingOptional?: boolean;

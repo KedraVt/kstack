@@ -96,7 +96,7 @@ CONFIG_HEADER='# gstack configuration — edit freely, changes take effect on ne
 #                           #   /document-release skip the outside-voice step entirely.
 #                           #   An invalid value is REJECTED (existing value preserved) so
 #                           #   a typo cannot silently turn paid Codex calls on or off.
-# gstack_contributor: false # true = file field reports when gstack misbehaves
+# kstack_contributor: false # true = file field reports when gstack misbehaves
 # skip_eng_review: false    # true = skip eng review gate in /ship (not recommended)
 #
 # ─── Workspace-aware ship ────────────────────────────────────────────
@@ -123,7 +123,7 @@ lookup_default() {
     checkpoint_push) echo "false" ;;
     explain_level) echo "default" ;;
     codex_reviews) echo "enabled" ;;
-    gstack_contributor) echo "false" ;;
+    kstack_contributor) echo "false" ;;
     skip_eng_review) echo "false" ;;
     workspace_root) echo "$HOME/conductor/workspaces" ;;
     cross_project_learnings) echo "" ;; # intentionally empty → unset triggers first-time prompt
@@ -346,7 +346,7 @@ case "${1:-}" in
     echo "# ─── Active values (including defaults for unset keys) ───"
     for KEY in proactive routing_declined telemetry auto_upgrade update_check \
                skill_prefix checkpoint_mode checkpoint_push explain_level \
-               codex_reviews gstack_contributor skip_eng_review workspace_root \
+               codex_reviews kstack_contributor skip_eng_review workspace_root \
                artifacts_sync_mode artifacts_sync_mode_prompted plan_tune_hooks; do
       VALUE=$(grep -E "^${KEY}:" "$CONFIG_FILE" 2>/dev/null | tail -1 | awk '{print $2}' | tr -d '[:space:]' || true)
       SOURCE="default"
@@ -362,7 +362,7 @@ case "${1:-}" in
     echo "# gstack-config defaults"
     for KEY in proactive routing_declined telemetry auto_upgrade update_check \
                skill_prefix checkpoint_mode checkpoint_push explain_level \
-               codex_reviews gstack_contributor skip_eng_review workspace_root \
+               codex_reviews kstack_contributor skip_eng_review workspace_root \
                artifacts_sync_mode artifacts_sync_mode_prompted plan_tune_hooks; do
       printf '  %-24s %s\n' "$KEY:" "$(lookup_default "$KEY")"
     done

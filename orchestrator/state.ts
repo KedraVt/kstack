@@ -360,13 +360,13 @@ export function approveNext(state: WorkflowState): WorkflowState {
 //
 // The old flow prompted `ctx.ui.confirm("Run the optional phase?")` from the
 // fire-and-forget background chain. That dialog fires mid-stream (the model is
-// still generating after gstack_advance returned), steals editor focus, and
+// still generating after kstack_advance returned), steals editor focus, and
 // defaults to "Yes" on Enter — so a user typing "no, skip QA" literally
 // LAUNCHED the QA phase they were refusing. Prompting from a background chain
 // cannot be a real decision point, so the decision now lives where every other
 // human decision lives: the foreground /gstack panel (Run / Skip / Abort),
 // exactly like the manual decision gates. The model cannot bypass it: while
-// parked, gstack_advance refuses and the executor never enters the phase.
+// parked, kstack_advance refuses and the executor never enters the phase.
 
 /**
  * Park the workflow at the current (optional) phase for an explicit human

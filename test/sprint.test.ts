@@ -1048,10 +1048,10 @@ describe("advanceBlockReason (F1): every parked state is code-enforced", () => {
 
   test("awaiting_approval (manual decision gate) is blocked", () => {
     const blocked = advanceBlockReason(sprintState(4, { status: "awaiting_approval" }));
-    assert.ok(blocked, "manual gate must refuse gstack_advance");
+    assert.ok(blocked, "manual gate must refuse kstack_advance");
   });
 
-  test("security freeze is blocked — a repeat gstack_advance cannot bypass it (F1 core)", () => {
+  test("security freeze is blocked — a repeat kstack_advance cannot bypass it (F1 core)", () => {
     const frozen = sprintState(7, {
       status: "paused",
       frozenUntilHuman: true,
@@ -1070,7 +1070,7 @@ describe("advanceBlockReason (F1): every parked state is code-enforced", () => {
   test("unreadable-verdict park is blocked", () => {
     const parked = parkForUnreadableVerdict(sprintState(8, { status: "paused" }), "qa-verdict", "no-verdict");
     const blocked = advanceBlockReason(parked);
-    assert.ok(blocked, "D4 park must refuse gstack_advance");
+    assert.ok(blocked, "D4 park must refuse kstack_advance");
     assert.match(blocked!, /unreadable/i);
   });
 
@@ -1113,7 +1113,7 @@ describe("advanceBlockReason (F1): every parked state is code-enforced", () => {
     // 2nd advance: the tool-level guard must refuse BEFORE advancePhase runs
     // (with pendingVerdict gone, advancePhase routing would silently skip).
     const blocked = advanceBlockReason(frozen);
-    assert.ok(blocked, "second gstack_advance on the frozen state must be blocked");
+    assert.ok(blocked, "second kstack_advance on the frozen state must be blocked");
     assert.match(blocked!, /FROZEN/i);
   });
 });
@@ -1358,7 +1358,7 @@ describe("in-flight decision guards (2026-09 fix 4)", () => {
 
     const inFlight = buildResumeContext(sprintState(0));
     assert.match(inFlight, /STILL RUNNING/, "in-flight chain flips the rider to the mid-turn warning");
-    assert.match(inFlight, /do NOT call gstack_advance/);
+    assert.match(inFlight, /do NOT call kstack_advance/);
 
     release();
     await new Promise((r) => setTimeout(r, 10));

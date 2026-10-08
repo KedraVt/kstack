@@ -70,7 +70,7 @@ the framework, install, first real tests, CI, TESTING.md.
 
 ## Browser testing methodology
 
-Core tool set (via `B` or the `gstack_*` browse tools):
+Core tool set (via `B` or the `kstack_*` browse tools):
 
 - `goto` — navigate; `snapshot` — capture DOM/accessibility state
 - `click` — click everything interactive

@@ -14,21 +14,21 @@ One extension, two layers:
 - **Skill ingestion** — distilled methodology digests (~2K tokens) from gstack's SKILL.md files are injected by the workflow itself: full digest to whoever does the work, compact DoD+best-practices gates for verification and repeats.
 - **Documentation phases** — optional doc-update phase on `develop` and `ship` (Diataxis coverage map, chained generation for missing docs).
 - **`qa-report` workflow** — full QA methodology, report-only, never modifies code.
-- **`gstack_start` tool** — programmatic workflow entry point (usable by any agent, including subagents).
+- **`kstack_start` tool** — programmatic workflow entry point (usable by any agent, including subagents).
 
 ## What's new (feat/sprint-workflow branch)
 
 - **`sprint` workflow (default-on)** — a 10-phase agile delivery pipeline distilled from `.agents-clean` methodology: understand → user-story → capability → system-design → ⏸ architect gate → backlog → implement → devsecops review → QA verdict → commit/archive. Planning artifacts (`user-story_XX.md`, `system-design_XX.md`, `tasks_XX.md`, …) live in the project root and archive to `.gstack/sprints/sprint_XX/` when the sprint goes green.
 - **Deterministic verdict routing** — review gates emit machine-parseable verdict lines (`status == red|green|orange`, `security-review == approved|rejected`) inside a `## HANDOFF` section. The orchestrator parses them fail-closed (whitelist-only values, containment-checked), cross-verifies them against the artifact files on disk (dual channel: chat + disk must agree), and routes deterministically — never on the model's say-so.
-- **Parks are code-enforced** — every parked state (security freeze, unreadable verdict, loop exhaustion, numbering anomaly, branch violation, failed phase) is refused by the `gstack_advance` tool itself, not just discouraged in prose: a repeat call cannot advance past a park on the model's say-so. Only the `/gstack` panel (or `/gstack next` where applicable) can resume, re-run, accept or abort.
+- **Parks are code-enforced** — every parked state (security freeze, unreadable verdict, loop exhaustion, numbering anomaly, branch violation, failed phase) is refused by the `kstack_advance` tool itself, not just discouraged in prose: a repeat call cannot advance past a park on the model's say-so. Only the `/gstack` panel (or `/gstack next` where applicable) can resume, re-run, accept or abort.
 - **Branch enforcement** — sprint gates that audit developer output (`devsecops-review`, `qa-verdict`) park fail-closed when entered on main/master: MASTER_DOD requires `task/<slug>` branches for implementation work. Document-level phases (`architect-gate`, planning) legitimately run on main.
-- **Compaction guard** — the per-turn resume prefix re-anchors the active main phase's deliverable/stop-condition contract, and the read-only `gstack_phase` tool re-fetches full phase instructions on demand — for delegated phases it also names the durable artifact files, since specialist results arrive via a transient message and are never persisted.
+- **Compaction guard** — the per-turn resume prefix re-anchors the active main phase's deliverable/stop-condition contract, and the read-only `kstack_phase` tool re-fetches full phase instructions on demand — for delegated phases it also names the durable artifact files, since specialist results arrive via a transient message and are never persisted.
 - **Truthful status line** — the footer shows the real state instead of the last running label: `PARKED for approval — /gstack next`, `FROZEN: <severity> security rejection`, `verdict unreadable (<cause>)`, `loop exhausted`, `branch violation`, `phase failed`; cleared on completion/abort.
 - **Security freeze** — a critical/high security rejection parks the whole sprint until a human types the confirmation phrase in the panel; medium/low rejections loop back to implement normally.
 - **Trust boundary note** — dual-channel verification trusts files in the repo root: a malicious repo can pre-plant both channels against a predictable next sprint number. Sprint stamping, anomaly guards, and the hard commit-archive gate raise the bar but do not close within-sprint planting — review gate artifacts before approving.
 - **Bounded loop-backs** — rejected reviews return work to the implementing phase with extracted blocker feedback; after N attempts (configurable) the sprint parks for human decision instead of looping forever. Accepting an exhausted gate ("Accept result — continue past the gate") resets the loop budget, so the next review gate gets a fresh ceiling instead of parking on its first rejection.
 - **Unreadable-verdict park** — if a gate's output can't be parsed into a known verdict, the sprint parks WITHOUT burning an attempt; the panel shows only the failing lines so you can approve/loop/inspect deliberately.
-- **Sprint requires deterministic delegation** — the sprint gates route exclusively on executor-produced verdicts, so the workflow refuses to start while `GSTACK_PI_DETERMINISTIC=off` (both `/gstack sprint` and the `gstack_start` tool explain this). Kill-switch parks (`GSTACK_PI_VERDICTS=off` / `_LOOPBACKS=off`) likewise land in a decision panel offering **Accept / Re-run / Abort**.
+- **Sprint requires deterministic delegation** — the sprint gates route exclusively on executor-produced verdicts, so the workflow refuses to start while `GSTACK_PI_DETERMINISTIC=off` (both `/gstack sprint` and the `kstack_start` tool explain this). Kill-switch parks (`GSTACK_PI_VERDICTS=off` / `_LOOPBACKS=off`) likewise land in a decision panel offering **Accept / Re-run / Abort**.
 - **Strict BE→FE chain** — implementation runs backend-developer then frontend-developer sequentially per task wave; model tiers (`GSTACK_PI_MODEL_STRONG/FAST`) let judgment phases run on stronger models while mechanical phases stay cheap.
 - **Fixed**: phase instructions are now delivered with `followUp` streaming behavior — eliminates the "Agent is already processing" error that silently dropped phase handoffs.
 - **Raw skill library split** — the bundled skill surface is organized in two folders: `skills/gstack/` (23 cherry-picked gstack skills, manual `/skill:gstack-*` invocation) and `skills/kedra/` (18 full `.agents-clean` methodology skills, verbatim, manual `/skill:<name>` invocation — the whole source library except `acceptance-criteria-backend/-frontend`, which live inside the sub-agent bodies).
@@ -90,7 +90,7 @@ The menu adapts to your git context:
 
 ⏸ = decision phase: the workflow pauses in `awaiting_approval` until you run `/gstack next`.
 
-Each phase runs either in the main agent context (analysis, verification, planning) or is delegated deterministically to a spawned specialist subagent — scout / planner / worker / reviewer (implementation, exploration, heavy testing). The orchestrator injects structured instructions and advances when the model calls `gstack_advance`; it can never bypass a manual gate or a parked state — the advance tool refuses `paused`/`awaiting_approval` states outright, so only you can resume, re-run, accept or abort from the `/gstack` panel.
+Each phase runs either in the main agent context (analysis, verification, planning) or is delegated deterministically to a spawned specialist subagent — scout / planner / worker / reviewer (implementation, exploration, heavy testing). The orchestrator injects structured instructions and advances when the model calls `kstack_advance`; it can never bypass a manual gate or a parked state — the advance tool refuses `paused`/`awaiting_approval` states outright, so only you can resume, re-run, accept or abort from the `/gstack` panel.
 
 While a workflow is active, every interactive input is prefixed with a resume context that re-anchors the current phase, the goal, and the constraints still binding this turn (frozen gate, unreadable verdict, report-only posture, decision phase) — short acknowledgements like "ok" stay on-workflow instead of drifting back to plain chat.
 
@@ -136,23 +136,23 @@ Suggestions are advisory — the LLM asks before starting a workflow. Slash comm
 
 ### Programmatic start
 
-Any agent — including spawned subagents, which load this extension too — can bootstrap a workflow with the `gstack_start { workflow, goal }` tool.
+Any agent — including spawned subagents, which load this extension too — can bootstrap a workflow with the `kstack_start { workflow, goal }` tool.
 
 ### Browser tools (65)
 
 All registered as native pi tools, callable by the LLM automatically:
 
 ```
-gstack_goto, gstack_snapshot, gstack_click, gstack_fill,
-gstack_screenshot, gstack_text, gstack_html, gstack_console,
-gstack_network, gstack_responsive, gstack_diff, gstack_is,
-gstack_cookie_import_browser, gstack_pdf, ...
+kstack_goto, kstack_snapshot, kstack_click, kstack_fill,
+kstack_screenshot, kstack_text, kstack_html, kstack_console,
+kstack_network, kstack_responsive, kstack_diff, kstack_is,
+kstack_cookie_import_browser, kstack_pdf, ...
 ```
 
-WP1 additions: `gstack_chain` runs a JSON array of `[cmd, ...args]` batches in ONE
-call (payload via stdin; output enveloped as untrusted web content), `gstack_dialog`
-reads the daemon's dialog ring buffer, `gstack_perf` returns page metrics, and
-`gstack_daemon_status` / `gstack_daemon_restart` expose daemon health and recovery
+WP1 additions: `kstack_chain` runs a JSON array of `[cmd, ...args]` batches in ONE
+call (payload via stdin; output enveloped as untrusted web content), `kstack_dialog`
+reads the daemon's dialog ring buffer, `kstack_perf` returns page metrics, and
+`kstack_daemon_status` / `kstack_daemon_restart` expose daemon health and recovery
 (the `daemon-` prefix distinguishes them from the orchestrator's own `/gstack status`).
 
 Full list: see `tools.generated.ts` (65 commands from the gstack browse CLI).
@@ -209,7 +209,7 @@ The script also detects new upstream features (skills, tools, bin scripts) not y
 ╚══════════════════════════════════════════════════════════╝
 
   [skill] gstack-canary
-  [tool]  gstack_handoff
+  [tool]  kstack_handoff
   [bin]   gstack-analytics
 ```
 
@@ -261,7 +261,7 @@ gstack-pi/
 │   ├── commands.generated.ts  Allowed command set (auto-generated)
 │   └── schemas.ts           TypeBox parameter schemas
 ├── orchestrator/
-│   ├── index.ts             Registers /gstack, gstack_advance, gstack_phase, gstack_start, input router
+│   ├── index.ts             Registers /gstack, kstack_advance, kstack_phase, kstack_start, input router
 │   ├── types.ts             Workflow, Phase, State interfaces
 │   ├── state.ts             State machine (persist via pi appendEntry; approval gates)
 │   ├── git.ts               Git context detection
@@ -272,7 +272,7 @@ gstack-pi/
 │   ├── spawn.ts             Deterministic subagent execution (pi --mode json)
 │   ├── sprint.ts            Sprint numbering discovery + root/archive anomaly guards
 │   ├── verdicts.ts          Deterministic verdict parsing, dual-channel verification, retry feedback
-│   ├── artifacts.ts         Sprint-stamped artifact filenames + phase→artifact map — single source for templates, verdicts, freeze path, gstack_phase
+│   ├── artifacts.ts         Sprint-stamped artifact filenames + phase→artifact map — single source for templates, verdicts, freeze path, kstack_phase
 │   ├── handoff.ts           ## HANDOFF extraction for {previous} (tail fallback)
 │   ├── skip.ts              Structural-skip guards (root-cause collapse, QA fix loop)
 │   ├── telemetry.ts         Per-step run reports (.gstack/runs)
@@ -299,7 +299,7 @@ gstack-pi/
 ### How the orchestrator works
 
 ```
-/gstack or gstack_start ──┐
+/gstack or kstack_start ──┐
                           ├──→ State Machine ──→ Phase Executor ──► main phase:
 input router ─────────────┘         ↑                              instructions to LLM
                                     │                                    │
@@ -307,15 +307,15 @@ input router ─────────────┘         ↑             
                        yes: pause   │                       specialists first, then
                        (/gstack next)│                      prefix their output
                                     │                                    ↓
-                      gstack_advance ←──── LLM executes/reviews ←── instructions
+                      kstack_advance ←──── LLM executes/reviews ←── instructions
 ```
 
-1. User starts a workflow via `/gstack`, `gstack_start`, or the router suggests one
+1. User starts a workflow via `/gstack`, `kstack_start`, or the router suggests one
 2. The orchestrator injects phase instructions into the LLM context (`followUp` delivery — never mid-turn)
 3. Subagent phases are executed by the orchestrator itself: specialists run in isolated `pi` processes and their output is prefixed for review
-4. The LLM calls `gstack_advance` with a summary — this is the only progression mechanism; it must never defer back to the user
+4. The LLM calls `kstack_advance` with a summary — this is the only progression mechanism; it must never defer back to the user
 5. Auto phases advance immediately; decision phases (`develop.plan`, `investigate.root-cause`) park in `awaiting_approval` until you run `/gstack next`
-6. Sprint parks (security freeze, unreadable verdict, loop exhaustion, numbering anomaly, branch violation, kill-switch pauses, failed phases) are tool-enforced: a repeat `gstack_advance` is refused and only the `/gstack` panel moves the state machine
+6. Sprint parks (security freeze, unreadable verdict, loop exhaustion, numbering anomaly, branch violation, kill-switch pauses, failed phases) are tool-enforced: a repeat `kstack_advance` is refused and only the `/gstack` panel moves the state machine
 7. Repeat until all phases complete
 
 State persists across session reloads via pi's `appendEntry` (not sent to LLM context).

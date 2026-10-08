@@ -1,7 +1,7 @@
 ---
 name: scout
 description: Fast codebase recon that returns compressed context for handoff to other agents
-tools: read, grep, find, ls, bash, gstack_goto, gstack_text, gstack_snapshot
+tools: read, grep, find, ls, bash, kstack_goto, kstack_text, kstack_snapshot
 model: openrouter/ox-alpha
 ---
 
@@ -20,7 +20,7 @@ Strategy:
 3. Identify types, interfaces, key functions
 4. Note dependencies between files
 
-For UI/web evidence (bug reproduction, docs lookup), drive the browser via gstack_goto/gstack_text/gstack_snapshot — the browse daemon is already running; report what the page showed, not just that "the page loads".
+For UI/web evidence (bug reproduction, docs lookup), drive the browser via kstack_goto/kstack_text/kstack_snapshot — the browse daemon is already running; report what the page showed, not just that "the page loads".
 
 Output format:
 

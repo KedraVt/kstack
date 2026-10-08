@@ -2,21 +2,21 @@
 # gstack-codex-probe: shared helper for /codex and /autoplan skills.
 # Sourced from template bash blocks; never execute directly.
 #
-# Functions (all prefixed with _gstack_codex_ for namespace hygiene):
-#   _gstack_codex_auth_probe      — multi-signal auth check (env + file)
-#   _gstack_codex_version_check   — warn on known-bad Codex CLI versions
-#   _gstack_codex_timeout_wrapper — gtimeout -> timeout -> unwrapped fallback
-#   _gstack_codex_log_event       — telemetry emission to ~/.gstack/analytics/
+# Functions (all prefixed with _kstack_codex_ for namespace hygiene):
+#   _kstack_codex_auth_probe      — multi-signal auth check (env + file)
+#   _kstack_codex_version_check   — warn on known-bad Codex CLI versions
+#   _kstack_codex_timeout_wrapper — gtimeout -> timeout -> unwrapped fallback
+#   _kstack_codex_log_event       — telemetry emission to ~/.gstack/analytics/
 #
 # Hygiene rules (enforced by test/codex-hardening.test.ts):
 #   - Never set -e / set -u / trap / IFS= / PATH= in this file.
 #   - All internal vars prefix with _GSTACK_CODEX_.
-#   - All functions prefix with _gstack_codex_.
+#   - All functions prefix with _kstack_codex_.
 #   - No command execution at source time (only function defs).
 
 # --- Auth probe -------------------------------------------------------------
 
-_gstack_codex_auth_probe() {
+_kstack_codex_auth_probe() {
   # Multi-signal: env vars OR auth file. Avoids false negatives for env-auth
   # users (CI, platform engineers) that a file-only check would reject.
   local _codex_home="${CODEX_HOME:-$HOME/.codex}"
@@ -35,7 +35,7 @@ _gstack_codex_auth_probe() {
 
 # --- Version check ----------------------------------------------------------
 
-_gstack_codex_version_check() {
+_kstack_codex_version_check() {
   # Warn on known-bad Codex CLI versions. Anchored regex prevents false
   # positives like 0.120.10 or 0.120.20 from matching. 0.120.2-beta still
   # matches the bad release and gets warned (it IS buggy).
@@ -45,13 +45,13 @@ _gstack_codex_version_check() {
   [ -z "$_ver" ] && return 0
   if echo "$_ver" | grep -Eq '(^|[^0-9.])0\.120\.(0|1|2)([^0-9.]|$)'; then
     echo "WARN: Codex CLI $_ver has known stdin deadlock bugs. Run: npm install -g @openai/codex@latest"
-    _gstack_codex_log_event "codex_version_warning"
+    _kstack_codex_log_event "codex_version_warning"
   fi
 }
 
 # --- Timeout wrapper --------------------------------------------------------
 
-_gstack_codex_timeout_wrapper() {
+_kstack_codex_timeout_wrapper() {
   # Resolve wrapper binary: prefer gtimeout (Homebrew coreutils on macOS),
   # fall back to timeout (Linux), else run unwrapped. Arguments: $1 is the
   # duration in seconds; rest is the command to run.
@@ -68,7 +68,7 @@ _gstack_codex_timeout_wrapper() {
 
 # --- Telemetry event --------------------------------------------------------
 
-_gstack_codex_log_event() {
+_kstack_codex_log_event() {
   # Emit a telemetry event to ~/.gstack/analytics/skill-usage.jsonl.
   # Gated on $_TEL != "off" (caller sets this from gstack-config).
   # Event types: codex_timeout, codex_auth_failed, codex_cli_missing,
@@ -88,7 +88,7 @@ _gstack_codex_log_event() {
 
 # --- Learnings log on hang --------------------------------------------------
 
-_gstack_codex_log_hang() {
+_kstack_codex_log_hang() {
   # Invoked when a codex invocation times out (exit 124). Records an
   # operational learning so future /investigate sessions surface the pattern.
   # Best-effort: errors swallowed.
