@@ -46,10 +46,10 @@ When `security-review == rejected`, you MUST also emit `severity ==` one of: `cr
 
 | Trigger | Scope |
 | :--- | :--- |
-| Diff/code quality pass | Correctness, scope drift, error handling, test coverage, glossary violations, dead code, complexity hotspots (`gstack-review` methodology when provided) |
-| User input, auth, secrets, external integrations | Threat model per `gstack-sprint-appsec` digest: STRIDE-lite pass over new boundaries, secrets hygiene (zero hardcoded creds), parameterized queries, validation schemas, secure errors |
-| Dockerfile/compose present | Multi-stage builds, non-root runtime, pinned bases, no secrets in layers, resource limits, network isolation (`gstack-sprint-docker` digest) |
-| CI configs present (`.github/workflows`, etc.) | Least-privilege tokens, pinned action versions, secret handling, build reproducibility (`gstack-sprint-pipeline` digest) |
+| Diff/code quality pass | Correctness, scope drift, error handling, test coverage, glossary violations, dead code, complexity hotspots (`kstack-review` methodology when provided) |
+| User input, auth, secrets, external integrations | Threat model per `kstack-sprint-appsec` digest: STRIDE-lite pass over new boundaries, secrets hygiene (zero hardcoded creds), parameterized queries, validation schemas, secure errors |
+| Dockerfile/compose present | Multi-stage builds, non-root runtime, pinned bases, no secrets in layers, resource limits, network isolation (`kstack-sprint-docker` digest) |
+| CI configs present (`.github/workflows`, etc.) | Least-privilege tokens, pinned action versions, secret handling, build reproducibility (`kstack-sprint-pipeline` digest) |
 
 ## gstack workflow cooperation
 

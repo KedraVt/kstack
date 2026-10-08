@@ -720,16 +720,16 @@ describe("conditional digests (D14) + glossary injection (E6)", () => {
   test("docker/pipeline digests dropped when their trigger is absent", () => {
     const tmp = tmpDir("gstack-cond-");
     try {
-      assert.deepEqual(conditionalSkillIds(["gstack-review", "gstack-sprint-docker", "gstack-sprint-pipeline"], tmp), ["gstack-review"]);
+      assert.deepEqual(conditionalSkillIds(["kstack-review", "kstack-sprint-docker", "kstack-sprint-pipeline"], tmp), ["kstack-review"]);
       writeFileSync(path.join(tmp, "Dockerfile"), "FROM node");
       fs.mkdirSync(path.join(tmp, ".github", "workflows"), { recursive: true });
       writeFileSync(path.join(tmp, ".github", "workflows", "ci.yml"), "on: push");
       assert.deepEqual(
-        conditionalSkillIds(["gstack-review", "gstack-sprint-docker", "gstack-sprint-pipeline"], tmp),
-        ["gstack-review", "gstack-sprint-docker", "gstack-sprint-pipeline"],
+        conditionalSkillIds(["kstack-review", "kstack-sprint-docker", "kstack-sprint-pipeline"], tmp),
+        ["kstack-review", "kstack-sprint-docker", "kstack-sprint-pipeline"],
       );
       assert.equal(conditionalSkillIds(undefined, tmp), undefined);
-      assert.deepEqual(conditionalSkillIds(["gstack-review"], undefined), ["gstack-review"], "no cwd ⇒ passthrough");
+      assert.deepEqual(conditionalSkillIds(["kstack-review"], undefined), ["kstack-review"], "no cwd ⇒ passthrough");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

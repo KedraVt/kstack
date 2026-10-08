@@ -1,7 +1,7 @@
 import type { WorkflowPhase, WorkflowContext, Workflow } from "./types.ts";
 import { getWorkflow } from "./workflows.ts";
-import { loadSkillSource, loadSkillGate, getSkillInfo } from "./skills.ts";
-import { skillsEnabled, manualGates, deterministicSubagents, skillInjectionMode } from "./config.ts";
+import { loadSkillFull, loadSkillGate, getSkillInfo } from "./skills.ts";
+import { skillsEnabled, manualGates, deterministicSubagents } from "./config.ts";
 import { replaceExact } from "./text.ts";
 import { extractHandoff } from "./handoff.ts";
 import { parseRootCauseMarker, validateStrategyTask } from "./skip.ts";
@@ -67,14 +67,14 @@ function repoHasCI(cwd: string): boolean {
 
 /**
  * Drop conditionally-loaded sprint digests whose trigger is absent in the
- * project: gstack-sprint-docker requires Docker files, gstack-sprint-pipeline
+ * project: kstack-sprint-docker requires Docker files, kstack-sprint-pipeline
  * requires CI configs. Everything else passes through untouched.
  */
 export function conditionalSkillIds(ids: string[] | undefined, cwd?: string): string[] | undefined {
   if (!ids || !cwd) return ids;
   const filtered = ids.filter((id) => {
-    if (id === "gstack-sprint-docker") return repoHasDocker(cwd);
-    if (id === "gstack-sprint-pipeline") return repoHasCI(cwd);
+    if (id === "kstack-sprint-docker") return repoHasDocker(cwd);
+    if (id === "kstack-sprint-pipeline") return repoHasCI(cwd);
     return true;
   });
   // Return [] (not undefined) when filtering emptied the list: downstream
@@ -292,7 +292,7 @@ function buildOrchestratorSkillBlock(phase: WorkflowPhase, ctx: WorkflowContext)
       !isSubagentPhase && !alreadyDelivered;
 
     if (wantFullDigest) {
-      const digest = loadSkillSource(id, skillInjectionMode());
+      const digest = loadSkillFull(id);
       if (digest) {
         parts.push(digest);
         parts.push(`(Full skill documentation for deep consultation: ${info.skillPath})`);
@@ -319,16 +319,16 @@ function buildOrchestratorSkillBlock(phase: WorkflowPhase, ctx: WorkflowContext)
 // must be treated inside a subagent task.
 type SkillClass = "format-critical" | "support";
 const SKILL_CLASSES: Record<string, SkillClass> = {
-  "gstack-qa": "format-critical",
-  "gstack-review": "format-critical",
-  "gstack-investigate": "format-critical",
-  "grilling": "format-critical",
-  "gstack-document-generate": "format-critical",
-  "gstack-fix-strategy": "format-critical",
-  "gstack-ship": "support",
-  "gstack-office-hours": "support",
-  "gstack-plan-eng-review": "support",
-  "gstack-document-release": "support",
+  "kstack-qa": "format-critical",
+  "kstack-review": "format-critical",
+  "kstack-investigate": "format-critical",
+  "kstack-grilling": "format-critical",
+  "kstack-document-generate": "format-critical",
+  "kstack-fix-strategy": "format-critical",
+  "kstack-ship": "support",
+  "kstack-office-hours": "support",
+  "kstack-plan-eng-review": "support",
+  "kstack-document-release": "support",
 };
 export function skillClassFor(id: string): SkillClass {
   return SKILL_CLASSES[id] ?? "format-critical";
@@ -798,7 +798,7 @@ function buildTaskSkills(phase: WorkflowPhase, task: string, skillsOverride?: st
   }
   const blocks: string[] = [];
   for (const id of ids) {
-    const digest = loadSkillSource(id, skillInjectionMode());
+    const digest = loadSkillFull(id);
     const info = getSkillInfo(id);
     // Per-skill class prefix (STEP 1c): format-critical digests are part of
     // the deliverable; support digests are applied only as useful.
@@ -822,7 +822,7 @@ function buildTaskSkills(phase: WorkflowPhase, task: string, skillsOverride?: st
  */
 // Scope boundaries keyed by phase id. The session debug of 2026-08-22 showed
 // the reproduce phase drifting into full root-causing (the injected
-// gstack-investigate digest contains the whole debugging methodology), which
+// kstack-investigate digest contains the whole debugging methodology), which
 // made the subsequent root-cause chain — and its manual approval gate — feel
 // redundant to the user. These directives keep each phase inside its lane.
 const PHASE_BOUNDARIES: Record<string, string> = {

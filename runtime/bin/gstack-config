@@ -41,7 +41,7 @@ CONFIG_HEADER='# gstack configuration — edit freely, changes take effect on ne
 # update_check: true        # false = suppress version check notifications
 #
 # ─── Skill naming ────────────────────────────────────────────────────
-# skill_prefix: false       # true = namespace skills as /gstack-qa, /gstack-ship
+# skill_prefix: false       # true = namespace skills as /kstack-qa, /kstack-ship
 #                           # false = short names /qa, /ship
 #
 # ─── Checkpoint ──────────────────────────────────────────────────────

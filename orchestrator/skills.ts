@@ -13,8 +13,7 @@
  * literal "## DoD gate" section by loadSkillGate — there is no separate
  * distilled layer, no inline dod field, and no per-layer path mapping.
  *
- * GSTACK_PI_SKILL_INJECTION=full is now a no-op kept for config compat:
- * the canonical file is always the injected methodology (it is already the
+ * The canonical file is always the injected methodology (it is already the
  * distilled-size form). A missing skill file must never break a run — all
  * loaders degrade to null and callers fall back to generic instructions.
  */
@@ -22,7 +21,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { SkillInjectionMode } from "./config.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const EXTENSION_ROOT = join(here, "..");
@@ -44,78 +42,78 @@ interface RegistryEntry {
 }
 
 const REGISTRY: Record<string, RegistryEntry> = {
-  "gstack-investigate": {
+  "kstack-investigate": {
     summary: "Systematic debugging: Iron Law (no fixes without root cause), hypothesis testing, structured debug report",
   },
-  "gstack-review": {
+  "kstack-review": {
     summary: "Pre-landing review: scope drift detection, severity-classified findings, completeness gaps",
   },
-  "gstack-qa": {
+  "kstack-qa": {
     summary: "Browser QA: test like a real user, severity-classified bug reports, evidence screenshots",
   },
-  "gstack-ship": {
+  "kstack-ship": {
     summary: "Release pipeline: pre-flight checks, test gates, TODOS.md management, atomic commits, PR discipline",
   },
-  "gstack-office-hours": {
+  "kstack-office-hours": {
     summary: "Product judgment for planning: premise-challenge, specificity, wedge thinking, scope ambition",
   },
-  "gstack-plan-eng-review": {
+  "kstack-plan-eng-review": {
     summary: "Engineering rigor for plans: blast radius, hidden assumptions, edge cases, test strategy",
   },
-  "gstack-document-release": {
-    dir: "gstack-document",
+  "kstack-document-release": {
+    dir: "kstack-document",
     summary: "Post-ship docs: Diataxis coverage map, factual updates from the diff, stale-reference sweep",
   },
-  "gstack-document-generate": {
-    dir: "gstack-document",
+  "kstack-document-generate": {
+    dir: "kstack-document",
     summary: "Author missing documentation: codebase archaeology first, Diataxis partitioning, reference-first writing",
   },
-  "grilling": {
+  "kstack-grilling": {
     summary: "Interview protocol: design-tree rounds over the frontier, recommended answers, facts-vs-decisions split",
   },
-  "gstack-fix-strategy": {
+  "kstack-fix-strategy": {
     summary: "Minimal-fix strategy for a CONFIRMED root cause: validation-first, minimal diff, regression test per fix",
   },
 
   // --- sprint workflow digests (canonical kedra ports, S1) ---
-  "gstack-sprint-capability": {
-    dir: "product-capability",
+  "kstack-sprint-capability": {
+    dir: "kstack-product-capability",
     summary: "User-story writing + story→engineering-constraints translation: boolean-checkable invariants, explicit trust boundaries, non-goals",
   },
-  "gstack-sprint-system-design": {
-    dir: "system-design",
+  "kstack-sprint-system-design": {
+    dir: "kstack-system-design",
     summary: "DDD system design: binding ubiquitous-language glossary, aggregates with boolean invariants, context mapping, contract immutability",
   },
-  "gstack-sprint-adr": {
-    dir: "adr",
+  "kstack-sprint-adr": {
+    dir: "kstack-adr",
     summary: "Architecture decision records: decision/context/consequences format, append-only sprint log",
   },
-  "gstack-sprint-tasks": {
-    dir: "tasks",
+  "kstack-sprint-tasks": {
+    dir: "kstack-tasks",
     summary: "Atomic task backlog: inputs/payloads/constraints/unhappy-paths/falsifiable success conditions, role-assigned with dependencies",
   },
-  "gstack-sprint-tdd": {
-    dir: "test-driven-development",
+  "kstack-sprint-tdd": {
+    dir: "kstack-test-driven-development",
     summary: "Test-first discipline: red-green-refactor, AAA structure, prove-it bug reproduction, anti-pattern avoidance",
   },
-  "gstack-sprint-verification": {
-    dir: "verification-before-completion",
+  "kstack-sprint-verification": {
+    dir: "kstack-verification-before-completion",
     summary: "Iron Law: completion claims require fresh verification evidence — run it now, read the output, cite it",
   },
-  "gstack-sprint-appsec": {
-    dir: "gstack-cso",
+  "kstack-sprint-appsec": {
+    dir: "kstack-cso",
     summary: "AppSec review: STRIDE-lite threat model over new trust boundaries, secrets hygiene, injection prevention, actionable remediations",
   },
-  "gstack-sprint-docker": {
-    dir: "docker-manager",
+  "kstack-sprint-docker": {
+    dir: "kstack-docker-manager",
     summary: "Conditional Docker audit: multi-stage builds, pinned bases, non-root runtime, resource limits, network isolation",
   },
-  "gstack-sprint-qa": {
-    dir: "gstack-qa",
+  "kstack-sprint-qa": {
+    dir: "kstack-qa",
     summary: "QA triage GREEN/RED/ORANGE, Testability Blockers, Save-Point git pattern, evidence-first reporting",
   },
-  "gstack-sprint-pipeline": {
-    dir: "pipeline-sre",
+  "kstack-sprint-pipeline": {
+    dir: "kstack-pipeline-sre",
     summary: "Conditional CI/CD authoring audit: least privilege, pinned versions, vault secrets, reproducible builds, rollback story",
   },
 };
@@ -167,18 +165,9 @@ export function loadSkillFull(id: string): string | null {
   return readSkill(id);
 }
 
-/**
- * Mode-aware methodology source. Post-S1 the canonical SKILL.md is the
- * single source for both modes — it is already distilled-size. The mode
- * argument is retained for config compat (GSTACK_PI_SKILL_INJECTION).
- */
-export function loadSkillSource(id: string, _mode: SkillInjectionMode): string | null {
-  return readSkill(id);
-}
-
 /** Compact index of all bundled skills, for optional deep consultation by the agent. */
 export function buildSkillIndex(): string {
-  const lines: string[] = ["Available gstack skills (read the full SKILL.md only if you need depth beyond your current instructions):"];
+  const lines: string[] = ["Available kstack skills (read the full SKILL.md only if you need depth beyond your current instructions):"];
   for (const id of getSkillIds()) {
     const info = getSkillInfo(id)!;
     lines.push(`- ${id}: ${info.summary} (full doc: ${info.skillPath})`);

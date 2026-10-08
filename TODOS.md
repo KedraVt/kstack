@@ -34,10 +34,10 @@ All three items landed in one commit:
 
 None forgotten; each maps to an existing mechanism and lands when its host skill next evolves:
 
-- `systematic-debugging` → deepen **gstack-investigate** digest (hypothesis-testing cadence overlap; merge unique sections only)
-- `code-audit-reviewer` → fold remaining checklist items into **gstack-review** digest
-- `code-simplification` → cross-reference **ponytail** `/gstack simplify` (better gate design already tracked here — do not double-inject)
-- `agent-introspection-debugging` → future standalone digest if agent-self-debugging demand appears
+- `systematic-debugging` → deepen **kstack-investigate** digest (hypothesis-testing cadence overlap; merge unique sections only)
+- `code-audit-reviewer` → fold remaining checklist items into **kstack-review** digest
+- `kstack-code-simplification` → cross-reference **ponytail** `/gstack simplify` (better gate design already tracked here — do not double-inject)
+- `kstack-agent-introspection-debugging` → future standalone digest if agent-self-debugging demand appears
 - `code-tour` → raw source shipped at `skills/kedra/code-tour/`; digest/execution integration still future (orthogonal)
 
 Deferred from the sprint-workflow integration (D12) — deliberate scope cuts, each
@@ -117,15 +117,14 @@ changes manually (MIT, pin a version in the digest header).
   `skills-distilled/gstack-simplify.md` (new digest).
 - Design sketched in session of 2026-08-23 (see conversation summary in `.gstack/plans/` if persisted).
 
-### Skill digest improvements — especially `gstack-office-hours`
+### Skill digest improvements — especially `kstack-office-hours`
 
 **What:** Review and improve all `skills-distilled/*.md` digests so they steer agent behavior
-more reliably inside workflows. Priority: `gstack-office-hours.md` (planning-phase quality gate).
+more reliably inside workflows. Priority: `kstack-office-hours.md` (planning-phase quality gate).
 
-> **Update 2026-09-14:** `GSTACK_PI_SKILL_INJECTION` defaults to `full` — the injected
-> source is the sprint-beta catalog and digests are only the missing-file fallback.
-> This item is now conditional on the digest-vs-full evaluation: improve whichever
-> source actually ships (the office-hours output-contract critique applies to both).
+> **Update 2026-09-14:** the canonical catalog is the only injected source
+> (the digest-vs-full switch was removed in S2). The office-hours
+> output-contract critique applies to what ships.
 > The registry `dod` lines are injected either way.
 
 Pain points to address:
@@ -140,7 +139,7 @@ Pain points to address:
 produce mushy plans that downstream gates reject → retry loops. Sharper office-hours output =
 fewer develop-plan rework cycles = better end-to-end workflow.
 
-**Files:** `skills-distilled/gstack-office-hours.md` first, then the rest; cross-check against
+**Files:** `skills-distilled/kstack-office-hours.md` first, then the rest; cross-check against
 phase instructions in `orchestrator/workflows.ts` so digest output matches what gates expect.
 
 ### Workflow: `/gstack design` — full design-review cycle
@@ -148,13 +147,13 @@ phase instructions in `orchestrator/workflows.ts` so digest output matches what 
 Same shape as `develop` / `investigate`: visual audit of the running app → severity-rated
 design findings (spacing, hierarchy, consistency, AI-slop detection) → interactive fix loop
 with before/after screenshots → regression pass. Build on the `gstack-design-review` skill
-methodology **composed with the locally installed `impeccable` skill**
-(`~/.pi/agent/skills/impeccable`) for frontend quality standards. Needs: browser tools
+methodology **composed with the locally installed `kstack-impeccable` skill**
+(`~/.pi/agent/skills/kstack-impeccable`) for frontend quality standards. Needs: browser tools
 (already native), a taste-feedback loop (interactive, like the plan approval gate).
 
 ### Workflow: `/gstack secure` — security audit
 
-Security audit workflow on the `gstack-cso` methodology: scout diffs → OWASP Top 10 +
+Security audit workflow on the `kstack-cso` methodology: scout diffs → OWASP Top 10 +
 STRIDE checklist phase → findings gate.
 
 ### Workflow: `/gstack retro`
@@ -163,7 +162,7 @@ Weekly retro reading session history; depends on the learnings memory below.
 
 ### Spec-as-goal entry for `develop`
 
-Accept a `gstack-spec`-style spec file as `develop`'s goal input, skipping the interview
+Accept a `kstack-spec`-style spec file as `develop`'s goal input, skipping the interview
 when a spec already exists.
 
 ### Orchestrator: `/gstack status`
@@ -196,7 +195,7 @@ Requirements covers it).
 
 - **`gstack-plan-devex-review`** — promote into planning when building developer-facing
   products (APIs, CLIs, SDKs).
-- **`gstack-plan-design-review`** — promote for UI-heavy work once `/gstack design` exists.
+- **`kstack-plan-design-review`** — promote for UI-heavy work once `/gstack design` exists.
 - **skillify-assisted digests** — use the `gstack-skillify` methodology to semi-automate
   distilling new upstream skills into `skills-distilled/`.
 

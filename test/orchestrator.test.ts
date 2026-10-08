@@ -355,13 +355,13 @@ describe("skill ingestion", () => {
 
   test("loadSkillFull returns null for unknown skills; grilling resolves canonically", () => {
     assert.equal(loadSkillFull("nonexistent-skill"), null);
-    const grilling = getSkillInfo("grilling")!;
+    const grilling = getSkillInfo("kstack-grilling")!;
     assert.ok(existsSync(grilling.skillPath));
-    assert.ok(grilling.skillPath.endsWith("skills\\grilling\\SKILL.md") || grilling.skillPath.endsWith("skills/grilling/SKILL.md"));
+    assert.ok(grilling.skillPath.replaceAll("\\", "/").endsWith("skills/kstack-grilling/SKILL.md"));
   });
 
   test("getSkillInfo resolves canonical SKILL.md paths that exist on disk", () => {
-    for (const id of ["gstack-review", "gstack-office-hours", "gstack-document-generate"]) {
+    for (const id of ["kstack-review", "kstack-office-hours", "kstack-document-generate"]) {
       const info = getSkillInfo(id)!;
       assert.ok(info.skillPath, `${id} should have a canonical SKILL.md`);
       assert.ok(existsSync(info.skillPath), `${info.skillPath} not found`);
@@ -384,10 +384,10 @@ describe("skill tiering in orchestrator instructions", () => {
     const instructions = buildPhaseInstructions(plan, makeCtx("develop", 2));
     // Canonical catalog: the SKILL.md frontmatter (`name: <dir>`) is embedded.
     // The marker proves the FULL methodology shipped — not just the compact gate.
-    assert.ok(instructions.includes("name: grilling"), "grilling protocol missing");
+    assert.ok(instructions.includes("name: kstack-grilling"), "kstack-grilling protocol missing");
     assert.ok(instructions.includes("frontier"), "interview protocol content missing");
     assert.ok(
-      instructions.includes("name: gstack-plan-eng-review"),
+      instructions.includes("name: kstack-plan-eng-review"),
       "eng rigor missing",
     );
   });
@@ -396,19 +396,19 @@ describe("skill tiering in orchestrator instructions", () => {
     const review = findPhase("ship", "review");
     assert.equal(review.execution, "subagent");
     const instructions = buildPhaseInstructions(review, makeCtx("ship"));
-    assert.ok(instructions.includes("Skill gate: gstack-review"));
-    assert.ok(instructions.includes("DoD gate: gstack-review"));
+    assert.ok(instructions.includes("Skill gate: kstack-review"));
+    assert.ok(instructions.includes("DoD gate: kstack-review"));
     assert.ok(instructions.includes("code-review =="), "review gate content missing");
-    assert.ok(!instructions.includes("name: gstack-review"), "full skill leaked into orchestrator instructions");
+    assert.ok(!instructions.includes("name: kstack-review"), "full skill leaked into orchestrator instructions");
   });
 
   test("repeat delivery degrades to the DoD gate even on main phases", () => {
-    const ctx = makeCtx("investigate", 3, ["gstack-investigate"]);
+    const ctx = makeCtx("investigate", 3, ["kstack-investigate"]);
     const verify = findPhase("investigate", "verify");
     const instructions = buildPhaseInstructions(verify, ctx);
-    assert.ok(instructions.includes("Skill gate: gstack-investigate"));
-    assert.ok(instructions.includes("DoD gate: gstack-investigate"));
-    assert.ok(!instructions.includes("name: gstack-investigate"), "full skill re-delivered");
+    assert.ok(instructions.includes("Skill gate: kstack-investigate"));
+    assert.ok(instructions.includes("DoD gate: kstack-investigate"));
+    assert.ok(!instructions.includes("name: kstack-investigate"), "full skill re-delivered");
   });
 
   test("phases without skills get no skill blocks; advancement rule intact", () => {
@@ -526,13 +526,13 @@ describe("documentation phases", () => {
   test("develop ends with an optional document phase carrying both doc skills", () => {
     const doc = findPhase("develop", "document");
     assert.equal(doc.optional, true);
-    assert.deepEqual(doc.skills, ["gstack-document-release", "gstack-document-generate"]);
+    assert.deepEqual(doc.skills, ["kstack-document-release", "kstack-document-generate"]);
   });
 
   test("ship carries an update-docs phase with both doc skills", () => {
     const doc = findPhase("ship", "update-docs");
     assert.equal(doc.optional, true);
-    assert.deepEqual(doc.skills, ["gstack-document-release", "gstack-document-generate"]);
+    assert.deepEqual(doc.skills, ["kstack-document-release", "kstack-document-generate"]);
   });
 
   test("document task chains generate pass and requires DOC REPORT + atomic docs commit", () => {
@@ -544,7 +544,7 @@ describe("documentation phases", () => {
   });
 
   test("ship skill mandates TODOS.md reconciliation and git discipline", () => {
-    const skill = loadSkillFull("gstack-ship")!;
+    const skill = loadSkillFull("kstack-ship")!;
     assert.ok(/TODOS\.md/.test(skill), "TODOS.md reconciliation missing");
     assert.ok(/git add -A/.test(skill), "no-git-add-A rule missing");
   });
@@ -583,7 +583,7 @@ describe("deterministic delegation plan", () => {
     assert.equal(plan.length, 1);
     assert.equal(plan[0].agent, "worker");
     assert.ok(plan[0].task.includes("add dark mode toggle"), "goal not interpolated");
-    assert.ok(plan[0].task.includes("Skill methodology: gstack-qa"), "skill digest not embedded in task");
+    assert.ok(plan[0].task.includes("Skill methodology: kstack-qa"), "skill digest not embedded in task");
   });
 
   test("chain steps also receive embedded skill methodology", () => {
@@ -591,7 +591,7 @@ describe("deterministic delegation plan", () => {
     assert.equal(rootCause.advance, "manual");
     const plan = buildDeterministicPlan(rootCause, makeCtx("investigate", 1));
     assert.deepEqual(plan.map((s) => s.agent), ["scout", "planner"]);
-    assert.ok(plan[0].task.includes("Skill methodology: gstack-investigate"), "digest not embedded in chain step");
+    assert.ok(plan[0].task.includes("Skill methodology: kstack-investigate"), "digest not embedded in chain step");
     assert.ok(plan[0].task.includes("add dark mode toggle"), "goal not interpolated in chain step");
   });
 
@@ -765,7 +765,7 @@ describe("deliverable-first contracts (STEP 1)", () => {
   test("methodology blocks carry the correct class prefix and follow the deliverable", () => {
     const qa = findPhase("develop", "qa");
     const qaPlan = buildDeterministicPlan(qa, makeCtx("develop", 4));
-    assert.ok(qaPlan[0].task.includes("Skill methodology: gstack-qa (format-critical)"), "qa should be format-critical");
+    assert.ok(qaPlan[0].task.includes("Skill methodology: kstack-qa (format-critical)"), "qa should be format-critical");
     assert.ok(
       qaPlan[0].task.includes("output format IS part of the deliverable"),
       "format-critical prefix missing",
@@ -777,7 +777,7 @@ describe("deliverable-first contracts (STEP 1)", () => {
 
     const pushPr = findPhase("ship", "push-pr");
     const shipPlan = buildDeterministicPlan(pushPr, makeCtx("ship", 4));
-    assert.ok(shipPlan[0].task.includes("Skill methodology: gstack-ship (support)"), "ship should be support-class");
+    assert.ok(shipPlan[0].task.includes("Skill methodology: kstack-ship (support)"), "ship should be support-class");
     assert.ok(shipPlan[0].task.includes("Apply the parts useful to the deliverable"), "support prefix missing");
   });
 
@@ -1030,16 +1030,16 @@ describe("role-scoped skill injection (STEP 3)", () => {
     const rootCause = findPhase("investigate", "root-cause");
     const plan = buildDeterministicPlan(rootCause, makeCtx("investigate", 1));
     assert.deepEqual(plan.map((s) => s.agent), ["scout", "planner"]);
-    assert.ok(plan[0].task.includes("Skill methodology: gstack-investigate"), "scout lost the full methodology");
-    assert.ok(plan[1].task.includes("Skill methodology: gstack-fix-strategy"), "planner missing the fix-strategy digest");
-    assert.ok(!plan[1].task.includes("Skill methodology: gstack-investigate"), "planner must NOT receive the full investigation digest [E1]");
+    assert.ok(plan[0].task.includes("Skill methodology: kstack-investigate"), "scout lost the full methodology");
+    assert.ok(plan[1].task.includes("Skill methodology: kstack-fix-strategy"), "planner missing the fix-strategy digest");
+    assert.ok(!plan[1].task.includes("Skill methodology: kstack-investigate"), "planner must NOT receive the full investigation digest [E1]");
   });
 
-  test("gstack-fix-strategy is a canonical registry skill with a parsed gate", () => {
-    const info = getSkillInfo("gstack-fix-strategy");
+  test("kstack-fix-strategy is a canonical registry skill with a parsed gate", () => {
+    const info = getSkillInfo("kstack-fix-strategy");
     assert.ok(info);
     assert.ok(existsSync(info.skillPath));
-    const gate = loadSkillGate("gstack-fix-strategy");
+    const gate = loadSkillGate("kstack-fix-strategy");
     assert.ok(gate);
     assert.ok(gate.includes("VALIDATED:"), "gate missing VALIDATED contract");
     assert.ok(gate.includes("REFUTED:"), "gate missing REFUTED contract");
@@ -1051,7 +1051,7 @@ describe("role-scoped skill injection (STEP 3)", () => {
     const plan = buildDeterministicPlan(doc, makeCtx("develop", 7));
     for (const step of plan) {
       assert.ok(
-        step.task.includes("Skill methodology: gstack-document-release") || step.task.includes("Skill methodology: gstack-document-generate"),
+        step.task.includes("Skill methodology: kstack-document-release") || step.task.includes("Skill methodology: kstack-document-generate"),
         "inherited phase skills lost",
       );
     }

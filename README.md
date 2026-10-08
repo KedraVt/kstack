@@ -106,7 +106,7 @@ While a workflow is active, every interactive input is prefixed with a resume co
 
 The workflow decides when skill knowledge applies — the model never has to guess:
 
-- Every mapped phase injects the **full sprint-beta SKILL.md** (`skills/sprint-beta/`) — `GSTACK_PI_SKILL_INJECTION=full` is the default. `=digest` restores the legacy distilled digests (~2K tokens) from `skills-distilled/`; a missing catalog file always degrades to the digest so a run never breaks.
+- Every mapped phase injects the canonical `skills/<id>/SKILL.md` — a missing catalog file degrades to the compact DoD gate so a run never breaks.
 - Main phases embed the methodology; subagent phases receive it inside their task string while orchestrator instructions carry only the compact **DoD + best-practices gate**
 - Repeated deliveries within one run degrade to the DoD gate (~40% skill-token savings)
 - Wired skills: investigate, qa, review, ship, office-hours, plan-eng-review, document-release (+generate), grilling, plus the sprint family (capability, system-design, adr, tasks, tdd, verification, appsec, docker, qa, pipeline). All 41 bundled skills stay manually invocable via `/skill:` (23 under the `gstack-` prefix, 18 kedra skills under their own name).
@@ -117,10 +117,10 @@ Pi's recursive discovery (`pi-agent-core` harness) loads `SKILL.md` files at any
 
 | Folder | Contents | Invocation | Source |
 |---|---|---|---|
-| `skills/gstack/` | 23 cherry-picked gstack skills (router nested at `gstack/gstack/`) | `/skill:gstack-qa`, `/skill:gstack-spec`, … | upstream gstack, adapted by `scripts/adapt-skills.ts` |
+| `skills/gstack/` | 23 cherry-picked gstack skills (router nested at `gstack/gstack/`) | `/skill:kstack-qa`, `/skill:kstack-spec`, … | upstream gstack, adapted by `scripts/adapt-skills.ts` |
 | `skills/kedra/` | 18 full `.agents-clean` skills — sprint methodology, process discipline (Iron Laws), security/infra, code quality | `/skill:systematic-debugging`, `/skill:adr`, `/skill:tasks`, … | `C:\Users\Mattia\Desktop\.agents-clean\skills\`, copied verbatim 2026-08-27 |
 
-`kedra/` ships the FULL source methodology (the digests in `skills-distilled/` remain as `GSTACK_PI_SKILL_INJECTION=digest` mode and the missing-file fallback). Deliberately excluded: `acceptance-criteria-backend` and `acceptance-criteria-frontend` — already folded into the `backend-developer`/`frontend-developer` sub-agent bodies (TODOS D12). Companion files (e.g. `testing-anti-patterns.md`, `systematic-debugging` reference material) are copied too — pi resolves skill-relative paths against the skill's own directory.
+`kedra/` ships the FULL source methodology. Deliberately excluded: `acceptance-criteria-backend` and `acceptance-criteria-frontend` — already folded into the `backend-developer`/`frontend-developer` sub-agent bodies (TODOS D12). Companion files (e.g. `testing-anti-patterns.md`, `systematic-debugging` reference material) are copied too — pi resolves skill-relative paths against the skill's own directory.
 
 ### Automatic routing
 
@@ -163,7 +163,7 @@ Two families, two folders:
 
 ```
 skills/
-├── gstack/   23 cherry-picked gstack skills   → /skill:gstack-qa, /skill:gstack-ship, /skill:gstack-spec, ...
+├── gstack/   23 cherry-picked gstack skills   → /skill:kstack-qa, /skill:kstack-ship, /skill:kstack-spec, ...
 └── kedra/    18 .agents-clean methodology     → /skill:systematic-debugging, /skill:tdd (test-driven-development), ...
 ```
 
@@ -222,7 +222,7 @@ To include new tools: run `bun run scripts/gen-tools.ts`.
 
 ```bash
 bun run scripts/adapt-skills.ts --check          # dry-run: report diffs, write nothing
-bun run scripts/adapt-skills.ts gstack-cso ...   # restrict to specific skills
+bun run scripts/adapt-skills.ts kstack-cso ...   # restrict to specific skills
 ```
 
 The root `gstack` router skill is hand-maintained and never regenerated.
@@ -413,7 +413,6 @@ the root-cause scout->planner chain collapses to ONE validate-only planner step.
 | `GSTACK_PI_SPRINT` | on | registers the sprint workflow; `off` hides it from menu and router entirely |
 | `GSTACK_PI_LOOPBACKS` | on | sprint loop-back engine; `off` ⇒ negative gate verdicts park in a `/gstack` panel (Accept / Re-run / Abort) instead of retrying |
 | `GSTACK_PI_VERDICTS` | on | deterministic verdict parsing; `off` ⇒ no auto-routing; gates park in a `/gstack` panel (Accept / Re-run / Abort) |
-| `GSTACK_PI_SKILL_INJECTION` | full | `full` injects the sprint-beta unified SKILL.md; `digest` restores `skills-distilled/` digests; missing catalog files always degrade to digest |
 | `GSTACK_PI_DELEGATION_BUDGET_SEC` | 2700 | wall-clock budget for one phase's whole delegation chain; `off` disables |
 | `GSTACK_PI_SPRINT_MAX_ATTEMPTS` | 4 | consecutive implement-rerun ceiling per review gate (counter resets on gate approval or on "Accept result — continue past the gate") |
 | `GSTACK_PI_ARCH_MAX_ATTEMPTS` | 5 | system-design rerun ceiling after architect rejections (reads `GSTACK_PI_SPRINT_ARCH_MAX_ATTEMPTS` / `GSTACK_PI_ARCH_MAX_ATTEMPTS`) |

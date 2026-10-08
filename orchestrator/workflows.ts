@@ -33,7 +33,7 @@ const develop: Workflow = {
       // Decision phase: interview rounds with the user, then the written
       // plan is reviewed before any code is written.
       advance: "manual",
-      skills: ["gstack-office-hours", "grilling", "gstack-plan-eng-review"],
+      skills: ["kstack-office-hours", "kstack-grilling", "kstack-plan-eng-review"],
     },
     {
       id: "implement",
@@ -48,7 +48,7 @@ const develop: Workflow = {
       execution: "subagent",
       agent: "worker",
       optional: true,
-      skills: ["gstack-qa"],
+      skills: ["kstack-qa"],
     },
     {
       id: "review",
@@ -56,7 +56,7 @@ const develop: Workflow = {
       execution: "subagent",
       agent: "reviewer",
       optional: false,
-      skills: ["gstack-review"],
+      skills: ["kstack-review"],
     },
     {
       id: "ship",
@@ -64,7 +64,7 @@ const develop: Workflow = {
       execution: "subagent",
       agent: "worker",
       optional: true,
-      skills: ["gstack-ship"],
+      skills: ["kstack-ship"],
     },
     {
       id: "document",
@@ -72,7 +72,7 @@ const develop: Workflow = {
       execution: "subagent",
       agent: "worker",
       optional: true,
-      skills: ["gstack-document-release", "gstack-document-generate"],
+      skills: ["kstack-document-release", "kstack-document-generate"],
     },
   ],
 };
@@ -93,18 +93,18 @@ const investigate: Workflow = {
       name: "Reproduce the Bug",
       execution: "main",
       optional: false,
-      skills: ["gstack-investigate"],
+      skills: ["kstack-investigate"],
     },
     {
       id: "root-cause",
       name: "Root Cause Analysis",
       execution: "subagent",
       chain: [
-        { agent: "scout", skills: ["gstack-investigate"], task: "## DELIVERABLE\nSuspicious code paths, recent changes (git log), and likely culprits related to the bug — each with file references.\n\n## STOP CONDITION\nStop when: all code plausibly involved in the reported symptom has been identified. Further exploration is waste.\n\n## CONTEXT\nBug: {goal} | Branch: {branch}\nReproduction context: {reproduce_summary}\n\nFind all code related to this bug and report suspicious code paths, recent changes (git log), and likely culprits." },
-        { agent: "planner", skills: ["gstack-fix-strategy"], task: "## DELIVERABLE\nRoot cause + minimal fix strategy: mechanism with file:line references, files to change, regression risks.\n\n## STOP CONDITION\nStop when: the root-cause mechanism is pinned to specific file:line locations and the fix strategy follows from it.\n\n## CONTEXT\nBug: {goal} | Branch: {branch}\nInvestigation context from the prior specialist:\n{previous}\n\nGiven this investigation context, identify the root cause and propose a minimal fix strategy. Output: root cause, fix approach, files to change, regression risks." },
+        { agent: "scout", skills: ["kstack-investigate"], task: "## DELIVERABLE\nSuspicious code paths, recent changes (git log), and likely culprits related to the bug — each with file references.\n\n## STOP CONDITION\nStop when: all code plausibly involved in the reported symptom has been identified. Further exploration is waste.\n\n## CONTEXT\nBug: {goal} | Branch: {branch}\nReproduction context: {reproduce_summary}\n\nFind all code related to this bug and report suspicious code paths, recent changes (git log), and likely culprits." },
+        { agent: "planner", skills: ["kstack-fix-strategy"], task: "## DELIVERABLE\nRoot cause + minimal fix strategy: mechanism with file:line references, files to change, regression risks.\n\n## STOP CONDITION\nStop when: the root-cause mechanism is pinned to specific file:line locations and the fix strategy follows from it.\n\n## CONTEXT\nBug: {goal} | Branch: {branch}\nInvestigation context from the prior specialist:\n{previous}\n\nGiven this investigation context, identify the root cause and propose a minimal fix strategy. Output: root cause, fix approach, files to change, regression risks." },
       ],
       optional: false,
-      skills: ["gstack-investigate"],
+      skills: ["kstack-investigate"],
       // Decision phase: the user approves the diagnosis before any fix is applied.
       advance: "manual",
     },
@@ -114,7 +114,7 @@ const investigate: Workflow = {
       execution: "subagent",
       agent: "worker",
       optional: false,
-      skills: ["gstack-investigate"],
+      skills: ["kstack-investigate"],
       // Context fix (2026-08-28 session post-mortem): this phase previously
       // fell back to the generic "fix" task template, whose {findings_summary}
       // placeholder only resolves in the review workflow (which has a phase
@@ -140,7 +140,7 @@ Apply the planned fixes. Run the tests after each fix. Report what was fixed.`,
       name: "Verify Fix",
       execution: "main",
       optional: false,
-      skills: ["gstack-investigate"],
+      skills: ["kstack-investigate"],
     },
     {
       id: "regression-qa",
@@ -149,7 +149,7 @@ Apply the planned fixes. Run the tests after each fix. Report what was fixed.`,
       agent: "worker",
       optional: true,
       skipWhen: (ctx) => !ctx.git.hasUncommittedChanges,
-      skills: ["gstack-qa"],
+      skills: ["kstack-qa"],
     },
   ],
 };
@@ -169,7 +169,7 @@ const qa: Workflow = {
       name: "Setup & Scope",
       execution: "main",
       optional: false,
-      skills: ["gstack-qa"],
+      skills: ["kstack-qa"],
     },
     {
       id: "test",
@@ -177,14 +177,14 @@ const qa: Workflow = {
       execution: "subagent",
       agent: "worker",
       optional: false,
-      skills: ["gstack-qa"],
+      skills: ["kstack-qa"],
     },
     {
       id: "report",
       name: "Bug Report",
       execution: "main",
       optional: false,
-      skills: ["gstack-qa"],
+      skills: ["kstack-qa"],
     },
     {
       id: "fix",
@@ -195,7 +195,7 @@ const qa: Workflow = {
       // STEP 4d: when the "test" phase already reported all tests passed,
       // the fix loop is structurally skipped (falsifiable, via skip.ts).
       skipWhen: (ctx) => allTestsPassed(ctx.state.results["test"]?.summary),
-      skills: ["gstack-qa"],
+      skills: ["kstack-qa"],
       // Context fix (2026-08-28 session post-mortem): same class of bug as
       // investigate/fix — the generic "fix" template's {findings_summary}
       // never resolves here (no "findings" phase), so the worker got
@@ -231,7 +231,7 @@ const ship: Workflow = {
       name: "Pre-flight Checks",
       execution: "main",
       optional: false,
-      skills: ["gstack-ship"],
+      skills: ["kstack-ship"],
     },
     {
       id: "review",
@@ -239,7 +239,7 @@ const ship: Workflow = {
       execution: "subagent",
       agent: "reviewer",
       optional: false,
-      skills: ["gstack-review"],
+      skills: ["kstack-review"],
     },
     {
       id: "test",
@@ -247,7 +247,7 @@ const ship: Workflow = {
       execution: "subagent",
       agent: "worker",
       optional: false,
-      skills: ["gstack-ship"],
+      skills: ["kstack-ship"],
     },
     {
       id: "push-pr",
@@ -255,14 +255,14 @@ const ship: Workflow = {
       execution: "subagent",
       agent: "worker",
       optional: false,
-      skills: ["gstack-ship"],
+      skills: ["kstack-ship"],
     },
     {
       id: "verify",
       name: "Verify CI",
       execution: "main",
       optional: false,
-      skills: ["gstack-ship"],
+      skills: ["kstack-ship"],
     },
     {
       id: "update-docs",
@@ -270,7 +270,7 @@ const ship: Workflow = {
       execution: "subagent",
       agent: "worker",
       optional: true,
-      skills: ["gstack-document-release", "gstack-document-generate"],
+      skills: ["kstack-document-release", "kstack-document-generate"],
     },
   ],
 };
@@ -296,7 +296,7 @@ const review: Workflow = {
       name: "Findings & Suggestions",
       execution: "main",
       optional: false,
-      skills: ["gstack-review"],
+      skills: ["kstack-review"],
     },
     {
       id: "fix",
@@ -304,7 +304,7 @@ const review: Workflow = {
       execution: "subagent",
       agent: "worker",
       optional: true,
-      skills: ["gstack-review"],
+      skills: ["kstack-review"],
     },
   ],
 };
@@ -340,7 +340,7 @@ const qaReport: Workflow = {
       name: "Setup & Scope",
       execution: "main",
       optional: false,
-      skills: ["gstack-qa"],
+      skills: ["kstack-qa"],
       variant: "report-only",
     },
     {
@@ -349,7 +349,7 @@ const qaReport: Workflow = {
       execution: "subagent",
       agent: "worker",
       optional: false,
-      skills: ["gstack-qa"],
+      skills: ["kstack-qa"],
       variant: "report-only",
     },
     {
@@ -357,7 +357,7 @@ const qaReport: Workflow = {
       name: "Bug Report",
       execution: "main",
       optional: false,
-      skills: ["gstack-qa"],
+      skills: ["kstack-qa"],
       variant: "report-only",
     },
   ],
@@ -391,14 +391,14 @@ const sprint: Workflow = {
       name: "User Story",
       execution: "main",
       optional: false,
-      skills: ["gstack-sprint-capability"],
+      skills: ["kstack-sprint-capability"],
     },
     {
       id: "capability",
       name: "Product Capability",
       execution: "main",
       optional: false,
-      skills: ["gstack-sprint-capability"],
+      skills: ["kstack-sprint-capability"],
     },
     {
       id: "system-design",
@@ -406,7 +406,7 @@ const sprint: Workflow = {
       execution: "main",
       optional: false,
       advance: "manual",
-      skills: ["gstack-sprint-system-design", "gstack-sprint-adr"],
+      skills: ["kstack-sprint-system-design", "kstack-sprint-adr"],
     },
     {
       id: "architect-gate",
@@ -416,7 +416,7 @@ const sprint: Workflow = {
       optional: false,
       // Decision phase: the user sees the binary verdict before the backlog.
       advance: "manual",
-      skills: ["gstack-sprint-system-design"],
+      skills: ["kstack-sprint-system-design"],
       // REJECTED ⇒ loop back to system-design with the architect's handoff.
       loopBackTo: "system-design",
       maxAttempts: sprintArchMaxAttempts(),
@@ -428,7 +428,7 @@ const sprint: Workflow = {
       execution: "main",
       optional: false,
       advance: "manual",
-      skills: ["gstack-sprint-tasks"],
+      skills: ["kstack-sprint-tasks"],
     },
     {
       id: "implement",
@@ -437,7 +437,7 @@ const sprint: Workflow = {
       chain: [
         {
           agent: "backend-developer",
-          skills: ["gstack-sprint-tdd", "gstack-sprint-verification"],
+          skills: ["kstack-sprint-tdd", "kstack-sprint-verification"],
           task: `## DELIVERABLE
 Backend implementation of your assigned tasks from tasks_{sprint}.md on a dedicated task/<slug> branch: code + failing-test-first tests green + observability hooks.
 
@@ -454,7 +454,7 @@ Sequential discipline: this phase runs strictly BEFORE the frontend developer; d
         },
         {
           agent: "frontend-developer",
-          skills: ["gstack-sprint-tdd", "gstack-sprint-verification"],
+          skills: ["kstack-sprint-tdd", "kstack-sprint-verification"],
           task: `## DELIVERABLE
 Frontend implementation consuming the backend interfaces from tasks_{sprint}.md: code + tests green + UI wired to the agreed contracts.
 
@@ -479,7 +479,7 @@ Emit ## HANDOFF with branch names, files touched, test evidence.`,
       chain: [
         {
           agent: "reviewer",
-          skills: ["gstack-review"],
+          skills: ["kstack-review"],
           task: `## DELIVERABLE
 Adversarial code audit of the sprint diff: findings with severity + file:line + concrete failure scenario, ending with the parseable line 'code-review == approved' or 'code-review == rejected' (also written into devsecops/code-review-artifact_{sprint}.md).
 
@@ -499,7 +499,7 @@ Repeat the SAME line verbatim in your ## HANDOFF — the orchestrator cross-chec
         },
         {
           agent: "devsecops-reviewer",
-          skills: ["gstack-sprint-appsec", "gstack-sprint-docker", "gstack-sprint-pipeline"],
+          skills: ["kstack-sprint-appsec", "kstack-sprint-docker", "kstack-sprint-pipeline"],
           task: `## DELIVERABLE
 Security (+ conditional Docker/CI) audit of the sprint diff: STRIDE-lite pass over new boundaries, actionable remediations, artifacts under devsecops/ ending with parseable verdict lines — 'security-review == approved' or 'security-review == rejected', plus a 'severity ==' line (critical, high, medium or low) when rejecting.
 
@@ -527,7 +527,7 @@ Write devsecops/security-review-artifact_{sprint}.md (+ docker-build-report_{spr
       // Sprint loop discipline: QA reports, developers fix (loop-back engine).
       // Pins beta-qa to its report-only mode — QA holds no commit/fix authority.
       variant: "report-only",
-      skills: ["gstack-sprint-qa"],
+      skills: ["kstack-sprint-qa"],
       loopBackTo: "implement",
       maxAttempts: sprintMaxAttempts(),
       feedbackFrom: "qa-verdict",
@@ -540,7 +540,7 @@ Write devsecops/security-review-artifact_{sprint}.md (+ docker-build-report_{spr
       optional: false,
       // Hard human gate: nothing lands without the user (D3 residual-risk control).
       advance: "manual",
-      skills: ["gstack-ship", "gstack-sprint-verification"],
+      skills: ["kstack-ship", "kstack-sprint-verification"],
     },
   ],
 };

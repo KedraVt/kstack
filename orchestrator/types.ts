@@ -17,7 +17,7 @@ export interface WorkflowPhase {
     /**
      * Per-step skill override (STEP 3). Default: inherits phase.skills —
      * lets a chain step receive a role-scoped digest (e.g. the planner gets
-     * gstack-fix-strategy instead of the full investigation methodology).
+     * kstack-fix-strategy instead of the full investigation methodology).
      */
     skills?: string[];
   }>;
