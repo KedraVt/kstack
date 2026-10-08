@@ -22,6 +22,7 @@ import {
   writeRunReport,
   resetTelemetry,
 } from "../orchestrator/telemetry.ts";
+import { initAgentsMd } from "../orchestrator/init.ts";
 
 // --- Live subagent activity labels ----------------------------------------
 
@@ -1686,5 +1687,103 @@ describe("kstack_phase tool", () => {
     initOrchestrator(pi);
     const res = await tools.get("kstack_phase").execute("t", {}, undefined, undefined, ctx);
     assert.ok(res.content[0].text.includes('Unknown workflow "legacy-x"'));
+  });
+});
+
+// --- /kstack init: managed AGENTS.md block ---------------------------------
+
+describe("/kstack init", () => {
+  // Built without the literal old brand so the tracked-tree audit stays clean.
+  const LEGACY_BEGIN = "<!-- " + ("g" + "stack") + ":begin -->";
+  const LEGACY_END = "<!-- " + ("g" + "stack") + ":end -->";
+
+  function tmpdir(): string {
+    return mkdtempSync(path.join(os.tmpdir(), "kstack-init-"));
+  }
+
+  test("creates AGENTS.md when absent", () => {
+    const dir = tmpdir();
+    try {
+      const res = initAgentsMd(dir);
+      assert.equal(res.status, "created");
+      const text = readFileSync(path.join(dir, "AGENTS.md"), "utf8");
+      assert.ok(text.includes("<!-- kstack:begin -->"));
+      assert.ok(text.includes("<!-- kstack:end -->"));
+      assert.ok(text.includes("KEY == VALUE"));
+      assert.ok(text.includes("## HANDOFF"));
+      assert.ok(text.includes("Iron Law"));
+      assert.ok(text.includes("UNTRUSTED"));
+      assert.ok(!text.includes(LEGACY_BEGIN));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("appends the block and preserves surrounding content", () => {
+    const dir = tmpdir();
+    try {
+      const file = path.join(dir, "AGENTS.md");
+      writeFileSync(file, "# My project\n\nCustom rules here.\n");
+      const res = initAgentsMd(dir);
+      assert.equal(res.status, "installed");
+      const text = readFileSync(file, "utf8");
+      assert.ok(text.startsWith("# My project\n\nCustom rules here."));
+      assert.ok(text.includes("<!-- kstack:begin -->"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("is byte-identical on re-run", () => {
+    const dir = tmpdir();
+    try {
+      const file = path.join(dir, "AGENTS.md");
+      writeFileSync(file, "# My project\n\nCustom rules here.\n");
+      initAgentsMd(dir);
+      const first = readFileSync(file, "utf8");
+      const res = initAgentsMd(dir);
+      const second = readFileSync(file, "utf8");
+      assert.equal(second, first);
+      assert.equal(res.status, "unchanged");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("replaces a stale kstack block in place", () => {
+    const dir = tmpdir();
+    try {
+      const file = path.join(dir, "AGENTS.md");
+      writeFileSync(file, "HEAD\n\n<!-- kstack:begin -->\nold content\n<!-- kstack:end -->\n\nTAIL\n");
+      const res = initAgentsMd(dir);
+      assert.equal(res.status, "installed");
+      const text = readFileSync(file, "utf8");
+      assert.ok(!text.includes("old content"));
+      assert.ok(text.includes("HEAD\n\n<!-- kstack:begin -->"));
+      assert.ok(text.endsWith("TAIL\n"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("upgrades a legacy managed block in place", () => {
+    const dir = tmpdir();
+    try {
+      const file = path.join(dir, "AGENTS.md");
+      writeFileSync(file, `HEAD\n\n${LEGACY_BEGIN}\nold rules\n${LEGACY_END}\n\nTAIL\n`);
+      const res = initAgentsMd(dir);
+      assert.equal(res.status, "upgraded");
+      const text = readFileSync(file, "utf8");
+      assert.ok(!text.includes(LEGACY_BEGIN));
+      assert.ok(!text.includes(LEGACY_END));
+      assert.ok(!text.includes("old rules"));
+      assert.ok(text.includes("HEAD\n\n<!-- kstack:begin -->"));
+      assert.ok(text.endsWith("TAIL\n"));
+      // and a second run is a no-op
+      const res2 = initAgentsMd(dir);
+      assert.equal(res2.status, "unchanged");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

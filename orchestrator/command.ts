@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { getAllWorkflows, getWorkflow, getWorkflowIds } from "./workflows.ts";
 import { loadActiveState, createState, saveState, abortState, resumeState, reissueGate, approveNext, approveEntryGate, approveOptionalPhase, skipPendingOptional, isSecurityFrozen, unfreeze, forceApproveParked, returnParkedWithContext, forceContinuePastGate } from "./state.ts";
 import { detectGitContext } from "./git.ts";
+import { initAgentsMd } from "./init.ts";
 import { deterministicSubagents } from "./config.ts";
 import { launchPhase, executeCurrentPhase, releasePhaseInFlight, isPhaseInFlight, invalidateRuntime } from "./executor.ts";
 import { writeRunReport } from "./telemetry.ts";
@@ -59,11 +60,10 @@ function abortWorkflow(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: Wo
 
 export function getCompletions(prefix: string) {
   // AutocompleteItem shape: { value, label, description? }
-  const verbs = ["next"].map((v) => ({
-    value: v,
-    label: v,
-    description: "Approve the gated phase and continue",
-  }));
+  const verbs = [
+    { value: "next", label: "next", description: "Approve the gated phase and continue" },
+    { value: "init", label: "init", description: "Install kstack rules into AGENTS.md" },
+  ];
   const wf = getAllWorkflows()
     .filter((w) => w.id.startsWith(prefix.toLowerCase()))
     .map((w) => ({ value: w.id, label: w.id, description: w.description }));
@@ -72,6 +72,21 @@ export function getCompletions(prefix: string) {
 
 export async function handleKstackCommand(args: string, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<void> {
   const argId = args.trim().toLowerCase();
+
+  // /kstack init — install/refresh the managed rules block in AGENTS.md.
+  // Orthogonal to workflow state: handled before loadActiveState so a parked
+  // sprint's panels never intercept it.
+  if (argId === "init") {
+    const res = initAgentsMd(ctx.cwd);
+    const msgs = {
+      created: `Created ${res.file} with the kstack rules block.`,
+      installed: `Installed the kstack rules block in ${res.file}.`,
+      upgraded: `Upgraded the legacy rules block in ${res.file} to kstack.`,
+      unchanged: `${res.file} already has the current kstack block.`,
+    } as const;
+    ctx.ui.notify(msgs[res.status], "info");
+    return;
+  }
 
   const activeState = loadActiveState(ctx);
 
