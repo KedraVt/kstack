@@ -1,4 +1,4 @@
-# gstack-pi
+# kstack-pi
 
 Browser automation + guided workflow orchestrator for the [pi](https://github.com/earendil-works/pi) coding agent.
 
@@ -47,7 +47,7 @@ One extension, two layers:
 ### 1. Clone with submodules
 
 ```bash
-git clone --recurse-submodules https://github.com/YOUR_USER/gstack-pi ~/.pi/agent/extensions/gstack-pi
+git clone --recurse-submodules https://github.com/YOUR_USER/kstack-pi ~/.pi/agent/extensions/kstack-pi
 ```
 
 Pi auto-discovers extensions in `~/.pi/agent/extensions/`. No settings.json changes needed.
@@ -192,13 +192,13 @@ On Windows, `.exe` is appended automatically.
 
 ```bash
 # Full update: pull kstack submodule, rebuild binary, sync skills + bin scripts
-bash ~/.pi/agent/extensions/gstack-pi/update.sh
+bash ~/.pi/agent/extensions/kstack-pi/update.sh
 
 # Rebuild without pulling (local patches in source/)
-bash ~/.pi/agent/extensions/gstack-pi/update.sh --skip-pull
+bash ~/.pi/agent/extensions/kstack-pi/update.sh --skip-pull
 
 # Update the submodule to latest upstream manually
-cd ~/.pi/agent/extensions/gstack-pi/source && git pull origin main
+cd ~/.pi/agent/extensions/kstack-pi/source && git pull origin main
 ```
 
 The script also detects new upstream features (skills, tools, bin scripts) not yet included in the extension and prints them:
@@ -242,7 +242,7 @@ This is temporary storage: it can be deleted once you're satisfied with the adap
 When kstack adds new browse commands:
 
 ```bash
-cd ~/.pi/agent/extensions/gstack-pi
+cd ~/.pi/agent/extensions/kstack-pi
 bun run scripts/gen-tools.ts
 ```
 
@@ -251,7 +251,7 @@ This regenerates `tools.generated.ts` and `lib/commands.generated.ts` from `sour
 ## Architecture
 
 ```
-gstack-pi/
+kstack-pi/
 ├── index.ts                 Entry: registers tools + orchestrator
 ├── tools.generated.ts       65 browser tool registrations (auto-generated)
 ├── lib/
@@ -350,7 +350,7 @@ Deferred ideas live in `TODOS.md` (absorbed the old `FUTURE_UPDATES.md`).
 |---------|-----|
 | "kstack browse binary not found" | Run `update.sh` or set `KSTACK_BINARY` |
 | "server-node.mjs not found" (Windows) | Run `bash browse/scripts/build-node-server.sh` in the kstack repo |
-| `/kstack` not showing in pi | Ensure the extension is in `~/.pi/agent/extensions/gstack-pi/` with `index.ts` at root |
+| `/kstack` not showing in pi | Ensure the extension is in `~/.pi/agent/extensions/kstack-pi/` with `index.ts` at root |
 | Subagent phases fail | Ensure `~/.pi/agent/agents/` has scout.md, planner.md, worker.md, reviewer.md — plus the sprint specialists (sprint-planner, software-architect, backend-developer, frontend-developer, qa-engineer, devsecops-reviewer) for the sprint workflow. Canonical copies live in this repo's [`agents/`](agents/) and are synced by `update.sh` (existing files backed up, never deleted). If you hand-tuned them, re-apply your changes after a sync or restore from the `.bak-<timestamp>` copy |
 | Skills not loading | Pi requires `"skills": ["./skills"]` in a package.json, or project `.pi/settings.json` |
 

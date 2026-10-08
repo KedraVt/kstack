@@ -16,13 +16,13 @@ export default function (pi: ExtensionAPI) {
         invalidateBinaryCache();
         return;
       }
-      ctx.ui.notify("gstack-pi: downloading browse binary...", "info");
-      const result = await downloadBinary((msg) => ctx.ui.notify(`gstack-pi: ${msg}`, "info"));
+      ctx.ui.notify("kstack-pi: downloading browse binary...", "info");
+      const result = await downloadBinary((msg) => ctx.ui.notify(`kstack-pi: ${msg}`, "info"));
       if ("error" in result) {
-        ctx.ui.notify(`gstack-pi: ${result.error} — browse tools unavailable`, "warning");
+        ctx.ui.notify(`kstack-pi: ${result.error} — browse tools unavailable`, "warning");
       } else {
         invalidateBinaryCache();
-        ctx.ui.notify(`gstack-pi: binary ready at ${result.path}`, "info");
+        ctx.ui.notify(`kstack-pi: binary ready at ${result.path}`, "info");
       }
     });
   }

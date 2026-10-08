@@ -24,7 +24,7 @@ any documentation. Accuracy is non-negotiable: every code example must work,
 every API description must match the code.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-document --status start 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-document --status start 2>/dev/null || true
 ```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), default to creating new files under `docs/`, proceed with the full partition plan, and flag deferred choices in the output — never block waiting for an answer.
@@ -107,7 +107,7 @@ writing; it is the source of truth for format.
    credentials; a live-format secret in committed docs is a leak:
    ```bash
    git diff --cached --no-color | grep '^+' | sed 's/^+//' | \
-     bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-redact --json
+     bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-redact --json
    # exit 3 (HIGH) → unstage, remove the secret, re-stage. Do NOT commit.
    ```
 3. `git commit -m "docs: generate [scope] documentation (Diataxis)"`, push to
@@ -172,7 +172,7 @@ commit. It is the source of truth; do not work from memory.
 - **Completeness over minimalism** — write complete docs; boil the ocean.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-document --status end 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-document --status end 2>/dev/null || true
 ```
 
 ## DoD gate (verification)

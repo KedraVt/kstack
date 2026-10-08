@@ -45,7 +45,7 @@ rushing guarantees rework.
 You MUST complete each phase before proceeding to the next.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-investigate --status start 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-investigate --status start 2>/dev/null || true
 ```
 
 ### Phase 1: Root Cause Investigation
@@ -198,7 +198,7 @@ Status semantics:
 - **BLOCKED** — root cause unclear after investigation, escalated
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-investigate --status end 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-investigate --status end 2>/dev/null || true
 ```
 
 ## Human Partner's Signals You're Doing It Wrong

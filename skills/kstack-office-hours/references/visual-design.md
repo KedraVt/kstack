@@ -3,8 +3,8 @@
 ```bash
 _ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 D=""
-[ -n "$_ROOT" ] && [ -x "$_ROOT/C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/design/dist/design" ] && D="$_ROOT/C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/design/dist/design"
-[ -z "$D" ] && D="C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/design/dist/design"
+[ -n "$_ROOT" ] && [ -x "$_ROOT/C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/design/dist/design" ] && D="$_ROOT/C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/design/dist/design"
+[ -z "$D" ] && D="C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/design/dist/design"
 [ -x "$D" ] && echo "DESIGN_READY" || echo "DESIGN_NOT_AVAILABLE"
 ```
 
@@ -18,7 +18,7 @@ Generating visual mockups of the proposed design... (say "skip" if you don't nee
 **Step 1: Set up the design directory**
 
 ```bash
-eval "$(C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-slug 2>/dev/null)"
+eval "$(C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-slug 2>/dev/null)"
 _DESIGN_DIR="$HOME/.kstack/projects/$SLUG/designs/mockup-$(date +%Y%m%d)"
 mkdir -p "$_DESIGN_DIR"
 echo "DESIGN_DIR: $_DESIGN_DIR"

@@ -23,7 +23,7 @@ and todos reconciled, branch pushed, PR created. You act upon the validation
 state established by the QA artifact — you do not re-derive it.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-ship --status start 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-ship --status start 2>/dev/null || true
 ```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), pick the non-destructive option (e.g. defer to TODOS.md rather than installing release CI) and note the skipped confirmation in the SHIP REPORT — never block waiting for an answer.
@@ -72,7 +72,7 @@ skip when already done (bump, push, PR create→update).
 ### Step 2: Review readiness
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-review-read 2>/dev/null
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-review-read 2>/dev/null
 ```
 
 Display the readiness dashboard: most recent entry per review skill within 7
@@ -120,7 +120,7 @@ Deterministic state logic via `kstack-version-bump`; level decision stays
 agent judgment; slot pick via `kstack-next-version` (both in `runtime/bin/`).
 
 1. **Classify:**
-   `bun run C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-version-bump classify --base <base>`
+   `bun run C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-version-bump classify --base <base>`
    - `FRESH` → bump (steps 2–4). `ALREADY_BUMPED` → skip bump, run queue-drift
      check; if the queue moved → ask: rebump vs keep.
    - `DRIFT_STALE_PKG` → `kstack-version-bump repair`. `DRIFT_UNEXPECTED` →
@@ -185,7 +185,7 @@ Status:          SHIPPED | BLOCKED_<reason>
 ```
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-ship --status end 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-ship --status end 2>/dev/null || true
 ```
 
 ## DoD gate (verification)

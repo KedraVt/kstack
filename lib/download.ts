@@ -9,6 +9,9 @@ const RUNTIME_DIR = resolve(here, "..", "runtime", "browse", "dist");
 
 // NOTE: pinned release tag — must be bumped alongside package.json's version
 // when a new binary release is cut, or fresh installs download a stale build.
+// DoD exemption: host segment stays "gstack-pi" until the GitHub repo is
+// renamed and the first kstack-pi release exists (post-merge manual task);
+// GitHub redirects old release URLs after the rename, so this keeps working.
 const RELEASE_BASE = "https://github.com/KedraVt/gstack-pi/releases/download/v2.0.0";
 
 const ASSETS: Record<string, string> = {

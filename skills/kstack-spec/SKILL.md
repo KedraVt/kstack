@@ -32,7 +32,7 @@ with Phase 1. Your only output is a spec: filed as a GitHub issue, archived
 locally, optionally handed to a spawned agent.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-spec --status start 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-spec --status start 2>/dev/null || true
 ```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), take the safe option — dedupe/semantic/redaction flags → file anyway with the flag recorded; spawn confirmation → skip the spawn and leave the spec for manual dispatch — never block waiting for an answer.
@@ -101,7 +101,7 @@ a temp file, scan THAT file, pass the same file downstream:
 REDACT_FILE=$(mktemp); cat > "$REDACT_FILE" <<'EOF'
 <exact spec body>
 EOF
-C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-redact --from-file "$REDACT_FILE" --repo-visibility "$REDACT_VIS" --json
+C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-redact --from-file "$REDACT_FILE" --repo-visibility "$REDACT_VIS" --json
 ```
 
 Exit 3 (HIGH: credentials) → stop, no dispatch, no skip. Exit 2 (MEDIUM) →
@@ -160,7 +160,7 @@ estimates · missing Out-of-Scope · unverified current state · 20+ items
 without tiers · generic DoD.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-spec --status end 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-spec --status end 2>/dev/null || true
 ```
 
 ## DoD gate (verification)

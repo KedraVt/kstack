@@ -29,7 +29,7 @@ questions` — you never silently pick one.
 no implementation.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-plan-draft --status start 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-plan-draft --status start 2>/dev/null || true
 ```
 
 ## Step 1: Gather the inputs
@@ -94,7 +94,7 @@ flagged BLOCKING]
   left implicit.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-plan-draft --status end 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-plan-draft --status end 2>/dev/null || true
 ```
 
 ## DoD gate (verification)

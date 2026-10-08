@@ -365,7 +365,7 @@ const qaReport: Workflow = {
 
 /**
  * Sprint workflow (plan B5): `.agents-clean` agile methodology fused with
- * gstack-pi's deterministic execution. Planning phases stay split (D6);
+ * kstack-pi's deterministic execution. Planning phases stay split (D6);
  * implement is a strict BE→FE chain (D5); review gates carry the loop
  * engine config consumed by state.advancePhase + executor verdict parsing.
  */

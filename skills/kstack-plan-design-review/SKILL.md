@@ -25,7 +25,7 @@ Find missing design decisions and add them to the plan before implementation.
 No code changes, no implementation.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-plan-design-review --status start 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-plan-design-review --status start 2>/dev/null || true
 ```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), review the artifact supplied in the task, skip the mockup-board and outside-voice prompts, rate all seven passes, and flag open design choices in the report — never block waiting for an answer.
@@ -62,11 +62,11 @@ applicable." and exit early.
 _ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 D=""
 [ -n "$_ROOT" ] && [ -x "$_ROOT/runtime/design/dist/design" ] && D="$_ROOT/runtime/design/dist/design"
-[ -z "$D" ] && D="C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/design/dist/design"
+[ -z "$D" ] && D="C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/design/dist/design"
 if [ -x "$D" ]; then echo "DESIGN_READY: $D"; else echo "DESIGN_NOT_AVAILABLE"; fi
 B=""
 [ -n "$_ROOT" ] && [ -x "$_ROOT/runtime/browse/dist/find-browse" ] && B="$_ROOT/runtime/browse/dist/find-browse"
-[ -z "$B" ] && B="C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/browse/dist/find-browse"
+[ -z "$B" ] && B="C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/browse/dist/find-browse"
 [ -x "$B" ] && echo "BROWSE_READY: $B" || echo "BROWSE_NOT_AVAILABLE (use 'open' to view boards)"
 ```
 
@@ -94,7 +94,7 @@ zero UI scope, or an explicit "text only". Mockups ARE the plan for design
 work; text descriptions are opinion.
 
 ```bash
-eval "$(C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-slug 2>/dev/null)"
+eval "$(C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-slug 2>/dev/null)"
 _DESIGN_DIR="$HOME/.kstack/projects/$SLUG/designs/<screen-name>-$(date +%Y%m%d)"
 mkdir -p "$_DESIGN_DIR"
 $D variants --brief "<assembled from plan + DESIGN.md>" --count 3 --output-dir "$_DESIGN_DIR/"
@@ -159,10 +159,10 @@ The plan file must end with `## REVIEW REPORT` carrying the Runs/Status/
 Findings table + verdict line; its FINAL non-whitespace line is the
 unresolved-decisions status (exact `NO UNRESOLVED DECISIONS` or a
 `**UNRESOLVED DECISIONS:**` bullet block). Body prose doesn't count. Persist:
-`bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-review-log 2>/dev/null || true`.
+`bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-review-log 2>/dev/null || true`.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-plan-design-review --status end 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-plan-design-review --status end 2>/dev/null || true
 ```
 
 ## DoD gate (verification)

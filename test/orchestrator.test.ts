@@ -243,8 +243,8 @@ describe("state machine", () => {
   });
 
   test("pre-rename state entries are ignored (S2 rebrand — no migration)", () => {
-    // The pre-S2 entry type is built without the literal brand string so the
-    // DoD audit (rg -i gstack over tracked files) stays clean.
+    // The pre-S2 entry type is built without the literal old-brand string so
+    // the tracked-tree rebrand audit stays clean.
     const LEGACY_ENTRY_TYPE = "g" + "stack-wf-state";
     const legacy = { workflowId: "qa", phaseIndex: 1, status: "active", goal: "x", results: {}, version: 2, attempts: {} };
     const ctx: any = {

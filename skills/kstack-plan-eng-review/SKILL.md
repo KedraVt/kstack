@@ -24,7 +24,7 @@ recommendation: explain the concrete tradeoffs, give an **opinionated
 recommendation**, and ask for input before assuming a direction.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-plan-eng-review --status start 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-plan-eng-review --status start 2>/dev/null || true
 ```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), default the review target to the current branch diff or the artifact supplied in the task, make assumptions explicit with `~assumed`, and never block a gate waiting for an answer.
@@ -47,7 +47,7 @@ Recommend A when a branch diff exists, otherwise B.
 ## Design Doc Check
 
 ```bash
-eval "$(C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-slug 2>/dev/null)"
+eval "$(C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-slug 2>/dev/null)"
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr '/' '-' || echo 'no-branch')
 DESIGN=$(ls -t ~/.kstack/projects/$SLUG/*-$BRANCH-design-*.md 2>/dev/null | head -1)
 [ -z "$DESIGN" ] && DESIGN=$(ls -t ~/.kstack/projects/$SLUG/*-design-*.md 2>/dev/null | head -1)
@@ -122,10 +122,10 @@ non-whitespace line must be the unresolved-decisions status: exact
 `NO UNRESOLVED DECISIONS` or a `**UNRESOLVED DECISIONS:**` bullet block. The
 report is a structured terminal section — in-body review prose does not
 count. Persist the result:
-`bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-review-log 2>/dev/null || true`.
+`bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-review-log 2>/dev/null || true`.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-plan-eng-review --status end 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-plan-eng-review --status end 2>/dev/null || true
 ```
 
 ## DoD gate (verification)

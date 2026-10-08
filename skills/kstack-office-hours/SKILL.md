@@ -30,7 +30,7 @@ scaffold any project, or take any implementation action. Your only output is
 a design document.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-office-hours --status start 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-office-hours --status start 2>/dev/null || true
 ```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), do NOT fabricate answers — write a draft design doc marking every unconfirmed assumption with `~` and stop for a human review pass.
@@ -42,7 +42,7 @@ bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry
 3. Grep/Glob the codebase areas relevant to the user's request.
 4. List prior design docs for this project:
    ```bash
-   eval "$(C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-slug 2>/dev/null)"
+   eval "$(C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-slug 2>/dev/null)"
    ls -t ~/.kstack/projects/$SLUG/*-design-*.md 2>/dev/null
    ```
    If they exist: "Prior designs for this project: [titles + dates]".
@@ -165,7 +165,7 @@ defended a premise with reasoning against the second opinion. The count feeds
 the closing tier in Phase 6.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-developer-profile --log-session '{"date":"ISO","mode":"startup|builder","project_slug":"SLUG","signal_count":N,"signals":[...],"design_doc":"PATH","assignment":"TEXT","resources_shown":[],"topics":[...]}' 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-developer-profile --log-session '{"date":"ISO","mode":"startup|builder","project_slug":"SLUG","signal_count":N,"signals":[...],"design_doc":"PATH","assignment":"TEXT","resources_shown":[],"topics":[...]}' 2>/dev/null || true
 ```
 
 ## Phases 5–6: Design doc + handoff
@@ -177,7 +177,7 @@ and the assignment. It is the source of truth; do not work from memory.
 user does next, not just "go build it."
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-office-hours --status end 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-office-hours --status end 2>/dev/null || true
 ```
 
 ## DoD gate (verification)

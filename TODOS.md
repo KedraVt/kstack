@@ -1,4 +1,4 @@
-# TODOS — gstack-pi extension
+# TODOS — kstack-pi extension
 
 Single backlog for the pi extension itself — absorbed `FUTURE_UPDATES.md` (deferred
 features & skill integrations) so all not-yet-built work lives in one place.
