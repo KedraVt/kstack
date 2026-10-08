@@ -10,8 +10,8 @@
  * skipped). This module gives the extension a self-owned layer:
  *
  *  - UNTRUSTED_BEGIN / UNTRUSTED_END: OUR sentinel pair, plain ASCII on
- *    purpose — no coupling to minified bundle constants, no drift after
- *    `update.sh` rebuilds. The SECURITY section injected into the system
+ *    purpose — no coupling to minified bundle constants, no drift across
+ *    binary rebuilds. The SECURITY section injected into the system
  *    prompt (orchestrator/index.ts) documents BOTH this pair and the daemon's.
  *  - PAGE_CONTENT_COMMANDS: registered commands whose stdout is page-derived.
  *  - strictWrap(): opt-in heuristic pre-checks over that stdout. Pure string

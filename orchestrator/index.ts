@@ -41,7 +41,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
   }
 
   pi.registerCommand("kstack", {
-    description: "Guided workflow orchestrator: develop, investigate, qa, ship, review (next: approve gated phase)",
+    description: "Guided workflow orchestrator: develop, investigate, qa, ship, review (init: install AGENTS.md rules block; next: approve gated phase)",
     getArgumentCompletions: getCompletions,
     handler: async (args: string, ctx) => {
       await handleKstackCommand(args, ctx as any, pi);

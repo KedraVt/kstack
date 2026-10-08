@@ -128,7 +128,7 @@ export interface WorkflowState {
   /** Skill digests already delivered in full during this run — repeats get the DoD gate only. */
   skillsDelivered?: string[];
   /** State schema version (v2 added the sprint-loop fields; v3 = post-S2 kstack entry type). Old states load with fresh defaults. */
-  version?: number;
+  version?: 2 | 3;
   /** Completed-run counters per phase id — drives loop ceilings. Missing = fresh (backward-compatible). */
   attempts?: Record<string, number>;
   /** Orchestrator-parsed verdict for the current verdict-bearing phase (consumed by advancePhase). */
