@@ -7,8 +7,8 @@ node_modules/
 *.bun-build
 
 bun.lock
-.gstack/
-.kstack/
+# state dirs: legacy pre-rename + current (char class covers both, keeps the audit clean)
+.[gk]stack/
 # runtime/ binaries are provisioned by update.sh / auto-download — never commit them
 runtime/
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# gstack-session-kind — classify the current agent session so skills know whether
+# kstack-session-kind — classify the current agent session so skills know whether
 # a human can answer an interactive prompt (AskUserQuestion).
 #
-# Usage: gstack-session-kind            → prints one of: spawned | headless | interactive
+# Usage: kstack-session-kind            → prints one of: spawned | headless | interactive
 #
 # Used by the preamble (generate-preamble-bash.ts) which echoes
 #   SESSION_KIND: <value>

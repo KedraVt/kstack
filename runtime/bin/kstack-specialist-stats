@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# gstack-specialist-stats — compute per-specialist hit rates from review history
-# Usage: gstack-specialist-stats
+# kstack-specialist-stats — compute per-specialist hit rates from review history
+# Usage: kstack-specialist-stats
 #
 # Reads all *-reviews.jsonl files across branches, parses specialist fields,
 # and outputs hit rates. Tags specialists as GATE_CANDIDATE (0 findings in 10+
 # dispatches) or NEVER_GATE (security, data-migration — insurance policy).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-eval "$("$SCRIPT_DIR/gstack-slug" 2>/dev/null)"
+eval "$("$SCRIPT_DIR/kstack-slug" 2>/dev/null)"
 KSTACK_HOME="${KSTACK_HOME:-$HOME/.kstack}"
 PROJECT_DIR="$KSTACK_HOME/projects/$SLUG"
 

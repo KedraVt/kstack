@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# gstack-paths — output portable state-root paths for skill bash blocks
-# Usage: eval "$(gstack-paths)"  → sets KSTACK_STATE_ROOT, PLAN_ROOT, TMP_ROOT
-# Or:    gstack-paths            → prints KSTACK_STATE_ROOT=... etc.
+# kstack-paths — output portable state-root paths for skill bash blocks
+# Usage: eval "$(kstack-paths)"  → sets KSTACK_STATE_ROOT, PLAN_ROOT, TMP_ROOT
+# Or:    kstack-paths            → prints KSTACK_STATE_ROOT=... etc.
 #
 # Resolves three roots with explicit fallback chains so skills work the same
 # whether installed as a Claude Code plugin (CLAUDE_PLUGIN_DATA / CLAUDE_PLANS_DIR

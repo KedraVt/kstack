@@ -13,7 +13,7 @@ description: >-
   existing plan (use kstack-plan-eng-review).
 metadata:
   version: "1.0.0"
-compatibility: Requires gh CLI for issue filing + runtime/bin/gstack-redact for leak scanning; $KSTACK_STATE_ROOT for the archive dir (defaults to repo .kstack/).
+compatibility: Requires gh CLI for issue filing + runtime/bin/kstack-redact for leak scanning; $KSTACK_STATE_ROOT for the archive dir (defaults to repo .kstack/).
 ---
 
 <!-- provenance: gstack/gstack-spec (5-phase interrogation, dedupe, redaction sink, issue templates) — boilerplate stripped: brain machinery, plan-mode detection, claude-specific spawn adapted · rewritten S1 2026-02-11 -->
@@ -32,7 +32,7 @@ with Phase 1. Your only output is a spec: filed as a GitHub issue, archived
 locally, optionally handed to a spawned agent.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill kstack-spec --status start 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-spec --status start 2>/dev/null || true
 ```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), take the safe option — dedupe/semantic/redaction flags → file anyway with the flag recorded; spawn confirmation → skip the spawn and leave the spec for manual dispatch — never block waiting for an answer.
@@ -101,7 +101,7 @@ a temp file, scan THAT file, pass the same file downstream:
 REDACT_FILE=$(mktemp); cat > "$REDACT_FILE" <<'EOF'
 <exact spec body>
 EOF
-C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-redact --from-file "$REDACT_FILE" --repo-visibility "$REDACT_VIS" --json
+C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-redact --from-file "$REDACT_FILE" --repo-visibility "$REDACT_VIS" --json
 ```
 
 Exit 3 (HIGH: credentials) → stop, no dispatch, no skip. Exit 2 (MEDIUM) →
@@ -118,7 +118,7 @@ zero-reformatting paste.
 
 **Archive** — re-scan, then atomic write (tmp→rename) to
 `$KSTACK_STATE_ROOT/projects/$SLUG/specs/<ts>-$$-<slug>.md` via
-`gstack-paths` + `gstack-slug`, frontmatter carrying `spec_issue_number`,
+`kstack-paths` + `kstack-slug`, frontmatter carrying `spec_issue_number`,
 `spec_issue_url`, `spec_filed_at`, `spec_branch`, `spec_executed` — the
 `spec_issue_number` field is what `kstack-ship` reads to auto-close the issue
 (`Closes #N`) when a PR completes the spec.
@@ -160,7 +160,7 @@ estimates · missing Out-of-Scope · unverified current state · 20+ items
 without tiers · generic DoD.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill kstack-spec --status end 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-spec --status end 2>/dev/null || true
 ```
 
 ## DoD gate (verification)

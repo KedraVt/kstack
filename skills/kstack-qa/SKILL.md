@@ -28,7 +28,7 @@ committing belongs to `kstack-ship` and happens only after a verified GREEN
 artifact.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill kstack-qa --status start 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-qa --status start 2>/dev/null || true
 ```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), take the non-destructive option: proceed WITHOUT committing, treat dirty-tree fixes as report-only, and set `uncommitted-changes: true` in the artifact — never block a gate waiting for an answer.
@@ -263,7 +263,7 @@ new deferred bugs → TODO entries with severity + repro; fixed TODOs → annota
 9. **Never delete output files.** Evidence accumulates intentionally.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill kstack-qa --status end 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-qa --status end 2>/dev/null || true
 ```
 
 ## DoD gate (verification)

@@ -76,10 +76,10 @@ higher confidence.
 
 ## Design Review (conditional, diff-scoped)
 
-Check if the diff touches frontend files using `gstack-diff-scope`:
+Check if the diff touches frontend files using `kstack-diff-scope`:
 
 ```bash
-source <(~/.claude/skills/kstack/bin/gstack-diff-scope <base> 2>/dev/null)
+source <(~/.claude/skills/kstack/bin/kstack-diff-scope <base> 2>/dev/null)
 ```
 
 **If `SCOPE_FRONTEND=false`:** Skip design review silently. No output.
@@ -102,7 +102,7 @@ source <(~/.claude/skills/kstack/bin/gstack-diff-scope <base> 2>/dev/null)
 6. **Log the result** for the Review Readiness Dashboard:
 
 ```bash
-~/.claude/skills/kstack/bin/gstack-review-log '{"skill":"design-review-lite","timestamp":"TIMESTAMP","status":"STATUS","findings":N,"auto_fixed":M,"commit":"COMMIT"}'
+~/.claude/skills/kstack/bin/kstack-review-log '{"skill":"design-review-lite","timestamp":"TIMESTAMP","status":"STATUS","findings":N,"auto_fixed":M,"commit":"COMMIT"}'
 ```
 
 Substitute: TIMESTAMP = ISO 8601 datetime, STATUS = "clean" if 0 findings or "issues_found", N = total findings, M = auto-fixed count, COMMIT = output of `git rev-parse --short HEAD`.
@@ -137,7 +137,7 @@ Present Codex output under a `CODEX (design):` header, merged with the checklist
 ### Detect stack and scope
 
 ```bash
-source <(~/.claude/skills/kstack/bin/gstack-diff-scope <base> 2>/dev/null) || true
+source <(~/.claude/skills/kstack/bin/kstack-diff-scope <base> 2>/dev/null) || true
 # Detect stack for specialist context
 STACK=""
 [ -f Gemfile ] && STACK="${STACK}ruby "
@@ -164,7 +164,7 @@ echo "TEST_FW: ${TEST_FW:-unknown}"
 ### Read specialist hit rates (adaptive gating)
 
 ```bash
-~/.claude/skills/kstack/bin/gstack-specialist-stats 2>/dev/null || true
+~/.claude/skills/kstack/bin/kstack-specialist-stats 2>/dev/null || true
 ```
 
 ### Select specialists
@@ -188,7 +188,7 @@ Based on the scope signals above, select which specialists to dispatch.
 
 After scope-based selection, apply adaptive gating based on specialist hit rates:
 
-For each conditional specialist that passed scope gating, check the `gstack-specialist-stats` output above:
+For each conditional specialist that passed scope gating, check the `kstack-specialist-stats` output above:
 - If tagged `[GATE_CANDIDATE]` (0 findings in 10+ dispatches): skip it. Print: "[specialist] auto-gated (0 findings in N reviews)."
 - If tagged `[NEVER_GATE]`: always dispatch regardless of hit rate. Security and data-migration are insurance policy specialists — they should run even when silent.
 
@@ -214,7 +214,7 @@ Construct the prompt for each specialist. The prompt includes:
 3. Past learnings for this domain (if any exist):
 
 ```bash
-~/.claude/skills/kstack/bin/gstack-learnings-search --type pitfall --query "{specialist domain}" --limit 5 2>/dev/null || true
+~/.claude/skills/kstack/bin/kstack-learnings-search --type pitfall --query "{specialist domain}" --limit 5 2>/dev/null || true
 ```
 
 If learnings are found, include them: "Past learnings for this domain: {learnings}"
@@ -341,7 +341,7 @@ If the Red Team subagent fails or times out, skip silently and continue.
 Before classifying findings, check if any were previously skipped by the user in a prior review on this branch.
 
 ```bash
-~/.claude/skills/kstack/bin/gstack-review-read
+~/.claude/skills/kstack/bin/kstack-review-read
 ```
 
 Parse the output: only lines BEFORE `---CONFIG---` are JSONL entries (the output also contains `---CONFIG---` and `---HEAD---` footer sections that are not JSONL — ignore those).
@@ -392,7 +392,7 @@ Output a summary header: `Pre-Landing Review: N issues (X critical, Y informatio
 
 9. Persist the review result to the review log:
 ```bash
-~/.claude/skills/kstack/bin/gstack-review-log '{"skill":"review","timestamp":"TIMESTAMP","status":"STATUS","issues_found":N,"critical":N,"informational":N,"quality_score":SCORE,"specialists":SPECIALISTS_JSON,"findings":FINDINGS_JSON,"commit":"'"$(git rev-parse --short HEAD)"'","via":"ship"}'
+~/.claude/skills/kstack/bin/kstack-review-log '{"skill":"review","timestamp":"TIMESTAMP","status":"STATUS","issues_found":N,"critical":N,"informational":N,"quality_score":SCORE,"specialists":SPECIALISTS_JSON,"findings":FINDINGS_JSON,"commit":"'"$(git rev-parse --short HEAD)"'","via":"ship"}'
 ```
 Substitute TIMESTAMP (ISO 8601), STATUS ("clean" if no issues, "issues_found" otherwise),
 and N values from the summary counts above. The `via:"ship"` distinguishes from standalone `/review` runs.

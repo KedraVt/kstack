@@ -114,7 +114,7 @@ changes manually (MIT, pin a version in the digest header).
   `pi install git:github.com/DietrichGebert/ponytail`
 - Files: `orchestrator/workflows.ts` (new `simplify` workflow + optional develop phase),
   `orchestrator/router.ts` + menu (intent patterns: /\b(simplify|clean ?up|delete[- ]list|dead code)\b/i),
-  `skills-distilled/gstack-simplify.md` (new digest).
+  `skills-distilled/kstack-simplify.md` (new digest).
 - Design sketched in session of 2026-08-23 (see conversation summary in `.kstack/plans/` if persisted).
 
 ### Skill digest improvements — especially `kstack-office-hours`
@@ -146,7 +146,7 @@ phase instructions in `orchestrator/workflows.ts` so digest output matches what 
 
 Same shape as `develop` / `investigate`: visual audit of the running app → severity-rated
 design findings (spacing, hierarchy, consistency, AI-slop detection) → interactive fix loop
-with before/after screenshots → regression pass. Build on the `gstack-design-review` skill
+with before/after screenshots → regression pass. Build on the `kstack-design-review` skill
 methodology **composed with the locally installed `kstack-impeccable` skill**
 (`~/.pi/agent/skills/kstack-impeccable`) for frontend quality standards. Needs: browser tools
 (already native), a taste-feedback loop (interactive, like the plan approval gate).
@@ -193,10 +193,10 @@ Requirements covers it).
 
 ### Skill promotions
 
-- **`gstack-plan-devex-review`** — promote into planning when building developer-facing
+- **`kstack-plan-devex-review`** — promote into planning when building developer-facing
   products (APIs, CLIs, SDKs).
 - **`kstack-plan-design-review`** — promote for UI-heavy work once `/kstack design` exists.
-- **skillify-assisted digests** — use the `gstack-skillify` methodology to semi-automate
+- **skillify-assisted digests** — use the `kstack-skillify` methodology to semi-automate
   distilling new upstream skills into `skills-distilled/`.
 
 ### Browse commands tier-3 (deferred from the WP1 regeneration)
@@ -217,11 +217,11 @@ real workflow needs them. All are supported by the browse binary — adding one 
 
 ### Decision log (event-sourced) — requires vendoring upstream lib
 
-Implement `runtime/bin/gstack-decision-log` + `gstack-decision-search` per the upstream
-contracts (`bin/gstack-decision-log`: append / `--supersede <id>` / `--redact <id>` /
+Implement `runtime/bin/kstack-decision-log` + `kstack-decision-search` per the upstream
+contracts (`bin/kstack-decision-log`: append / `--supersede <id>` / `--redact <id>` /
 `--compact`; event log + bounded `decisions.active.json` snapshot; scope-filtered reads by
 branch/issue; strictly non-interactive; HIGH-secret rejection). Blocked on vendoring
-upstream `lib/gstack-decision.ts` (~200 lines TS + deps: `lib/bin-context`). Highest-value
+upstream `lib/kstack-decision.ts` (~200 lines TS + deps: `lib/bin-context`). Highest-value
 consumer: plan-gate rationale persistence and `/kstack retro` (also still open above).
 
 ## Efficiency plan follow-ups (deferred by efficiency plan v3.1, preserved as commit `f06870a` in git history — the plan file itself was deleted; everything it contained is either shipped or listed below)
@@ -255,7 +255,7 @@ consumer: plan-gate rationale persistence and `/kstack retro` (also still open a
   SECURITY system-prompt section (upgrade-plan WP2, commit `5c9efa1`) cover the realistic risk.
 - **pair-agent / ngrok remote browser tunnel** — no single-machine use case; large attack
   surface (dual-listener, scoped tokens).
-- **GStack Browser Chrome extension** — separate distribution + maintenance; headless
+- **KStack Browser Chrome extension** — separate distribution + maintenance; headless
   daemon already covers QA.
 - **gbrain / PGLite knowledge brain** — heavy dependency overlapping the learnings
   memory; revisit only if WP4 learnings prove valuable in practice.
@@ -293,6 +293,6 @@ every `update.sh` pull unless fixed upstream:
 
 ## Notes
 
-- All 23 bundled skills remain invocable manually via `/skill:gstack-*` regardless of wiring.
+- All 23 bundled skills remain invocable manually via `/skill:kstack-*` regardless of wiring.
 - Digests must stay verbatim-stable across releases where possible — provider prompt caches
   key on exact prefixes.

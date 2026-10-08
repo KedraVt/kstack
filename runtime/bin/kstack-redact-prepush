@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * gstack-redact-prepush — git pre-push hook that scans the diff being pushed for
+ * kstack-redact-prepush — git pre-push hook that scans the diff being pushed for
  * HIGH-severity credentials and blocks the push on a hit.
  *
  * THIS IS A GUARDRAIL, NOT ENFORCEMENT. `git push --no-verify` bypasses it, as
@@ -22,8 +22,8 @@
  *   - MEDIUM → warn (non-blocking). LOW/WARN → silent.
  *   - KSTACK_REDACT_PREPUSH=skip → log + exit 0 (escape valve).
  *
- * Installed/uninstalled via `gstack-redact install-prepush-hook` (see the
- * gstack-redact CLI), which chains any pre-existing hook.
+ * Installed/uninstalled via `kstack-redact install-prepush-hook` (see the
+ * kstack-redact CLI), which chains any pre-existing hook.
  */
 import { spawnSync } from "child_process";
 import * as fs from "fs";
@@ -131,7 +131,7 @@ function logSkip(reason: string): void {
 function main() {
   if ((process.env.KSTACK_REDACT_PREPUSH || "").toLowerCase() === "skip") {
     logSkip(process.env.KSTACK_REDACT_PREPUSH_REASON || "env-skip");
-    process.stderr.write("gstack-redact-prepush: skipped via KSTACK_REDACT_PREPUSH=skip\n");
+    process.stderr.write("kstack-redact-prepush: skipped via KSTACK_REDACT_PREPUSH=skip\n");
     process.exit(0);
   }
 
@@ -155,7 +155,7 @@ function main() {
       // scan it, and unscanned-but-allowed is the failure mode this hook
       // exists to prevent.
       process.stderr.write(
-        "\n⛔ gstack-redact-prepush BLOCKED the push — could not compute the pushed diff, " +
+        "\n⛔ kstack-redact-prepush BLOCKED the push — could not compute the pushed diff, " +
           "so it cannot be scanned for credentials.\n" +
           `  (${err instanceof Error ? err.message.split("\n")[0] : String(err)})\n` +
           "Bypass if you're sure: KSTACK_REDACT_PREPUSH=skip git push   (or git push --no-verify)\n",
@@ -174,14 +174,14 @@ function main() {
 
   if (mediumCount > 0) {
     process.stderr.write(
-      `gstack-redact-prepush: ${mediumCount} MEDIUM finding(s) in pushed diff (PII/internal). ` +
+      `kstack-redact-prepush: ${mediumCount} MEDIUM finding(s) in pushed diff (PII/internal). ` +
         "Not blocking. Review before this becomes public.\n",
     );
   }
 
   if (allHigh.length > 0) {
     process.stderr.write(
-      "\n⛔ gstack-redact-prepush BLOCKED the push — credential(s) in the pushed diff:\n\n",
+      "\n⛔ kstack-redact-prepush BLOCKED the push — credential(s) in the pushed diff:\n\n",
     );
     for (const f of allHigh) {
       process.stderr.write(`  HIGH  ${f.id}  ${f.preview}\n`);

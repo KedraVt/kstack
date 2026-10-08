@@ -13,7 +13,7 @@ description: >-
   test-driven-development).
 metadata:
   version: "1.0.0"
-compatibility: Runtime helpers under runtime/ (bin/gstack-telemetry-log, skills/kstack-investigate/scripts/find-polluter.sh, browse binary); all degrade gracefully when absent.
+compatibility: Runtime helpers under runtime/ (bin/kstack-telemetry-log, skills/kstack-investigate/scripts/find-polluter.sh, browse binary); all degrade gracefully when absent.
 ---
 
 <!-- provenance: sprint-beta/beta-debugging (merged base — phases, contract) + gstack/gstack-investigate (upstream body, stripped) + kedra/systematic-debugging (signals section, references) · merged S1 2026-02-11 -->
@@ -45,7 +45,7 @@ rushing guarantees rework.
 You MUST complete each phase before proceeding to the next.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill kstack-investigate --status start 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-investigate --status start 2>/dev/null || true
 ```
 
 ### Phase 1: Root Cause Investigation
@@ -198,7 +198,7 @@ Status semantics:
 - **BLOCKED** — root cause unclear after investigation, escalated
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill kstack-investigate --status end 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-investigate --status end 2>/dev/null || true
 ```
 
 ## Human Partner's Signals You're Doing It Wrong

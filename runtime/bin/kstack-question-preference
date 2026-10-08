@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gstack-question-preference — read/write/check explicit per-question preferences.
+# kstack-question-preference — read/write/check explicit per-question preferences.
 #
 # Preference file: ~/.kstack/projects/{SLUG}/question-preferences.json
 # Schema: { "<question_id>": "always-ask" | "never-ask" | "ask-only-for-one-way" }
@@ -25,7 +25,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # KSTACK_STATE_ROOT takes precedence over KSTACK_HOME (test isolation per D16).
 KSTACK_HOME="${KSTACK_STATE_ROOT:-${KSTACK_HOME:-$HOME/.kstack}}"
-eval "$("$SCRIPT_DIR/gstack-slug" 2>/dev/null || true)"
+eval "$("$SCRIPT_DIR/kstack-slug" 2>/dev/null || true)"
 SLUG="${SLUG:-unknown}"
 PREF_FILE="$KSTACK_HOME/projects/$SLUG/question-preferences.json"
 EVENT_FILE="$KSTACK_HOME/projects/$SLUG/question-events.jsonl"
@@ -111,7 +111,7 @@ do_check() {
 do_write() {
   local INPUT="${1:-}"
   if [ -z "$INPUT" ]; then
-    echo "gstack-question-preference: --write requires a JSON payload" >&2
+    echo "kstack-question-preference: --write requires a JSON payload" >&2
     exit 1
   fi
   ensure_file
@@ -127,18 +127,18 @@ do_write() {
     const fs = require('fs');
     const raw = await Bun.stdin.text();
     let j;
-    try { j = JSON.parse(raw); } catch { process.stderr.write('gstack-question-preference: invalid JSON\n'); process.exit(1); }
+    try { j = JSON.parse(raw); } catch { process.stderr.write('kstack-question-preference: invalid JSON\n'); process.exit(1); }
 
     // Required: question_id (kebab-case, <=64)
     if (!j.question_id || !/^[a-z0-9-]+\$/.test(j.question_id) || j.question_id.length > 64) {
-      process.stderr.write('gstack-question-preference: invalid question_id\n');
+      process.stderr.write('kstack-question-preference: invalid question_id\n');
       process.exit(1);
     }
 
     // Required: preference
     const ALLOWED_PREFS = ['always-ask', 'never-ask', 'ask-only-for-one-way'];
     if (!ALLOWED_PREFS.includes(j.preference)) {
-      process.stderr.write('gstack-question-preference: invalid preference (must be one of: ' + ALLOWED_PREFS.join(', ') + ')\n');
+      process.stderr.write('kstack-question-preference: invalid preference (must be one of: ' + ALLOWED_PREFS.join(', ') + ')\n');
       process.exit(1);
     }
 
@@ -147,22 +147,22 @@ do_write() {
     const ALLOWED_SOURCES = ['plan-tune', 'inline-user'];
     const REJECTED_SOURCES = ['inline-tool-output', 'inline-file', 'inline-file-content', 'inline-unknown'];
     if (!j.source) {
-      process.stderr.write('gstack-question-preference: source field required (one of: ' + ALLOWED_SOURCES.join(', ') + ')\n');
+      process.stderr.write('kstack-question-preference: source field required (one of: ' + ALLOWED_SOURCES.join(', ') + ')\n');
       process.exit(1);
     }
     if (REJECTED_SOURCES.includes(j.source)) {
-      process.stderr.write('gstack-question-preference: rejected — source \"' + j.source + '\" is not user-originated (profile poisoning defense)\n');
+      process.stderr.write('kstack-question-preference: rejected — source \"' + j.source + '\" is not user-originated (profile poisoning defense)\n');
       process.exit(2);
     }
     if (!ALLOWED_SOURCES.includes(j.source)) {
-      process.stderr.write('gstack-question-preference: invalid source \"' + j.source + '\"; allowed: ' + ALLOWED_SOURCES.join(', ') + '\n');
+      process.stderr.write('kstack-question-preference: invalid source \"' + j.source + '\"; allowed: ' + ALLOWED_SOURCES.join(', ') + '\n');
       process.exit(1);
     }
 
     // Optional free_text — sanitize (no injection patterns, no newlines, <=300 chars)
     if (j.free_text !== undefined) {
       if (typeof j.free_text !== 'string') {
-        process.stderr.write('gstack-question-preference: free_text must be string\n');
+        process.stderr.write('kstack-question-preference: free_text must be string\n');
         process.exit(1);
       }
       if (j.free_text.length > 300) j.free_text = j.free_text.slice(0, 300);
@@ -177,7 +177,7 @@ do_write() {
       ];
       for (const pat of INJECTION_PATTERNS) {
         if (pat.test(j.free_text)) {
-          process.stderr.write('gstack-question-preference: free_text contains injection-like content, rejected\n');
+          process.stderr.write('kstack-question-preference: free_text contains injection-like content, rejected\n');
           process.exit(1);
         }
       }
@@ -272,7 +272,7 @@ case "$CMD" in
   --stats) do_stats ;;
   --help|-h) sed -n '1,/^set -euo/p' "$0" | sed 's|^# \?||' ;;
   *)
-    echo "gstack-question-preference: unknown subcommand '$CMD'" >&2
+    echo "kstack-question-preference: unknown subcommand '$CMD'" >&2
     exit 1
     ;;
 esac

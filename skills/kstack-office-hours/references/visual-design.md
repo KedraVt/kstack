@@ -18,7 +18,7 @@ Generating visual mockups of the proposed design... (say "skip" if you don't nee
 **Step 1: Set up the design directory**
 
 ```bash
-eval "$(C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-slug 2>/dev/null)"
+eval "$(C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-slug 2>/dev/null)"
 _DESIGN_DIR="$HOME/.kstack/projects/$SLUG/designs/mockup-$(date +%Y%m%d)"
 mkdir -p "$_DESIGN_DIR"
 echo "DESIGN_DIR: $_DESIGN_DIR"
@@ -107,14 +107,14 @@ Generate a single-page HTML file with these constraints:
 
 Write to a temp file:
 ```bash
-SKETCH_FILE="/tmp/gstack-sketch-$(date +%s).html"
+SKETCH_FILE="/tmp/kstack-sketch-$(date +%s).html"
 ```
 
 **Step 3: Render and capture**
 
 ```bash
 $B goto "file://$SKETCH_FILE"
-$B screenshot /tmp/gstack-sketch.png
+$B screenshot /tmp/kstack-sketch.png
 ```
 
 If `$B` is not available (browse binary not set up), skip the render step. Tell the
@@ -130,8 +130,8 @@ If they approve or say "good enough," proceed.
 **Step 5: Include in design doc**
 
 Reference the wireframe screenshot in the design doc's "Recommended Approach" section.
-The screenshot file at `/tmp/gstack-sketch.png` can be referenced by downstream skills
-(`/skill:kstack-plan-design-review`, `/skill:gstack-design-review`) to see what was originally envisioned.
+The screenshot file at `/tmp/kstack-sketch.png` can be referenced by downstream skills
+(`/skill:kstack-plan-design-review`, `/skill:kstack-design-review`) to see what was originally envisioned.
 
 **Step 6: Outside design voices** (optional)
 

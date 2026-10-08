@@ -1,8 +1,8 @@
 /**
  * redact-engine — pure scanning + auto-redaction over the shared taxonomy.
  *
- * No I/O. Deterministic. The CLI shim (`bin/gstack-redact`), the pre-push hook
- * (`bin/gstack-redact-prepush`), and tests all import from here.
+ * No I/O. Deterministic. The CLI shim (`bin/kstack-redact`), the pre-push hook
+ * (`bin/kstack-redact-prepush`), and tests all import from here.
  *
  * Key behaviors (locked in /plan-eng-review + two Codex passes):
  *   - Normalization BEFORE matching (NFKC + strip zero-width + decode a small

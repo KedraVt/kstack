@@ -11,7 +11,7 @@ description: >-
   to a page.
 metadata:
   version: "1.0.0"
-compatibility: Requires runtime/browse/dist/find-browse ($B) — fail-closed when absent; gstack-skillify lives in the user-level stack, not this catalog.
+compatibility: Requires runtime/browse/dist/find-browse ($B) — fail-closed when absent; kstack-skillify lives in the user-level stack, not this catalog.
 ---
 
 <!-- provenance: gstack/gstack-scrape (match/prototype paths) — boilerplate stripped: learnings-log, eureka, preamble · rewritten S1 2026-02-11 -->
@@ -27,7 +27,7 @@ B="C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/browse/dist/find-brows
 ```
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill kstack-scrape --status start 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-scrape --status start 2>/dev/null || true
 ```
 
 ## Step 1 — Determine intent
@@ -68,7 +68,7 @@ Emit one JSON document on stdout — stable shape, typically
 
 ## Step 5 — Skillify nudge
 
-After a successful prototype, append exactly one line: "Say `/gstack-skillify`
+After a successful prototype, append exactly one line: "Say `/kstack-skillify`
 to make this a permanent skill (200ms on next call)." That's it — no nagging.
 
 ## When the prototype fails
@@ -85,7 +85,7 @@ different selector / different page / stop.
 - Not for: mutations, auth flows/cookies, multi-page crawls.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill kstack-scrape --status end 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-scrape --status end 2>/dev/null || true
 ```
 
 ## DoD gate (verification)
@@ -98,7 +98,7 @@ bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry
 
 ## Related skills
 
-- `gstack-skillify` (generic stack) — codifies a successful prototype into a
+- `kstack-skillify` (generic stack) — codifies a successful prototype into a
   permanent browser-skill
 
 ---

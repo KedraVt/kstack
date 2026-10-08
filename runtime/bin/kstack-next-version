@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// gstack-next-version — host-aware VERSION allocator for /ship.
+// kstack-next-version — host-aware VERSION allocator for /ship.
 //
 // Queries the PR queue (GitHub or GitLab), fetches each open PR's VERSION,
 // scans configurable Conductor sibling worktrees, picks the next free version
@@ -9,7 +9,7 @@
 // /ship consumes the JSON and decides what to do.
 //
 // Usage:
-//   gstack-next-version --base <branch> --bump <major|minor|patch|micro> \
+//   kstack-next-version --base <branch> --bump <major|minor|patch|micro> \
 //     --current-version <X.Y.Z.W> [--workspace-root <path>|null] \
 //     [--version-path <path>] [--json]
 //
@@ -306,7 +306,7 @@ async function fetchGitlabClaimed(base: string, versionPath: string, excludePR: 
 function resolveWorkspaceRoot(override?: string): string | null {
   if (override === "null") return null;
   if (override) return override;
-  const r = runCommand(join(__dirname, "gstack-config"), ["get", "workspace_root"]);
+  const r = runCommand(join(__dirname, "kstack-config"), ["get", "workspace_root"]);
   const configured = r.ok ? r.stdout.trim() : "";
   if (configured === "null") return null;
   if (configured) return configured;
@@ -431,7 +431,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     console.log(
-      "Usage: gstack-next-version --base <branch> --bump <level> --current-version <X.Y.Z.W> [--workspace-root <path|null>] [--version-path <path>]",
+      "Usage: kstack-next-version --base <branch> --bump <level> --current-version <X.Y.Z.W> [--workspace-root <path|null>] [--version-path <path>]",
     );
     process.exit(0);
   }

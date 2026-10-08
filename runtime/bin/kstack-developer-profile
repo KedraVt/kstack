@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# gstack-developer-profile — unified developer profile access and derivation.
+# kstack-developer-profile — unified developer profile access and derivation.
 #
-# Supersedes bin/gstack-builder-profile. The old binary remains as a legacy
-# shim that delegates to `gstack-developer-profile --read`.
+# Supersedes bin/kstack-builder-profile. The old binary remains as a legacy
+# shim that delegates to `kstack-developer-profile --read`.
 #
 # Subcommands:
 #   --read              (default)  emit KEY: VALUE pairs in builder-profile format
@@ -32,7 +32,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 KSTACK_HOME="${KSTACK_STATE_ROOT:-${KSTACK_HOME:-$HOME/.kstack}}"
 PROFILE_FILE="$KSTACK_HOME/developer-profile.json"
 LEGACY_FILE="$KSTACK_HOME/builder-profile.jsonl"
-eval "$("$SCRIPT_DIR/gstack-slug" 2>/dev/null || true)"
+eval "$("$SCRIPT_DIR/kstack-slug" 2>/dev/null || true)"
 SLUG="${SLUG:-unknown}"
 
 CMD="${1:---read}"
@@ -107,7 +107,7 @@ do_migrate() {
 
   # gbrain-sync: enqueue the migrated file for cross-machine sync (no-op if off).
   SCRIPT_DIR_E="$(cd "$(dirname "$0")" && pwd)"
-  "$SCRIPT_DIR_E/gstack-brain-enqueue" "developer-profile.json" 2>/dev/null &
+  "$SCRIPT_DIR_E/kstack-brain-enqueue" "developer-profile.json" 2>/dev/null &
 
   # Archive the legacy file.
   local TS
@@ -163,7 +163,7 @@ EOF
 # and update aggregates (signals_accumulated, resources_shown, topics).
 # Fix for #1671: the writer side of the v1.0.0.0 migration. Reader and
 # writer now share the same file.
-# Silent skip on invalid input (matches gstack-timeline-log:22-26 pattern).
+# Silent skip on invalid input (matches kstack-timeline-log:22-26 pattern).
 # -----------------------------------------------------------------------
 do_log_session() {
   local INPUT="${1:-}"
@@ -214,7 +214,7 @@ do_log_session() {
 
   mv "$TMPOUT" "$PROFILE_FILE"
   trap - EXIT
-  "$SCRIPT_DIR/gstack-brain-enqueue" "developer-profile.json" 2>/dev/null &
+  "$SCRIPT_DIR/kstack-brain-enqueue" "developer-profile.json" 2>/dev/null &
 }
 
 # -----------------------------------------------------------------------
@@ -512,7 +512,7 @@ case "$CMD" in
   --log-session) do_log_session "$@" ;;
   --help|-h) sed -n '1,/^set -euo/p' "$0" | sed 's|^# \?||' ;;
   *)
-    echo "gstack-developer-profile: unknown subcommand '$CMD'" >&2
+    echo "kstack-developer-profile: unknown subcommand '$CMD'" >&2
     echo "run --help for usage" >&2
     exit 1
     ;;

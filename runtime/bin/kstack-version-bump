@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// gstack-version-bump — deterministic version-state classifier + writer for /ship.
+// kstack-version-bump — deterministic version-state classifier + writer for /ship.
 //
 // Extracted from ship Step 12 prose (v2 plan T9, hybrid CLI extraction). The
 // idempotency classification and the dual-write to VERSION + package.json are
@@ -9,7 +9,7 @@
 //
 // What STAYS agent judgment (NOT here): the bump-LEVEL decision (micro/patch vs
 // minor/major, which may AskUserQuestion on feature signals) and the queue
-// collision prompt. The slot pick itself is bin/gstack-next-version. This CLI
+// collision prompt. The slot pick itself is bin/kstack-next-version. This CLI
 // only answers "what state am I in?" and "write this exact version".
 //
 // Subcommands:
@@ -31,7 +31,7 @@
 //       file. No bump. Validates the VERSION pattern first.
 //
 // Contract: classify NEVER writes. write/repair mutate VERSION + package.json
-// only. No git mutation, no network. Mirrors gstack-next-version's reader/writer
+// only. No git mutation, no network. Mirrors kstack-next-version's reader/writer
 // split so /ship composes them.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -44,7 +44,7 @@ const DEFAULT = "0.0.0.0";
 type State = "FRESH" | "ALREADY_BUMPED" | "DRIFT_STALE_PKG" | "DRIFT_UNEXPECTED";
 
 function fail(msg: string, code = 2): never {
-  process.stderr.write(`gstack-version-bump: ${msg}\n`);
+  process.stderr.write(`kstack-version-bump: ${msg}\n`);
   process.exit(code);
 }
 
@@ -207,6 +207,6 @@ if (import.meta.main) {
     case "write": cmdWrite(rest, cwd); break;
     case "repair": cmdRepair(rest, cwd); break;
     default:
-      fail("usage: gstack-version-bump <classify|write|repair> [flags]", 2);
+      fail("usage: kstack-version-bump <classify|write|repair> [flags]", 2);
   }
 }

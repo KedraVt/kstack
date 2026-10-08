@@ -219,7 +219,7 @@ describe("runDeterministicDelegation — fake-spawn integration", () => {
   });
 
   test("a REFUTED collapsed validate re-runs the FULL scout→planner chain with the do-not-revisit note", async () => {
-    const tmp = mkdtempSync(path.join(os.tmpdir(), "gstack-deleg-"));
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "kstack-deleg-"));
     try {
       // A CONFIRMED ROOT CAUSE marker inside the reproduce HANDOFF + cited
       // files on disk collapses the plan to one validate-only planner step.

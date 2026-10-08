@@ -69,7 +69,7 @@ function scoreIntents(text: string): Array<{ workflow: Workflow; confidence: num
 function buildSuggestion(workflow: Workflow): string {
   const phaseNames = workflow.phases.map((p) => p.name).join(" → ");
   return [
-    `[gstack-orchestrator] The user's input matches the "${workflow.name}" workflow.`,
+    `[kstack-orchestrator] The user's input matches the "${workflow.name}" workflow.`,
     `Suggested workflow: ${phaseNames}`,
     `If this matches the user's intent, suggest running /kstack ${workflow.id} for the guided workflow.`,
     `If unsure, ask: "This looks like a ${workflow.name.toLowerCase()} task. Want the full guided workflow (/kstack ${workflow.id}), or should I handle it directly?"`,

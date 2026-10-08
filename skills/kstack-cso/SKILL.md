@@ -29,7 +29,7 @@ third-party webhooks that accept anything. Start there.
 copy-paste-ready fixes.**
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill kstack-cso --status start 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-cso --status start 2>/dev/null || true
 ```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), apply fixes only inside the assigned task scope, record every unmade decision in the report, and never block waiting for an answer.
@@ -201,7 +201,7 @@ critical/high rejections freeze the pipeline for human review; medium/low loop
 back automatically.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill kstack-cso --status end 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-cso --status end 2>/dev/null || true
 ```
 
 ## DoD gate (verification)

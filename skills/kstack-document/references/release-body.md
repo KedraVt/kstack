@@ -3,7 +3,7 @@
 ## Step 2: Per-File Documentation Audit
 
 Read each documentation file and cross-reference it against the diff. Use these generic heuristics
-(adapt to whatever project you're in — these are not gstack-specific):
+(adapt to whatever project you're in — these are not kstack-specific):
 
 **README.md:**
 - Does it describe all features and capabilities visible in the diff?
@@ -213,12 +213,12 @@ git push
 
 **If GitHub:**
 ```bash
-gh pr view --json body -q .body > /tmp/gstack-pr-body-$$.md
+gh pr view --json body -q .body > /tmp/kstack-pr-body-$$.md
 ```
 
 **If GitLab:**
 ```bash
-glab mr view -F json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('description',''))" > /tmp/gstack-pr-body-$$.md
+glab mr view -F json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('description',''))" > /tmp/kstack-pr-body-$$.md
 ```
 
 2. If the tempfile already contains a `## Documentation` section, replace that section with the
@@ -241,23 +241,23 @@ glab mr view -F json 2>/dev/null | python3 -c "import sys,json; print(json.load(
    If there are any documentation debt items, suggest adding a `docs-debt` label to the PR.
 
 4. Redaction scan-at-sink, then write the updated body back. The body is already
-   in a temp file (`/tmp/gstack-pr-body-$$.md`); scan THAT file before editing so
+   in a temp file (`/tmp/kstack-pr-body-$$.md`); scan THAT file before editing so
    the bytes scanned are the bytes sent:
 
 ```bash
-REDACT_VIS=$(~/.claude/skills/kstack/bin/gstack-config get redact_repo_visibility 2>/dev/null)
+REDACT_VIS=$(~/.claude/skills/kstack/bin/kstack-config get redact_repo_visibility 2>/dev/null)
 [ -z "$REDACT_VIS" ] && REDACT_VIS=$(gh repo view --json visibility -q .visibility 2>/dev/null | tr 'A-Z' 'a-z')
-~/.claude/skills/kstack/bin/gstack-redact --from-file /tmp/gstack-pr-body-$$.md --repo-visibility "${REDACT_VIS:-unknown}" --json
+~/.claude/skills/kstack/bin/kstack-redact --from-file /tmp/kstack-pr-body-$$.md --repo-visibility "${REDACT_VIS:-unknown}" --json
 # exit 3 (HIGH) → do NOT edit, rotate+redact; exit 2 (MEDIUM) → confirm per finding.
 ```
 
 **If GitHub:**
 ```bash
-gh pr edit --body-file /tmp/gstack-pr-body-$$.md
+gh pr edit --body-file /tmp/kstack-pr-body-$$.md
 ```
 
 **If GitLab:**
-Read the contents of `/tmp/gstack-pr-body-$$.md` using the Read tool, then pass it to `glab mr update` using a heredoc to avoid shell metacharacter issues:
+Read the contents of `/tmp/kstack-pr-body-$$.md` using the Read tool, then pass it to `glab mr update` using a heredoc to avoid shell metacharacter issues:
 ```bash
 glab mr update -d "$(cat <<'MRBODY'
 <paste the file contents here>
@@ -268,7 +268,7 @@ MRBODY
 5. Clean up the tempfile:
 
 ```bash
-rm -f /tmp/gstack-pr-body-$$.md
+rm -f /tmp/kstack-pr-body-$$.md
 ```
 
 6. If `gh pr view` / `glab mr view` fails (no PR/MR exists): skip with message "No PR/MR found — skipping body update."
@@ -304,7 +304,7 @@ If `CURRENT_TITLE` is empty (no open PR/MR), skip with message "No PR/MR found �
 3. Compute the corrected title using the shared helper (single source of truth — same one `/ship` uses):
 
 ```bash
-NEW_TITLE=$(~/.claude/skills/kstack/bin/gstack-pr-title-rewrite.sh "$V" "$CURRENT_TITLE")
+NEW_TITLE=$(~/.claude/skills/kstack/bin/kstack-pr-title-rewrite.sh "$V" "$CURRENT_TITLE")
 ```
 
 The helper handles three cases: title already correct (no-op), title has a different `v<X.Y.Z.W>` prefix (replace it), or title has no version prefix (prepend one).
@@ -366,15 +366,15 @@ If all coverage is complete and no diagrams drifted, output: "Coverage: all ship
 After the documentation updates above are written, run an independent cross-model pass that
 checks the docs against what actually shipped. This is a standard part of /document-release,
 not an opt-in. The user turns it off only by asking explicitly
-(`gstack-config set codex_reviews disabled`).
+(`kstack-config set codex_reviews disabled`).
 
 **Preflight — decide whether and how the doc review runs:**
 
 ```bash
 # Codex preflight: one block (functions sourced here don't persist to later blocks).
-_TEL=$(~/.claude/skills/kstack/bin/gstack-config get telemetry 2>/dev/null || echo off)
-_CODEX_CFG=$(~/.claude/skills/kstack/bin/gstack-config get codex_reviews 2>/dev/null || echo enabled)
-source ~/.claude/skills/kstack/bin/gstack-codex-probe 2>/dev/null || true
+_TEL=$(~/.claude/skills/kstack/bin/kstack-config get telemetry 2>/dev/null || echo off)
+_CODEX_CFG=$(~/.claude/skills/kstack/bin/kstack-config get codex_reviews 2>/dev/null || echo enabled)
+source ~/.claude/skills/kstack/bin/kstack-codex-probe 2>/dev/null || true
 if [ "$_CODEX_CFG" = "disabled" ]; then
   _CODEX_MODE="disabled"
 elif ! command -v codex >/dev/null 2>&1; then
@@ -388,13 +388,13 @@ echo "CODEX_MODE: $_CODEX_MODE"
 ```
 
 Branch on the echoed `CODEX_MODE`:
-- **`disabled`** — the user turned Codex reviews off (`codex_reviews=disabled`). Skip this section entirely; do NOT fall back to a Claude subagent — disabled means no extra review step. Print: "Codex review skipped (codex_reviews disabled). Re-enable: `gstack-config set codex_reviews enabled`."
+- **`disabled`** — the user turned Codex reviews off (`codex_reviews=disabled`). Skip this section entirely; do NOT fall back to a Claude subagent — disabled means no extra review step. Print: "Codex review skipped (codex_reviews disabled). Re-enable: `kstack-config set codex_reviews enabled`."
 - **`not_installed`** — Codex CLI absent. Print: "Codex not installed — using Claude subagent. Install for cross-model coverage: `npm install -g @openai/codex`." Fall back to the Claude subagent path.
 - **`not_authed`** — installed but no credentials. Print: "Codex installed but not authenticated — using Claude subagent. Run `codex login` or set `$CODEX_API_KEY`." Fall back to the Claude subagent path.
 - **`ready`** — run the Codex pass below.
 
 When the mode is `ready`, `not_installed`, or `not_authed`, print one line so the off-switch
-stays discoverable: "Running the Codex doc review automatically (standard step). Disable: `gstack-config set codex_reviews disabled`."
+stays discoverable: "Running the Codex doc review automatically (standard step). Disable: `kstack-config set codex_reviews disabled`."
 
 **Determine the release diff range (D3 — reuse the method, do not invent one).**
 Recompute the SAME range document-release used in its pre-flight / diff analysis, with the
@@ -468,7 +468,7 @@ rewrites docs). On B, note the gaps in the output so they're visible.
 
 **Persist the result:**
 ```bash
-~/.claude/skills/kstack/bin/gstack-review-log '{"skill":"codex-doc-review","timestamp":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","status":"STATUS","source":"SOURCE","commit":"'"$(git rev-parse --short HEAD)"'"}'
+~/.claude/skills/kstack/bin/kstack-review-log '{"skill":"codex-doc-review","timestamp":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","status":"STATUS","source":"SOURCE","commit":"'"$(git rev-parse --short HEAD)"'"}'
 ```
 Substitute: STATUS = "clean" if no gaps, "issues_found" if gaps exist. SOURCE = "codex" if Codex ran, "claude" if the subagent ran.
 

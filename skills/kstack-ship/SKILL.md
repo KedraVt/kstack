@@ -10,7 +10,7 @@ description: >-
   bugs (use kstack-investigate) — ship consumes their verified output.
 metadata:
   version: "1.0.0"
-compatibility: Requires git + gh CLI for push/PR steps; runtime/bin/gstack-* helpers degrade gracefully.
+compatibility: Requires git + gh CLI for push/PR steps; runtime/bin/kstack-* helpers degrade gracefully.
 ---
 
 <!-- provenance: sprint-beta/beta-ship (merged base — skeleton, save-point, SHIP REPORT) + gstack/gstack-ship (readiness dashboard, version CLI, section machinery) + kedra/qa-git (save-point, git discipline) · merged S1 2026-02-11 -->
@@ -23,7 +23,7 @@ and todos reconciled, branch pushed, PR created. You act upon the validation
 state established by the QA artifact — you do not re-derive it.
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill kstack-ship --status start 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-ship --status start 2>/dev/null || true
 ```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), pick the non-destructive option (e.g. defer to TODOS.md rather than installing release CI) and note the skipped confirmation in the SHIP REPORT — never block waiting for an answer.
@@ -72,7 +72,7 @@ skip when already done (bump, push, PR create→update).
 ### Step 2: Review readiness
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-review-read 2>/dev/null
+bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-review-read 2>/dev/null
 ```
 
 Display the readiness dashboard: most recent entry per review skill within 7
@@ -116,21 +116,21 @@ for running the suites (and eval suites when prompt files changed).
 
 ### Step 7: Version bump (auto-decide)
 
-Deterministic state logic via `gstack-version-bump`; level decision stays
-agent judgment; slot pick via `gstack-next-version` (both in `runtime/bin/`).
+Deterministic state logic via `kstack-version-bump`; level decision stays
+agent judgment; slot pick via `kstack-next-version` (both in `runtime/bin/`).
 
 1. **Classify:**
-   `bun run C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-version-bump classify --base <base>`
+   `bun run C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-version-bump classify --base <base>`
    - `FRESH` → bump (steps 2–4). `ALREADY_BUMPED` → skip bump, run queue-drift
      check; if the queue moved → ask: rebump vs keep.
-   - `DRIFT_STALE_PKG` → `gstack-version-bump repair`. `DRIFT_UNEXPECTED` →
+   - `DRIFT_STALE_PKG` → `kstack-version-bump repair`. `DRIFT_UNEXPECTED` →
      **STOP**: manual edit bypassed ship; reconcile manually.
 2. **Level:** MICRO <50 lines trivial; PATCH 50+ no features; MINOR → ASK on
    feature signals or 500+ lines; MAJOR → ASK (milestones/breaking only).
 3. **Queue-aware pick:**
-   `bun run …/runtime/bin/gstack-next-version --base <base> --bump "$BUMP_LEVEL" --current-version "$BASE_VERSION"`.
+   `bun run …/runtime/bin/kstack-next-version --base <base> --bump "$BUMP_LEVEL" --current-version "$BASE_VERSION"`.
    Offline → local arithmetic + print "workspace-aware ship offline".
-4. **Write:** `gstack-version-bump write --version "$NEW_VERSION"` — writes
+4. **Write:** `kstack-version-bump write --version "$NEW_VERSION"` — writes
    VERSION + package.json, validates `MAJOR.MINOR.PATCH.MICRO`. Exit 3 →
    re-run, then `repair`.
 
@@ -185,7 +185,7 @@ Status:          SHIPPED | BLOCKED_<reason>
 ```
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry-log --event-type skill_run --skill kstack-ship --status end 2>/dev/null || true
+bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-ship --status end 2>/dev/null || true
 ```
 
 ## DoD gate (verification)

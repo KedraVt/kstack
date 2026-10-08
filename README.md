@@ -31,7 +31,7 @@ One extension, two layers:
 - **Sprint requires deterministic delegation** — the sprint gates route exclusively on executor-produced verdicts, so the workflow refuses to start while `KSTACK_PI_DETERMINISTIC=off` (both `/kstack sprint` and the `kstack_start` tool explain this). Kill-switch parks (`KSTACK_PI_VERDICTS=off` / `_LOOPBACKS=off`) likewise land in a decision panel offering **Accept / Re-run / Abort**.
 - **Strict BE→FE chain** — implementation runs backend-developer then frontend-developer sequentially per task wave; model tiers (`KSTACK_PI_MODEL_STRONG/FAST`) let judgment phases run on stronger models while mechanical phases stay cheap.
 - **Fixed**: phase instructions are now delivered with `followUp` streaming behavior — eliminates the "Agent is already processing" error that silently dropped phase handoffs.
-- **Raw skill library split** — the bundled skill surface is organized in two folders: `skills/kstack/` (23 cherry-picked kstack skills, manual `/skill:gstack-*` invocation) and `skills/kedra/` (18 full `.agents-clean` methodology skills, verbatim, manual `/skill:<name>` invocation — the whole source library except `acceptance-criteria-backend/-frontend`, which live inside the sub-agent bodies).
+- **Raw skill library split** — the bundled skill surface is organized in two folders: `skills/kstack/` (23 cherry-picked kstack skills, manual `/skill:kstack-*` invocation) and `skills/kedra/` (18 full `.agents-clean` methodology skills, verbatim, manual `/skill:<name>` invocation — the whole source library except `acceptance-criteria-backend/-frontend`, which live inside the sub-agent bodies).
 - **Centralized artifact names** — `orchestrator/artifacts.ts` is the single source for every sprint-stamped filename (`qa-artifact_XX.md`, `code-review-artifact_XX.md`, `software-architect-artifact_XX_N.md`, …); verdict verification, task templates and the freeze path all consume it, closing the stamping-drift bug class.
 - **D4 park causes** — an unreadable-verdict park now records *why* in `pausedReason` (`no-verdict` / `artifact-mismatch` / `unroutable`) and the panel names the cause for triage; no attempt is burned either way.
 - **Runtime binaries untracked** — `runtime/` is gitignored and provisioned on demand (session-start download / `update.sh`); ~197MB of browse daemon binaries were dropped from the git index.
@@ -40,7 +40,7 @@ One extension, two layers:
 ## Requirements
 
 - [pi](https://github.com/earendil-works/pi) >= 0.82.0
-- For updates **and skill memory scripts**: [Bun](https://bun.sh) >= 1.3.0 + Git Bash (Windows). The bundled skills' operational-memory preamble (`gstack-telemetry-log`, `gstack-learnings-log`, `gstack-question-log`, …) executes bash wrappers from `source/bin/` that validate via `bun -e` — verified working 2026-08-24 (write → search roundtrip, fail-loud validation, latest-wins dedup). Without bun those calls fail silently (`|| true` guards) and memory writes are dropped; the orchestrator itself is unaffected.
+- For updates **and skill memory scripts**: [Bun](https://bun.sh) >= 1.3.0 + Git Bash (Windows). The bundled skills' operational-memory preamble (`kstack-telemetry-log`, `kstack-learnings-log`, `kstack-question-log`, …) executes bash wrappers from `source/bin/` that validate via `bun -e` — verified working 2026-08-24 (write → search roundtrip, fail-loud validation, latest-wins dedup). Without bun those calls fail silently (`|| true` guards) and memory writes are dropped; the orchestrator itself is unaffected.
 
 ## Installation
 
@@ -109,7 +109,7 @@ The workflow decides when skill knowledge applies — the model never has to gue
 - Every mapped phase injects the canonical `skills/<id>/SKILL.md` — a missing catalog file degrades to the compact DoD gate so a run never breaks.
 - Main phases embed the methodology; subagent phases receive it inside their task string while orchestrator instructions carry only the compact **DoD + best-practices gate**
 - Repeated deliveries within one run degrade to the DoD gate (~40% skill-token savings)
-- Wired skills: investigate, qa, review, ship, office-hours, plan-eng-review, document-release (+generate), grilling, plus the sprint family (capability, system-design, adr, tasks, tdd, verification, appsec, docker, qa, pipeline). All 41 bundled skills stay manually invocable via `/skill:` (23 under the `gstack-` prefix, 18 kedra skills under their own name).
+- Wired skills: investigate, qa, review, ship, office-hours, plan-eng-review, document-release (+generate), grilling, plus the sprint family (capability, system-design, adr, tasks, tdd, verification, appsec, docker, qa, pipeline). All 41 bundled skills stay manually invocable via `/skill:` (23 under the `kstack-` prefix, 18 kedra skills under their own name).
 
 ### Raw skill library (`skills/kstack/` + `skills/kedra/`)
 
@@ -208,9 +208,9 @@ The script also detects new upstream features (skills, tools, bin scripts) not y
 ║  NEW FEATURES AVAILABLE UPSTREAM — update extension!    ║
 ╚══════════════════════════════════════════════════════════╝
 
-  [skill] gstack-canary
+  [skill] kstack-canary
   [tool]  kstack_handoff
-  [bin]   gstack-analytics
+  [bin]   kstack-analytics
 ```
 
 To include new skills: add them to `SKILLS=` in `update.sh`.
@@ -232,7 +232,7 @@ The root `kstack` router skill is hand-maintained and never regenerated.
 A pre-migration snapshot of `skills/` and `update.sh` (before the runtime-path decoupling from the legacy adapter install) is kept at:
 
 ```
-%TEMP%\opencode\gstack-pi-backup-20260824\
+%TEMP%\opencode\kstack-pi-backup-20260824\
 ```
 
 This is temporary storage: it can be deleted once you're satisfied with the adapted skills (a fresh backup is always one `git checkout` away — see `git log -- skills/`).

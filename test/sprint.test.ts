@@ -194,7 +194,7 @@ describe("verdict parsing (D1/D4 fail-closed)", () => {
 
 describe("dual-channel artifact verification (guard 3)", () => {
   function setup(files: Record<string, string>): string {
-    const tmp = tmpDir("gstack-verdict-");
+    const tmp = tmpDir("kstack-verdict-");
     for (const [file, content] of Object.entries(files)) {
       fs.mkdirSync(path.dirname(path.join(tmp, file)), { recursive: true });
       writeFileSync(path.join(tmp, file), content);
@@ -342,7 +342,7 @@ describe("feedback extraction (loop fuel)", () => {
   });
 
   test("buildRetryFeedback degrades gracefully when artifacts are unreadable", () => {
-    const empty = tmpDir("gstack-fb-");
+    const empty = tmpDir("kstack-fb-");
     try {
       assert.equal(buildRetryFeedback({ verdicts: { status: "red" } }, "qa-verdict", empty, 9), "");
       const parsed = parseHandoffVerdicts("## HANDOFF\nsecurity-review == rejected\nseverity == medium");
@@ -355,7 +355,7 @@ describe("feedback extraction (loop fuel)", () => {
   });
 
   test("buildRetryFeedback reads QA blockers from the sprint-numbered artifact", () => {
-    const cwd = tmpDir("gstack-fb2-");
+    const cwd = tmpDir("kstack-fb2-");
     try {
       writeFileSync(
         path.join(cwd, "qa-artifact_04.md"),
@@ -638,7 +638,7 @@ describe("sprint numbering discovery (E5)", () => {
   });
 
   test("empty project ⇒ next is 01", () => {
-    const tmp = tmpDir("gstack-num-");
+    const tmp = tmpDir("kstack-num-");
     try {
       assert.deepEqual(computeNextSprintNumber(tmp), { next: 1, anomaly: null });
     } finally {
@@ -647,7 +647,7 @@ describe("sprint numbering discovery (E5)", () => {
   });
 
   test("gaps are fine: root 01 + archive 03 ⇒ 04", () => {
-    const tmp = tmpDir("gstack-num-");
+    const tmp = tmpDir("kstack-num-");
     try {
       writeFileSync(path.join(tmp, "user-story_01.md"), "x");
       const arch = path.join(tmp, ".kstack", "sprints", "sprint_03");
@@ -660,7 +660,7 @@ describe("sprint numbering discovery (E5)", () => {
   });
 
   test("archive-only history counts toward the max", () => {
-    const tmp = tmpDir("gstack-num-");
+    const tmp = tmpDir("kstack-num-");
     try {
       const arch = path.join(tmp, ".kstack", "sprints", "sprint_05");
       fs.mkdirSync(arch, { recursive: true });
@@ -674,7 +674,7 @@ describe("sprint numbering discovery (E5)", () => {
   });
 
   test("root/archive collision ⇒ hijack-guard anomaly (never guess)", () => {
-    const tmp = tmpDir("gstack-num-");
+    const tmp = tmpDir("kstack-num-");
     try {
       writeFileSync(path.join(tmp, "user-story_02.md"), "live?");
       const arch = path.join(tmp, ".kstack", "sprints", "sprint_02");
@@ -689,7 +689,7 @@ describe("sprint numbering discovery (E5)", () => {
   });
 
   test(">1 live sprint in root ⇒ anomaly", () => {
-    const tmp = tmpDir("gstack-num-");
+    const tmp = tmpDir("kstack-num-");
     try {
       writeFileSync(path.join(tmp, "user-story_02.md"), "a");
       writeFileSync(path.join(tmp, "user-story_09.md"), "b");
@@ -702,7 +702,7 @@ describe("sprint numbering discovery (E5)", () => {
   });
 
   test("non user-story files are ignored by the scan", () => {
-    const tmp = tmpDir("gstack-num-");
+    const tmp = tmpDir("kstack-num-");
     try {
       writeFileSync(path.join(tmp, "README.md"), "x");
       writeFileSync(path.join(tmp, "tasks_99.md"), "x");
@@ -718,7 +718,7 @@ describe("sprint numbering discovery (E5)", () => {
 
 describe("conditional digests (D14) + glossary injection (E6)", () => {
   test("docker/pipeline digests dropped when their trigger is absent", () => {
-    const tmp = tmpDir("gstack-cond-");
+    const tmp = tmpDir("kstack-cond-");
     try {
       assert.deepEqual(conditionalSkillIds(["kstack-review", "kstack-sprint-docker", "kstack-sprint-pipeline"], tmp), ["kstack-review"]);
       writeFileSync(path.join(tmp, "Dockerfile"), "FROM node");
@@ -736,7 +736,7 @@ describe("conditional digests (D14) + glossary injection (E6)", () => {
   });
 
   test("glossaryTable scrapes the BINDING table from system-design_XX.md", () => {
-    const tmp = tmpDir("gstack-glos-");
+    const tmp = tmpDir("kstack-glos-");
     try {
       writeFileSync(
         path.join(tmp, `system-design_${pad2(3)}.md`),
@@ -940,7 +940,7 @@ describe("code-review pass-1 fixes", () => {
 
   test("B3: buildRetryFeedback finds SPRINT-STAMPED review artifacts", () => {
     const parsed = { verdicts: { "code-review": "rejected" } };
-    const dir = tmpDir("gstack-b3-");
+    const dir = tmpDir("kstack-b3-");
     try {
       fs.mkdirSync(path.join(dir, "devsecops"), { recursive: true });
       writeFileSync(
@@ -955,7 +955,7 @@ describe("code-review pass-1 fixes", () => {
 
     // Negative pin: the UNSTAMPED artifact name satisfies nothing — this is
     // the exact bug (the old code scanned unstamped names and got silence).
-    const unstampedDir = tmpDir("gstack-b3u-");
+    const unstampedDir = tmpDir("kstack-b3u-");
     try {
       fs.mkdirSync(path.join(unstampedDir, "devsecops"), { recursive: true });
       writeFileSync(path.join(unstampedDir, "devsecops", "code-review-artifact.md"), "- CRITICAL: old finding\n");
@@ -974,7 +974,7 @@ describe("code-review pass-1 fixes", () => {
   });
 
   test("B5: severity is disk-verified (freeze/loop-back routing cannot rest on the HANDOFF alone)", () => {
-    const dir = tmpDir("gstack-b5-");
+    const dir = tmpDir("kstack-b5-");
     try {
       fs.mkdirSync(path.join(dir, "devsecops"), { recursive: true });
       writeFileSync(
@@ -1251,7 +1251,7 @@ describe("input router (Q4): short inputs still re-anchor during an active workf
     const handler = createInputRouter({} as any);
     const out = handler({ text: "investigate the failing login request", source: "interactive" }, fakeRouterCtx(null)) as any;
     assert.equal(out.action, "transform");
-    assert.match(out.text, /gstack-orchestrator/);
+    assert.match(out.text, /kstack-orchestrator/);
   });
 });
 

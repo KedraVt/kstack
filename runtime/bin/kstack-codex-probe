@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gstack-codex-probe: shared helper for /codex and /autoplan skills.
+# kstack-codex-probe: shared helper for /codex and /autoplan skills.
 # Sourced from template bash blocks; never execute directly.
 #
 # Functions (all prefixed with _kstack_codex_ for namespace hygiene):
@@ -70,7 +70,7 @@ _kstack_codex_timeout_wrapper() {
 
 _kstack_codex_log_event() {
   # Emit a telemetry event to ~/.kstack/analytics/skill-usage.jsonl.
-  # Gated on $_TEL != "off" (caller sets this from gstack-config).
+  # Gated on $_TEL != "off" (caller sets this from kstack-config).
   # Event types: codex_timeout, codex_auth_failed, codex_cli_missing,
   #              codex_version_warning.
   # Payload schema: {skill, event, duration_s, ts}. NEVER includes prompt
@@ -94,7 +94,7 @@ _kstack_codex_log_hang() {
   # Best-effort: errors swallowed.
   local _mode="${1:-unknown}"
   local _prompt_size="${2:-0}"
-  local _log_bin="$HOME/.claude/skills/kstack/bin/gstack-learnings-log"
+  local _log_bin="$HOME/.claude/skills/kstack/bin/kstack-learnings-log"
   [ -x "$_log_bin" ] || return 0
   local _key="codex-hang-$(date +%s 2>/dev/null || echo unknown)"
   "$_log_bin" "$(printf '{"skill":"codex","type":"operational","key":"%s","insight":"Codex timed out after 600s during [%s] invocation. Prompt size: %s. Consider splitting prompt or checking network.","confidence":8,"source":"observed","files":["codex/SKILL.md.tmpl","autoplan/SKILL.md.tmpl"]}' "$_key" "$_mode" "$_prompt_size")" \

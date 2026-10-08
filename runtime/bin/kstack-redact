@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * gstack-redact — scan text for secrets/PII/legal content via the shared engine.
+ * kstack-redact — scan text for secrets/PII/legal content via the shared engine.
  *
  * Skill-facing CLI over lib/redact-engine.ts. Reads from stdin (default) or
  * --from-file, scans, and prints findings as JSON (--json) or a human table.
@@ -42,12 +42,12 @@ const MAX_STDIN_BYTES = 16 * 1024 * 1024; // hard ceiling before the engine cap
 
 // ── pre-push hook install/uninstall (chains any existing hook) ────────────────
 
-const MANAGED_MARKER = "# gstack-redact pre-push (managed)";
+const MANAGED_MARKER = "# kstack-redact pre-push (managed)";
 
 function hooksPath(): string {
   const r = spawnSync("git", ["rev-parse", "--git-path", "hooks"], { encoding: "utf8" });
   if (r.status !== 0) {
-    process.stderr.write("gstack-redact: not in a git repo\n");
+    process.stderr.write("kstack-redact: not in a git repo\n");
     process.exit(1);
   }
   return r.stdout.trim();
@@ -57,19 +57,19 @@ function installPrepushHook(): void {
   const dir = hooksPath();
   fs.mkdirSync(dir, { recursive: true });
   const hookPath = path.join(dir, "pre-push");
-  const prepushBin = path.join(import.meta.dir, "gstack-redact-prepush");
+  const prepushBin = path.join(import.meta.dir, "kstack-redact-prepush");
 
   // If a non-managed hook exists, preserve it as pre-push.local and chain it.
   if (fs.existsSync(hookPath)) {
     const existing = fs.readFileSync(hookPath, "utf8");
     if (existing.includes(MANAGED_MARKER)) {
-      process.stdout.write("gstack-redact: pre-push hook already installed.\n");
+      process.stdout.write("kstack-redact: pre-push hook already installed.\n");
       return;
     }
     const localPath = path.join(dir, "pre-push.local");
     fs.renameSync(hookPath, localPath);
     fs.chmodSync(localPath, 0o755);
-    process.stdout.write("gstack-redact: preserved existing hook as pre-push.local (chained).\n");
+    process.stdout.write("kstack-redact: preserved existing hook as pre-push.local (chained).\n");
   }
 
   // stdin is single-consume: capture it once, feed both the chained hook and ours.
@@ -85,7 +85,7 @@ printf '%s' "$_input" | bun "${prepushBin}" "$@"
 `;
   fs.writeFileSync(hookPath, wrapper, { mode: 0o755 });
   fs.chmodSync(hookPath, 0o755);
-  process.stdout.write(`gstack-redact: installed pre-push hook at ${hookPath}\n`);
+  process.stdout.write(`kstack-redact: installed pre-push hook at ${hookPath}\n`);
 }
 
 function uninstallPrepushHook(): void {
@@ -93,15 +93,15 @@ function uninstallPrepushHook(): void {
   const hookPath = path.join(dir, "pre-push");
   const localPath = path.join(dir, "pre-push.local");
   if (!fs.existsSync(hookPath) || !fs.readFileSync(hookPath, "utf8").includes(MANAGED_MARKER)) {
-    process.stdout.write("gstack-redact: no managed pre-push hook to remove.\n");
+    process.stdout.write("kstack-redact: no managed pre-push hook to remove.\n");
     return;
   }
   if (fs.existsSync(localPath)) {
     fs.renameSync(localPath, hookPath); // restore the chained original
-    process.stdout.write("gstack-redact: removed managed hook, restored pre-push.local.\n");
+    process.stdout.write("kstack-redact: removed managed hook, restored pre-push.local.\n");
   } else {
     fs.unlinkSync(hookPath);
-    process.stdout.write("gstack-redact: removed managed pre-push hook.\n");
+    process.stdout.write("kstack-redact: removed managed pre-push hook.\n");
   }
 }
 
@@ -119,7 +119,7 @@ function readInput(): string {
     const st = fs.statSync(file);
     if (st.size > MAX_STDIN_BYTES) {
       // Don't even read it — fail closed at the CLI boundary.
-      process.stderr.write(`gstack-redact: input file too large (${st.size} bytes)\n`);
+      process.stderr.write(`kstack-redact: input file too large (${st.size} bytes)\n`);
       process.exit(3);
     }
     return fs.readFileSync(file, "utf8");
@@ -141,7 +141,7 @@ function readInput(): string {
     if (n === 0) break;
     total += n;
     if (total > MAX_STDIN_BYTES) {
-      process.stderr.write("gstack-redact: stdin too large\n");
+      process.stderr.write("kstack-redact: stdin too large\n");
       process.exit(3);
     }
     chunks.push(Buffer.from(buf.subarray(0, n)));
@@ -168,7 +168,7 @@ function buildOpts(): ScanOptions {
   if (maxBytes !== undefined) {
     if (!/^\d+$/.test(maxBytes) || Number(maxBytes) <= 0) {
       process.stderr.write(
-        `gstack-redact: --max-bytes must be a positive integer (got "${maxBytes}")\n`,
+        `kstack-redact: --max-bytes must be a positive integer (got "${maxBytes}")\n`,
       );
       process.exit(1);
     }
@@ -211,7 +211,7 @@ function main() {
     if (diff) process.stderr.write(diff + "\n");
     if (skipped.length) {
       process.stderr.write(
-        `\ngstack-redact: ${skipped.length} finding(s) could not be auto-redacted (structural) — edit manually:\n` +
+        `\nkstack-redact: ${skipped.length} finding(s) could not be auto-redacted (structural) — edit manually:\n` +
           skipped.map((f) => `  ${f.id} @ ${f.line}:${f.col}`).join("\n") +
           "\n",
       );
@@ -226,7 +226,7 @@ function main() {
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
   } else {
     const vis = result.repoVisibility.toUpperCase();
-    process.stdout.write(`gstack-redact scan — repo ${vis}\n`);
+    process.stdout.write(`kstack-redact scan — repo ${vis}\n`);
     if (result.oversize) {
       process.stdout.write("  BLOCKED — input too large to scan safely (fail-closed)\n");
     } else {

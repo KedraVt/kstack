@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# gstack-brain-sync — drain queue, commit allowlisted paths, push to remote.
+# kstack-brain-sync — drain queue, commit allowlisted paths, push to remote.
 #
 # Usage:
-#   gstack-brain-sync --once           drain queue, commit, push (default)
-#   gstack-brain-sync --status         print sync health as JSON
-#   gstack-brain-sync --skip-file <p>  add <p> to ~/.kstack/.brain-skip.txt
-#   gstack-brain-sync --drop-queue --yes   clear queue without committing
-#   gstack-brain-sync --discover-new   scan allowlist dirs, enqueue changed files
+#   kstack-brain-sync --once           drain queue, commit, push (default)
+#   kstack-brain-sync --status         print sync health as JSON
+#   kstack-brain-sync --skip-file <p>  add <p> to ~/.kstack/.brain-skip.txt
+#   kstack-brain-sync --drop-queue --yes   clear queue without committing
+#   kstack-brain-sync --discover-new   scan allowlist dirs, enqueue changed files
 #
 # Invoked by the preamble at skill START and END boundaries. No persistent
 # daemon. Typical run <1s when queue empty; ~200-800ms with network push.
@@ -30,7 +30,7 @@ LOCK_FILE="$KSTACK_HOME/.brain-sync.lock"
 DISCOVER_CURSOR="$KSTACK_HOME/.brain-discover-cursor"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CONFIG_BIN="$SCRIPT_DIR/gstack-config"
+CONFIG_BIN="$SCRIPT_DIR/kstack-config"
 
 # Remote-specific hint for auth errors (branch on origin URL).
 remote_auth_hint() {
@@ -270,7 +270,7 @@ subcmd_once() {
     # Hit — unstage, preserve queue, write loud status.
     git -C "$KSTACK_HOME" reset HEAD -- . >/dev/null 2>&1 || true
     local hint
-    hint="secret pattern detected ($scan_out). Remediation: review the staged file, then run: gstack-brain-sync --skip-file <path> OR edit the content."
+    hint="secret pattern detected ($scan_out). Remediation: review the staged file, then run: kstack-brain-sync --skip-file <path> OR edit the content."
     write_status "blocked" "$hint"
     echo "BRAIN_SYNC: blocked: $scan_out" >&2
     exit 0
@@ -281,7 +281,7 @@ subcmd_once() {
   n=$(wc -l < "$paths_file" | tr -d ' ')
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   local msg="sync: $n file(s) | $ts"
-  git -C "$KSTACK_HOME" -c user.email="kstack@localhost" -c user.name="gstack-brain-sync" \
+  git -C "$KSTACK_HOME" -c user.email="kstack@localhost" -c user.name="kstack-brain-sync" \
     commit -q -m "$msg" 2>/dev/null || {
       # Nothing to commit (e.g. all files already committed).
       : > "$QUEUE"
@@ -347,7 +347,7 @@ subcmd_status() {
 subcmd_skip_file() {
   local path="${1:-}"
   if [ -z "$path" ]; then
-    echo "Usage: gstack-brain-sync --skip-file <path>" >&2
+    echo "Usage: kstack-brain-sync --skip-file <path>" >&2
     exit 1
   fi
   mkdir -p "$KSTACK_HOME"
@@ -446,7 +446,7 @@ for root, dirs, files in os.walk(kstack_home):
             to_enqueue.append((rel, key))
 
 # Append to the queue directly. The previous implementation shelled out to
-# gstack-brain-enqueue once per file, but Windows Python cannot exec a
+# kstack-brain-enqueue once per file, but Windows Python cannot exec a
 # bash-shebang script (the spawn fails with a fork error), so discovery
 # enqueued nothing on Windows even after the path-match fix above.
 # Writing the queue line here is platform-agnostic; the drain step
@@ -455,7 +455,7 @@ if to_enqueue:
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         # One atomic append per record (O_APPEND, each line < PIPE_BUF), matching
-        # gstack-brain-enqueue's concurrency contract so a writer-shim append
+        # kstack-brain-enqueue's concurrency contract so a writer-shim append
         # running in parallel can't interleave mid-record. Buffered text writes
         # don't guarantee that. Compact separators match the shim's JSON shape.
         fd = os.open(queue_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
@@ -491,7 +491,7 @@ case "${1:-}" in
     ;;
   *)
     echo "Unknown subcommand: $1" >&2
-    echo "Run: gstack-brain-sync --help" >&2
+    echo "Run: kstack-brain-sync --help" >&2
     exit 1
     ;;
 esac

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gstack-first-task-detect — classify the current project into ONE first-task
+# kstack-first-task-detect — classify the current project into ONE first-task
 # bucket so the first-run scaffold can suggest a concrete next skill.
 #
 # Contract (load-bearing — the preamble eval's nothing but a single token):
@@ -14,10 +14,10 @@
 #   | code_ios | branch_ahead | dirty_default | clean_default | nongit
 #
 # The caller maps the token to human prose; no description text crosses the
-# eval boundary. Usage: TOKEN=$(gstack-first-task-detect)
+# eval boundary. Usage: TOKEN=$(kstack-first-task-detect)
 set -uo pipefail
 
-# --- Portable timeout wrapper (gtimeout → timeout → unwrapped), per gstack-codex-probe ---
+# --- Portable timeout wrapper (gtimeout → timeout → unwrapped), per kstack-codex-probe ---
 _ftd_to=$(command -v gtimeout 2>/dev/null || command -v timeout 2>/dev/null || echo "")
 _git() {
   if [ -n "$_ftd_to" ]; then

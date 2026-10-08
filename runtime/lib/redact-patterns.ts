@@ -1,8 +1,8 @@
 /**
  * redact-patterns — the canonical redaction taxonomy.
  *
- * Single source of truth shared by `lib/redact-engine.ts`, `bin/gstack-redact`,
- * `bin/gstack-redact-prepush`, and (via `scripts/resolvers/redact-doc.ts`) the
+ * Single source of truth shared by `lib/redact-engine.ts`, `bin/kstack-redact`,
+ * `bin/kstack-redact-prepush`, and (via `scripts/resolvers/redact-doc.ts`) the
  * generated SKILL.md docs for /spec, /ship, /cso, /document-release, and
  * /document-generate.
  *

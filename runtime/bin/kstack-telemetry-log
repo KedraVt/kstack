@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# gstack-telemetry-log — append a telemetry event to local JSONL
+# kstack-telemetry-log — append a telemetry event to local JSONL
 #
 # Data flow:
 #   preamble (start) ──▶ .pending marker
-#   preamble (epilogue) ──▶ gstack-telemetry-log ──▶ skill-usage.jsonl
-#                                                 └──▶ gstack-telemetry-sync (bg)
+#   preamble (epilogue) ──▶ kstack-telemetry-log ──▶ skill-usage.jsonl
+#                                                 └──▶ kstack-telemetry-sync (bg)
 #
 # Usage:
-#   gstack-telemetry-log --skill qa --duration 142 --outcome success \
+#   kstack-telemetry-log --skill qa --duration 142 --outcome success \
 #     --used-browse true --session-id "12345-1710756600"
 #
 # Env overrides (for testing):
@@ -28,7 +28,7 @@ STATE_DIR="${KSTACK_STATE_DIR:-$HOME/.kstack}"
 ANALYTICS_DIR="$STATE_DIR/analytics"
 JSONL_FILE="$ANALYTICS_DIR/skill-usage.jsonl"
 PENDING_DIR="$ANALYTICS_DIR"  # .pending-* files live here
-CONFIG_CMD="$KSTACK_DIR/bin/gstack-config"
+CONFIG_CMD="$KSTACK_DIR/bin/kstack-config"
 VERSION_FILE="$KSTACK_DIR/VERSION"
 
 # ─── Parse flags ─────────────────────────────────────────────
@@ -260,7 +260,7 @@ printf '{"v":1,"ts":"%s","event_type":"%s","skill":"%s","session_id":"%s","kstac
   "$REPO_SLUG" "$BRANCH" >> "$JSONL_FILE" 2>/dev/null || true
 
 # ─── Trigger sync if tier is not off ─────────────────────────
-SYNC_CMD="$KSTACK_DIR/bin/gstack-telemetry-sync"
+SYNC_CMD="$KSTACK_DIR/bin/kstack-telemetry-sync"
 if [ -x "$SYNC_CMD" ]; then
   "$SYNC_CMD" 2>/dev/null &
 fi

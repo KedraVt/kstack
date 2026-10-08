@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# gstack-config — read/write ~/.kstack/config.yaml
+# kstack-config — read/write ~/.kstack/config.yaml
 #
 # Usage:
-#   gstack-config get <key>          — read a config value (falls back to DEFAULTS)
-#   gstack-config set <key> <value>  — write a config value
-#   gstack-config list               — show all config (values + defaults)
-#   gstack-config defaults           — show just the defaults table
+#   kstack-config get <key>          — read a config value (falls back to DEFAULTS)
+#   kstack-config set <key> <value>  — write a config value
+#   kstack-config list               — show all config (values + defaults)
+#   kstack-config defaults           — show just the defaults table
 #
 # Env overrides (for testing):
 #   KSTACK_STATE_ROOT — override ~/.kstack state directory (highest priority,
@@ -48,7 +48,7 @@ CONFIG_HEADER='# kstack configuration — edit freely, changes take effect on ne
 # checkpoint_mode: explicit # explicit | continuous
 #                           #   explicit   — commit only when you run /ship or /checkpoint
 #                           #   continuous — auto-commit after each significant change
-#                           #                with WIP: prefix + [gstack-context] body
+#                           #                with WIP: prefix + [kstack-context] body
 #
 # checkpoint_push: false    # true = push WIP commits to remote as you go
 #                           # false = keep WIP commits local only (default)
@@ -205,7 +205,7 @@ endpoint_hash_with_collision_check() {
 #   2. $USER env
 #   3. sha8($(git config user.email))
 #   4. anonymous-<sha8(hostname)>
-# Persists result via gstack-config set user_slug_at_<endpoint-hash> on first call.
+# Persists result via kstack-config set user_slug_at_<endpoint-hash> on first call.
 resolve_user_slug() {
   _hash=$(endpoint_hash_with_collision_check)
   _stored=$(grep -E "^user_slug_at_${_hash}:" "$CONFIG_FILE" 2>/dev/null | tail -1 | awk '{print $2}' | tr -d '[:space:]' || true)
@@ -245,7 +245,7 @@ resolve_user_slug() {
     _slug="anonymous-$(sha8_of "$(hostname 2>/dev/null || echo unknown)")"
   fi
 
-  # Persist via direct file write (avoid recursion into gstack-config set)
+  # Persist via direct file write (avoid recursion into kstack-config set)
   mkdir -p "$STATE_DIR"
   if [ ! -f "$CONFIG_FILE" ]; then
     printf '%s' "$CONFIG_HEADER" > "$CONFIG_FILE"
@@ -259,7 +259,7 @@ resolve_user_slug() {
 
 case "${1:-}" in
   get)
-    KEY="${2:?Usage: gstack-config get <key>}"
+    KEY="${2:?Usage: kstack-config get <key>}"
     # Validate key (alphanumeric + underscore + optional @<hash> suffix for
     # endpoint-namespaced keys introduced by the brain-aware planning layer)
     if ! printf '%s' "$KEY" | grep -qE '^[a-zA-Z0-9_]+(@[a-f0-9]+)?$'; then
@@ -274,8 +274,8 @@ case "${1:-}" in
     printf '%s' "$VALUE"
     ;;
   set)
-    KEY="${2:?Usage: gstack-config set <key> <value>}"
-    VALUE="${3:?Usage: gstack-config set <key> <value>}"
+    KEY="${2:?Usage: kstack-config set <key> <value>}"
+    VALUE="${3:?Usage: kstack-config set <key> <value>}"
     # Validate key (alphanumeric + underscore + optional @<hash> suffix)
     if ! printf '%s' "$KEY" | grep -qE '^[a-zA-Z0-9_]+(@[a-f0-9]+)?$'; then
       echo "Error: key must contain only alphanumeric characters, underscores, and an optional @<hex-hash> suffix" >&2
@@ -334,7 +334,7 @@ case "${1:-}" in
     fi
     # Auto-relink skills when prefix setting changes (skip during setup to avoid recursive call)
     if [ "$KEY" = "skill_prefix" ] && [ -z "${KSTACK_SETUP_RUNNING:-}" ]; then
-      KSTACK_RELINK="$(dirname "$0")/gstack-relink"
+      KSTACK_RELINK="$(dirname "$0")/kstack-relink"
       [ -x "$KSTACK_RELINK" ] && "$KSTACK_RELINK" || true
     fi
     ;;
@@ -359,7 +359,7 @@ case "${1:-}" in
     done
     ;;
   defaults)
-    echo "# gstack-config defaults"
+    echo "# kstack-config defaults"
     for KEY in proactive routing_declined telemetry auto_upgrade update_check \
                skill_prefix checkpoint_mode checkpoint_push explain_level \
                codex_reviews kstack_contributor skip_eng_review workspace_root \
@@ -385,11 +385,11 @@ case "${1:-}" in
     # Run this after installing or uninstalling gbrain so your locally
     # generated SKILL.md files match your installation state.
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-    DETECT_BIN="$SCRIPT_DIR/gstack-gbrain-detect"
+    DETECT_BIN="$SCRIPT_DIR/kstack-gbrain-detect"
     DETECTION_FILE="$STATE_DIR/gbrain-detection.json"
     mkdir -p "$STATE_DIR"
     if [ ! -x "$DETECT_BIN" ]; then
-      echo "gstack-gbrain-detect not found at $DETECT_BIN" >&2
+      echo "kstack-gbrain-detect not found at $DETECT_BIN" >&2
       exit 1
     fi
     if ! "$DETECT_BIN" > "$DETECTION_FILE.tmp" 2>/dev/null; then
@@ -413,7 +413,7 @@ case "${1:-}" in
     case "$STATUS" in
       ok|timeout)
         # "timeout" = slow-but-healthy engine (#1964) — same treatment as
-        # "ok", matching gstack-gbrain-detect --is-ok and gen-skill-docs.
+        # "ok", matching kstack-gbrain-detect --is-ok and gen-skill-docs.
         echo "Detected gbrain v$VERSION (local-status: $STATUS)."
         # Render brain-aware blocks INTO the global install so EVERY project's
         # Claude sessions get them (other projects read SKILL.md + sections from
@@ -429,23 +429,23 @@ case "${1:-}" in
         elif [ ! -f "$INSTALL_DIR/VERSION" ] || [ ! -f "$INSTALL_DIR/package.json" ]; then
           echo "Skip: $INSTALL_DIR doesn't look like a kstack clone (missing VERSION/package.json) — refusing to modify it."
         elif ! command -v bun >/dev/null 2>&1; then
-          echo "Skip: bun not on PATH — can't render. Install bun, then re-run 'gstack-config gbrain-refresh'."
+          echo "Skip: bun not on PATH — can't render. Install bun, then re-run 'kstack-config gbrain-refresh'."
         elif ( cd "$INSTALL_DIR" && bun run gen:skill-docs:user --host claude >/dev/null 2>&1 ); then
           echo "Rendered brain-aware blocks into $INSTALL_DIR — now live across all your projects' Claude sessions."
           echo "Note: this dirties the install's git tree (generated blocks differ from main, by design)."
-          echo "      A 'git reset --hard origin/main' there reverts them; re-run 'gstack-config gbrain-refresh' to restore."
+          echo "      A 'git reset --hard origin/main' there reverts them; re-run 'kstack-config gbrain-refresh' to restore."
         else
           echo "Warning: render failed. Run 'cd $INSTALL_DIR && bun run gen:skill-docs:user --host claude' manually to see the error."
         fi
         ;;
       *)
         echo "gbrain not detected (local-status: $STATUS) → brain-aware blocks will be suppressed in planning-skill SKILL.md files."
-        echo "Install gbrain (see /setup-gbrain) and re-run 'gstack-config gbrain-refresh' once it's configured."
+        echo "Install gbrain (see /setup-gbrain) and re-run 'kstack-config gbrain-refresh' once it's configured."
         ;;
     esac
     ;;
   *)
-    echo "Usage: gstack-config {get|set|list|defaults|endpoint-hash|resolve-user-slug|gbrain-refresh} [key] [value]"
+    echo "Usage: kstack-config {get|set|list|defaults|endpoint-hash|resolve-user-slug|gbrain-refresh} [key] [value]"
     exit 1
     ;;
 esac

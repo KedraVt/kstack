@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# gstack-repo-mode — detect solo vs collaborative repo mode
-# Usage: source <(gstack-repo-mode)  → sets REPO_MODE variable
-# Or:    gstack-repo-mode           → prints REPO_MODE=... line
+# kstack-repo-mode — detect solo vs collaborative repo mode
+# Usage: source <(kstack-repo-mode)  → sets REPO_MODE variable
+# Or:    kstack-repo-mode           → prints REPO_MODE=... line
 #
 # Detection heuristic (90-day window):
 #   Solo:          top author >= 80% of commits
 #   Collaborative: top author < 80%
 #
-# Override: gstack-config set repo_mode solo|collaborative
+# Override: kstack-config set repo_mode solo|collaborative
 # Cache:    ~/.kstack/projects/$SLUG/repo-mode.json (7-day TTL)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# Compute SLUG directly (avoid eval of gstack-slug — branch names can contain shell metacharacters)
+# Compute SLUG directly (avoid eval of kstack-slug — branch names can contain shell metacharacters)
 REMOTE_URL=$(git remote get-url origin 2>/dev/null || true)
 if [ -z "$REMOTE_URL" ]; then
   echo "REPO_MODE=unknown"
@@ -27,7 +27,7 @@ validate_mode() {
 }
 
 # Config override takes precedence
-OVERRIDE=$("$SCRIPT_DIR/gstack-config" get repo_mode 2>/dev/null || true)
+OVERRIDE=$("$SCRIPT_DIR/kstack-config" get repo_mode 2>/dev/null || true)
 if [ -n "$OVERRIDE" ] && [ "$OVERRIDE" != "null" ]; then
   echo "REPO_MODE=$(validate_mode "$OVERRIDE")"
   exit 0

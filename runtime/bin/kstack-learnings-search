@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# gstack-learnings-search — read and filter project learnings
-# Usage: gstack-learnings-search [--type TYPE] [--query KEYWORD] [--limit N] [--cross-project]
+# kstack-learnings-search — read and filter project learnings
+# Usage: kstack-learnings-search [--type TYPE] [--query KEYWORD] [--limit N] [--cross-project]
 #
 # Reads ~/.kstack/projects/$SLUG/learnings.jsonl, applies confidence decay,
 # resolves duplicates (latest winner per key+type), and outputs formatted text.
 # Exit 0 silently if no learnings file exists.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-eval "$("$SCRIPT_DIR/gstack-slug" 2>/dev/null)"
+eval "$("$SCRIPT_DIR/kstack-slug" 2>/dev/null)"
 KSTACK_HOME="${KSTACK_HOME:-$HOME/.kstack}"
 
 TYPE=""

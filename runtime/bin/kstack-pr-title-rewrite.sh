@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rewrite a PR/MR title to start with v<NEW_VERSION>.
 #
-# Usage:  bin/gstack-pr-title-rewrite.sh <NEW_VERSION> <CURRENT_TITLE>
+# Usage:  bin/kstack-pr-title-rewrite.sh <NEW_VERSION> <CURRENT_TITLE>
 # Output: corrected title on stdout.
 #
 # Rule: PR titles MUST start with v<NEW_VERSION>. Three cases:

@@ -1,4 +1,4 @@
-## Working rules — gstack-devin port
+## Working rules — kstack-devin port
 
 - **No building without explicit consent.** We are still in the design phase:
   discuss, plan, and detail first. Do not scaffold or write implementation code
@@ -11,8 +11,8 @@
   `## DoD gate` section + `<!-- provenance -->` comment. The old layers
   (`skills/{kstack,kedra,sprint-beta}`, `skills-distilled`, `source/`) are
   deleted; `main` stays the stable baseline, work happens on `kstack`.
-- **Telemetry convention**: only session-level `gstack-*`/`plan-*` skills emit
-  `skill_run` markers via `runtime/bin/gstack-telemetry-log`. kedra ports,
+- **Telemetry convention**: only session-level `kstack-*`/`plan-*` skills emit
+  `skill_run` markers via `runtime/bin/kstack-telemetry-log`. kedra ports,
   vendored skills, and pure-methodology skills emit nothing — markers belong
   to orchestrated runs, not reference material.
 - **Headless rule**: skills that may run inside spawned subagents

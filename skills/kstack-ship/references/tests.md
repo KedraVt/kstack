@@ -336,12 +336,12 @@ If multiple suites need to run, run them sequentially (each needs a test lane). 
 A plain backgrounded eval lives in the harness's process group and dies to a
 SIGTERM ("polite quit") on a turn boundary, a stopped monitor, or an interruption
 (observed mid-`/ship`: `script terminated by signal SIGTERM`). Run it through
-`~/.claude/skills/kstack/bin/gstack-detach` instead — it survives in its own
+`~/.claude/skills/kstack/bin/kstack-detach` instead — it survives in its own
 session, serializes against other worktrees via a machine lock (no API
-saturation), and writes a guaranteed `### gstack-detach EXIT=<code> ###` sentinel:
+saturation), and writes a guaranteed `### kstack-detach EXIT=<code> ###` sentinel:
 
 ```bash
-~/.claude/skills/kstack/bin/gstack-detach --label ship-evals --lock gstack-evals --timeout 5400 -- <project eval command>
+~/.claude/skills/kstack/bin/kstack-detach --label ship-evals --lock kstack-evals --timeout 5400 -- <project eval command>
 ```
 
 Then poll the printed log path; break on the `EXIT=` sentinel (covers both pass

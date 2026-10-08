@@ -11,12 +11,12 @@
 Search for relevant learnings from previous sessions:
 
 ```bash
-_CROSS_PROJ=$(~/.claude/skills/kstack/bin/gstack-config get cross_project_learnings 2>/dev/null || echo "unset")
+_CROSS_PROJ=$(~/.claude/skills/kstack/bin/kstack-config get cross_project_learnings 2>/dev/null || echo "unset")
 echo "CROSS_PROJECT: $_CROSS_PROJ"
 if [ "$_CROSS_PROJ" = "true" ]; then
-  ~/.claude/skills/kstack/bin/gstack-learnings-search --limit 10 --cross-project 2>/dev/null || true
+  ~/.claude/skills/kstack/bin/kstack-learnings-search --limit 10 --cross-project 2>/dev/null || true
 else
-  ~/.claude/skills/kstack/bin/gstack-learnings-search --limit 10 2>/dev/null || true
+  ~/.claude/skills/kstack/bin/kstack-learnings-search --limit 10 2>/dev/null || true
 fi
 ```
 
@@ -31,8 +31,8 @@ Options:
 - A) Enable cross-project learnings (recommended)
 - B) Keep learnings project-scoped only
 
-If A: run `~/.claude/skills/kstack/bin/gstack-config set cross_project_learnings true`
-If B: run `~/.claude/skills/kstack/bin/gstack-config set cross_project_learnings false`
+If A: run `~/.claude/skills/kstack/bin/kstack-config set cross_project_learnings true`
+If B: run `~/.claude/skills/kstack/bin/kstack-config set cross_project_learnings false`
 
 Then re-run the search with the appropriate flag.
 
@@ -284,7 +284,7 @@ The plan should be complete enough that when implementation begins, every test i
 After producing the coverage diagram, write a test plan artifact to the project directory so `/qa` and `/qa-only` can consume it as primary test input:
 
 ```bash
-eval "$(~/.claude/skills/kstack/bin/gstack-slug 2>/dev/null)" && mkdir -p ~/.kstack/projects/$SLUG
+eval "$(~/.claude/skills/kstack/bin/kstack-slug 2>/dev/null)" && mkdir -p ~/.kstack/projects/$SLUG
 USER=$(whoami)
 DATETIME=$(date +%Y%m%d-%H%M%S)
 ```
@@ -335,15 +335,15 @@ After all review sections are complete, run an independent second opinion from a
 different AI system automatically — it is a standard part of plan review, not an
 opt-in. Two models agreeing on a plan is stronger signal than one model's thorough
 review. The user turns this off only by asking explicitly
-(`gstack-config set codex_reviews disabled`).
+(`kstack-config set codex_reviews disabled`).
 
 **Preflight — decide whether and how the outside voice runs:**
 
 ```bash
 # Codex preflight: one block (functions sourced here don't persist to later blocks).
-_TEL=$(~/.claude/skills/kstack/bin/gstack-config get telemetry 2>/dev/null || echo off)
-_CODEX_CFG=$(~/.claude/skills/kstack/bin/gstack-config get codex_reviews 2>/dev/null || echo enabled)
-source ~/.claude/skills/kstack/bin/gstack-codex-probe 2>/dev/null || true
+_TEL=$(~/.claude/skills/kstack/bin/kstack-config get telemetry 2>/dev/null || echo off)
+_CODEX_CFG=$(~/.claude/skills/kstack/bin/kstack-config get codex_reviews 2>/dev/null || echo enabled)
+source ~/.claude/skills/kstack/bin/kstack-codex-probe 2>/dev/null || true
 if [ "$_CODEX_CFG" = "disabled" ]; then
   _CODEX_MODE="disabled"
 elif ! command -v codex >/dev/null 2>&1; then
@@ -357,13 +357,13 @@ echo "CODEX_MODE: $_CODEX_MODE"
 ```
 
 Branch on the echoed `CODEX_MODE`:
-- **`disabled`** — the user turned Codex reviews off (`codex_reviews=disabled`). Skip this section entirely; do NOT fall back to a Claude subagent — disabled means no extra review step. Print: "Codex review skipped (codex_reviews disabled). Re-enable: `gstack-config set codex_reviews enabled`."
+- **`disabled`** — the user turned Codex reviews off (`codex_reviews=disabled`). Skip this section entirely; do NOT fall back to a Claude subagent — disabled means no extra review step. Print: "Codex review skipped (codex_reviews disabled). Re-enable: `kstack-config set codex_reviews enabled`."
 - **`not_installed`** — Codex CLI absent. Print: "Codex not installed — using Claude subagent. Install for cross-model coverage: `npm install -g @openai/codex`." Fall back to the Claude subagent path.
 - **`not_authed`** — installed but no credentials. Print: "Codex installed but not authenticated — using Claude subagent. Run `codex login` or set `$CODEX_API_KEY`." Fall back to the Claude subagent path.
 - **`ready`** — run the Codex pass below.
 
 When the mode is `ready`, `not_installed`, or `not_authed`, print one line so the off-switch
-stays discoverable: "Running the outside voice automatically (standard step). Disable: `gstack-config set codex_reviews disabled`."
+stays discoverable: "Running the outside voice automatically (standard step). Disable: `kstack-config set codex_reviews disabled`."
 
 **Construct the plan review prompt** (for `ready`, `not_installed`, and `not_authed` — skip only on `disabled`).
 Read the plan file being reviewed (the file the user pointed this review at, or the branch
@@ -465,7 +465,7 @@ If no tension points exist, note: "No cross-model tension — both reviewers agr
 
 **Persist the result:**
 ```bash
-~/.claude/skills/kstack/bin/gstack-review-log '{"skill":"codex-plan-review","timestamp":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","status":"STATUS","source":"SOURCE","commit":"'"$(git rev-parse --short HEAD)"'"}'
+~/.claude/skills/kstack/bin/kstack-review-log '{"skill":"codex-plan-review","timestamp":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","status":"STATUS","source":"SOURCE","commit":"'"$(git rev-parse --short HEAD)"'"}'
 ```
 
 Substitute: STATUS = "clean" if no findings, "issues_found" if findings exist.
@@ -589,7 +589,7 @@ Rules:
 backslashes serialize cleanly — never use hand-rolled `echo` / `printf`.
 
 ```bash
-eval "$(~/.claude/skills/kstack/bin/gstack-slug 2>/dev/null)"
+eval "$(~/.claude/skills/kstack/bin/kstack-slug 2>/dev/null)"
 TASKS_DIR="${HOME}/.kstack/projects/${SLUG:-unknown}"
 mkdir -p "$TASKS_DIR"
 TASKS_FILE="$TASKS_DIR/tasks-eng-review-$(date +%Y%m%d-%H%M%S).jsonl"
@@ -662,8 +662,8 @@ the same pattern. The review dashboard depends on this data. Skipping this
 command breaks the review readiness dashboard in /ship.
 
 ```bash
-~/.claude/skills/kstack/bin/gstack-review-log '{"skill":"plan-eng-review","timestamp":"TIMESTAMP","status":"STATUS","unresolved":N,"critical_gaps":N,"issues_found":N,"mode":"MODE","commit":"COMMIT"}'
-~/.claude/skills/kstack/bin/gstack-decision-log '{"decision":"Eng review (MODE): ARCH_SUMMARY","rationale":"KEY_DECISION","scope":"branch","source":"skill","confidence":8}' 2>/dev/null || true
+~/.claude/skills/kstack/bin/kstack-review-log '{"skill":"plan-eng-review","timestamp":"TIMESTAMP","status":"STATUS","unresolved":N,"critical_gaps":N,"issues_found":N,"mode":"MODE","commit":"COMMIT"}'
+~/.claude/skills/kstack/bin/kstack-decision-log '{"decision":"Eng review (MODE): ARCH_SUMMARY","rationale":"KEY_DECISION","scope":"branch","source":"skill","confidence":8}' 2>/dev/null || true
 ```
 
 The second command records the architecture verdict as a durable cross-session decision (so a future session inherits the chosen approach and what was hardened, not just the count). Same `~/.kstack/` write pattern as review-log, non-interactive, best-effort (`|| true`). Substitute `ARCH_SUMMARY` (e.g. "N findings, all folded" or "M unresolved") and `KEY_DECISION` (the load-bearing architecture call from the report, one line — omit if the review found nothing durable).
@@ -682,7 +682,7 @@ Substitute values from the Completion Summary:
 After completing the review, read the review log and config to display the dashboard.
 
 ```bash
-~/.claude/skills/kstack/bin/gstack-review-read
+~/.claude/skills/kstack/bin/kstack-review-read
 ```
 
 Parse the output. Find the most recent entry for each skill (plan-ceo-review, plan-eng-review, review, plan-design-review, design-review-lite, adversarial-review, codex-review, codex-plan-review). Ignore entries with timestamps older than 7 days. For the Eng Review row, show whichever is more recent between `review` (diff-scoped pre-landing review) and `plan-eng-review` (plan-stage architecture review). Append "(DIFF)" or "(PLAN)" to the status to distinguish. For the Adversarial row, show whichever is more recent between `adversarial-review` (new auto-scaled) and `codex-review` (legacy). For Design Review, show whichever is more recent between `plan-design-review` (full visual audit) and `design-review-lite` (code-level check). Append "(FULL)" or "(LITE)" to the status to distinguish. For the Outside Voice row, show the most recent `codex-plan-review` entry — this captures outside voices from both /plan-ceo-review and /plan-eng-review.
@@ -710,7 +710,7 @@ Display:
 ```
 
 **Review tiers:**
-- **Eng Review (required by default):** The only review that gates shipping. Covers architecture, code quality, tests, performance. Can be disabled globally with \`gstack-config set skip_eng_review true\` (the "don't bother me" setting).
+- **Eng Review (required by default):** The only review that gates shipping. Covers architecture, code quality, tests, performance. Can be disabled globally with \`kstack-config set skip_eng_review true\` (the "don't bother me" setting).
 - **CEO Review (optional):** Use your judgment. Recommend it for big product/business changes, new user-facing features, or scope decisions. Skip for bug fixes, refactors, infra, and cleanup.
 - **Design Review (optional):** Use your judgment. Recommend it for UI/UX changes. Skip for backend-only, infra, or prompt-only changes.
 - **Adversarial Review (automatic):** Always-on for every review. Every diff gets both Claude adversarial subagent and Codex adversarial challenge. Large diffs (200+ lines) additionally get Codex structured review with P1 gate. No configuration needed.
@@ -830,7 +830,7 @@ If you discovered a non-obvious pattern, pitfall, or architectural insight durin
 this session, log it for future sessions:
 
 ```bash
-~/.claude/skills/kstack/bin/gstack-learnings-log '{"skill":"plan-eng-review","type":"TYPE","key":"SHORT_KEY","insight":"DESCRIPTION","confidence":N,"source":"SOURCE","files":["path/to/relevant/file"]}'
+~/.claude/skills/kstack/bin/kstack-learnings-log '{"skill":"plan-eng-review","type":"TYPE","key":"SHORT_KEY","insight":"DESCRIPTION","confidence":N,"source":"SOURCE","files":["path/to/relevant/file"]}'
 ```
 
 **Types:** `pattern` (reusable approach), `pitfall` (what NOT to do), `preference`
@@ -859,7 +859,7 @@ TTHW target, architectural bet, wedge commitment), it MAY write a
 
 **Gated on two things:**
 1. Brain trust policy for the active endpoint is `personal` (check via
-   `~/.claude/skills/kstack/bin/gstack-config get brain_trust_policy@<endpoint-hash>`).
+   `~/.claude/skills/kstack/bin/kstack-config get brain_trust_policy@<endpoint-hash>`).
    Shared brains skip write-back to avoid polluting team calibration.
 2. Feature flag `BRAIN_CALIBRATION_WRITEBACK` is set (today: false; flips
    to true when upstream gbrain v0.42+ ships `takes_add` MCP op).
@@ -884,7 +884,7 @@ After write, invalidate the affected digests so the next preflight reflects
 the new state:
 
 ```bash
-eval "$(~/.claude/skills/kstack/bin/gstack-slug 2>/dev/null)" 2>/dev/null || true
+eval "$(~/.claude/skills/kstack/bin/kstack-slug 2>/dev/null)" 2>/dev/null || true
   # (no per-skill invalidation targets configured)
 ```
 
@@ -897,8 +897,8 @@ This is non-blocking — the user doesn't wait. Next invocation benefits
 from the warm cache.
 
 ```bash
-eval "$(~/.claude/skills/kstack/bin/gstack-slug 2>/dev/null)" 2>/dev/null || true
-(~/.claude/skills/kstack/bin/gstack-brain-cache refresh --project "$SLUG" 2>/dev/null &) || true
+eval "$(~/.claude/skills/kstack/bin/kstack-slug 2>/dev/null)" 2>/dev/null || true
+(~/.claude/skills/kstack/bin/kstack-brain-cache refresh --project "$SLUG" 2>/dev/null &) || true
 ```
 
 

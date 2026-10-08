@@ -684,7 +684,7 @@ describe("run-report telemetry", () => {
 
   test("writeRunReport persists a JSON report under .kstack/runs after a simulated run", () => {
     resetTelemetry();
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gstack-telemetry-"));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "kstack-telemetry-"));
     try {
       beginRun("investigate");
       recordDelegatedStep({ phaseId: "reproduce", stepIndex: 0, agent: "worker", durationMs: 1000, timeoutClass: "default" });
@@ -1059,7 +1059,7 @@ describe("role-scoped skill injection (STEP 3)", () => {
   });
 
   test("chain steps without an override inherit the phase skills", () => {
-    // The document phase has no per-step override: its steps keep gstack-document-*.
+    // The document phase has no per-step override: its steps keep kstack-document-*.
     const doc = findPhase("develop", "document");
     const plan = buildDeterministicPlan(doc, makeCtx("develop", 7));
     for (const step of plan) {
@@ -1087,7 +1087,7 @@ const HANDOFF_PAYLOAD = "## HANDOFF\nVERIFIED FACTS:\n- cause confirmed @ src/ap
 
 describe("root-cause marker parsing (STEP 4b)", () => {
   test("parses a valid marker inside a HANDOFF with existing files", () => {
-    const tmp = mkdtempSync(path.join(os.tmpdir(), "gstack-skip-"));
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "kstack-skip-"));
     try {
       fs.mkdirSync(path.join(tmp, "src"), { recursive: true });
       writeFileSync(path.join(tmp, "src", "app.ts"), "x");
@@ -1113,7 +1113,7 @@ describe("root-cause marker parsing (STEP 4b)", () => {
   test("marker with NO ## HANDOFF at all is honored (main-phase summary channel)", () => {
     // The reproduce phase's summary never contains a HANDOFF section — the
     // collapse was unreachable when the guard required one.
-    const tmp = mkdtempSync(path.join(os.tmpdir(), "gstack-skip3-"));
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "kstack-skip3-"));
     try {
       fs.mkdirSync(path.join(tmp, "src"), { recursive: true });
       writeFileSync(path.join(tmp, "src", "app.ts"), "x");
@@ -1127,7 +1127,7 @@ describe("root-cause marker parsing (STEP 4b)", () => {
   });
 
   test("nonexistent cited files yield null", () => {
-    const tmp = mkdtempSync(path.join(os.tmpdir(), "gstack-skip2-"));
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "kstack-skip2-"));
     try {
       assert.equal(parseRootCauseMarker(HANDOFF_PAYLOAD, tmp), null);
     } finally {
@@ -1152,7 +1152,7 @@ describe("root-cause marker parsing (STEP 4b)", () => {
 
 describe("conditional collapse (STEP 4c)", () => {
   test("valid reproduce summary collapses the chain to ONE planner step", () => {
-    const tmp = mkdtempSync(path.join(os.tmpdir(), "gstack-collapse-"));
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "kstack-collapse-"));
     try {
       fs.mkdirSync(path.join(tmp, "src"), { recursive: true });
       writeFileSync(path.join(tmp, "src", "app.ts"), "x");
@@ -1391,7 +1391,7 @@ describe("runSubagent real spawn path (crash regression)", () => {
       async () => {
         const cliPath = resolveCliPath();
         assert.ok(cliPath, "pi CLI not found in expected npm global locations");
-        const tmpCwd = mkdtempSync(path.join(os.tmpdir(), "gstack-e2e-"));
+        const tmpCwd = mkdtempSync(path.join(os.tmpdir(), "kstack-e2e-"));
         const result = await runSubagent({
           agent: "regression-agent",
           agentDef: MINIMAL_AGENT,

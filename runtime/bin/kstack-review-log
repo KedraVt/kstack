@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# gstack-review-log — atomically log a review result
-# Usage: gstack-review-log '{"skill":"...","timestamp":"...","status":"..."}'
+# kstack-review-log — atomically log a review result
+# Usage: kstack-review-log '{"skill":"...","timestamp":"...","status":"..."}'
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-eval "$("$SCRIPT_DIR/gstack-slug" 2>/dev/null)"
+eval "$("$SCRIPT_DIR/kstack-slug" 2>/dev/null)"
 KSTACK_HOME="${KSTACK_HOME:-$HOME/.kstack}"
 mkdir -p "$KSTACK_HOME/projects/$SLUG"
 
@@ -11,11 +11,11 @@ mkdir -p "$KSTACK_HOME/projects/$SLUG"
 INPUT="$1"
 if ! printf '%s' "$INPUT" | bun -e "JSON.parse(await Bun.stdin.text())" 2>/dev/null; then
   # Not valid JSON — refuse to append
-  echo "gstack-review-log: invalid JSON, skipping" >&2
+  echo "kstack-review-log: invalid JSON, skipping" >&2
   exit 1
 fi
 
 echo "$INPUT" >> "$KSTACK_HOME/projects/$SLUG/$BRANCH-reviews.jsonl"
 
 # gbrain-sync: enqueue for cross-machine sync (no-op if sync is off).
-"$SCRIPT_DIR/gstack-brain-enqueue" "projects/$SLUG/$BRANCH-reviews.jsonl" 2>/dev/null &
+"$SCRIPT_DIR/kstack-brain-enqueue" "projects/$SLUG/$BRANCH-reviews.jsonl" 2>/dev/null &
