@@ -18,14 +18,14 @@ running, prove it, commit it, return to QA.
 ls jest.config.* vitest.config.* playwright.config.* .rspec pytest.ini phpunit.xml 2>/dev/null
 ls -d test/ tests/ spec/ __tests__/ cypress/ e2e/ 2>/dev/null
 # Opt-out marker
-[ -f .gstack/no-test-bootstrap ] && echo "BOOTSTRAP_DECLINED"
+[ -f .kstack/no-test-bootstrap ] && echo "BOOTSTRAP_DECLINED"
 ```
 
 - Framework detected → read 2–3 existing test files to learn conventions
   (naming, imports, assertion style). Skip the rest.
 - `BOOTSTRAP_DECLINED` → skip, continue without tests.
 - No runtime detected → `ask_user_question` which runtime, or "no tests needed"
-  → write `.gstack/no-test-bootstrap` and continue.
+  → write `.kstack/no-test-bootstrap` and continue.
 
 ## 2. Propose (via `ask_user_question`)
 
@@ -41,7 +41,7 @@ ls -d test/ tests/ spec/ __tests__/ cypress/ e2e/ 2>/dev/null
 | Elixir | ExUnit + ex_machina | — |
 
 A) Primary (recommend, with rationale) B) Alternative C) Skip → write
-`.gstack/no-test-bootstrap`. Monorepo → ask which runtime first.
+`.kstack/no-test-bootstrap`. Monorepo → ask which runtime first.
 
 ## 3. Install & verify
 

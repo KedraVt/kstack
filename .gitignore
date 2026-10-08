@@ -8,6 +8,7 @@ node_modules/
 
 bun.lock
 .gstack/
+.kstack/
 # runtime/ binaries are provisioned by update.sh / auto-download — never commit them
 runtime/
 

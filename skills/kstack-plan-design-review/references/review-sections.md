@@ -254,7 +254,7 @@ backslashes serialize cleanly — never use hand-rolled `echo` / `printf`.
 
 ```bash
 eval "$(~/.claude/skills/kstack/bin/gstack-slug 2>/dev/null)"
-TASKS_DIR="${HOME}/.gstack/projects/${SLUG:-unknown}"
+TASKS_DIR="${HOME}/.kstack/projects/${SLUG:-unknown}"
 mkdir -p "$TASKS_DIR"
 TASKS_FILE="$TASKS_DIR/tasks-design-review-$(date +%Y%m%d-%H%M%S).jsonl"
 COMMIT=$(git rev-parse HEAD 2>/dev/null || echo unknown)
@@ -331,7 +331,7 @@ If visual mockups were generated during this review, add to the plan file:
 
 | Screen/Section | Mockup Path | Direction | Notes |
 |----------------|-------------|-----------|-------|
-| [screen name]  | ~/.gstack/projects/$SLUG/designs/[folder]/[filename].png | [brief description] | [constraints from review] |
+| [screen name]  | ~/.kstack/projects/$SLUG/designs/[folder]/[filename].png | [brief description] | [constraints from review] |
 ```
 
 Include the full path to each approved mockup (the variant the user chose), a one-line description of the direction, and any constraints. The implementer reads this to know exactly which visual to build from. These persist across conversations and workspaces. If no mockups were generated, omit this section.
@@ -341,8 +341,8 @@ Include the full path to each approved mockup (the variant the user chose), a on
 After producing the Completion Summary above, persist the review result.
 
 **PLAN MODE EXCEPTION — ALWAYS RUN:** This command writes review metadata to
-`~/.gstack/` (user config directory, not project files). The skill preamble
-already writes to `~/.gstack/sessions/` and `~/.gstack/analytics/` — this is
+`~/.kstack/` (user config directory, not project files). The skill preamble
+already writes to `~/.kstack/sessions/` and `~/.kstack/analytics/` — this is
 the same pattern. The review dashboard depends on this data. Skipping this
 command breaks the review readiness dashboard in /ship.
 

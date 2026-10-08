@@ -1,7 +1,7 @@
 /**
  * Structured run-report telemetry (STEP 0 of the efficiency plan).
  *
- * At workflow end we persist `.gstack/runs/<ISO-timestamp>-<workflowId>.json`
+ * At workflow end we persist `.kstack/runs/<ISO-timestamp>-<workflowId>.json`
  * with one entry per delegated step: durations, tool calls, turns and token
  * usage. All data already exists on SpawnResult — this module only accumulates
  * and persists it so baseline runs can be compared against post-fix runs
@@ -119,14 +119,14 @@ export function runReportFileName(startedAt: string, workflowId: string): string
 }
 
 /**
- * Persist the accumulated report under <cwd>/.gstack/runs/. Never throws:
+ * Persist the accumulated report under <cwd>/.kstack/runs/. Never throws:
  * returns the written path on success, null on any failure.
  */
 export function writeRunReport(cwd: string, workflowId: string): string | null {
   try {
     if (!current || current.workflowId !== workflowId) return null;
     const report = buildRunReport(workflowId);
-    const dir = path.join(cwd, ".gstack", "runs");
+    const dir = path.join(cwd, ".kstack", "runs");
     fs.mkdirSync(dir, { recursive: true });
     const filePath = path.join(dir, runReportFileName(report.startedAt, workflowId));
     fs.writeFileSync(filePath, JSON.stringify(report, null, 2), "utf-8");

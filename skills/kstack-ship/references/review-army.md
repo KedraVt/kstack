@@ -58,7 +58,7 @@ The verification is "I read the source that creates this symbol", not "I
 grep'd for the name and didn't find it." Deeper framework-aware verification
 (model introspection, migration-history-aware checks, ORM dialect detection)
 is deliberately out of scope for the lighter gate — see the deferred
-`~/.gstack-dev/plans/1539-framework-aware-review.md` design doc.
+`~/.kstack-dev/plans/1539-framework-aware-review.md` design doc.
 
 The FP classes the gate kills (measured against Django Sprint 2.5 #1539):
 

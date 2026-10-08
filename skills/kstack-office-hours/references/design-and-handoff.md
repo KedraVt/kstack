@@ -5,7 +5,7 @@
 Write the design document to the project directory.
 
 ```bash
-eval "$(~/.claude/skills/kstack/bin/gstack-slug 2>/dev/null)" && mkdir -p ~/.gstack/projects/$SLUG
+eval "$(~/.claude/skills/kstack/bin/gstack-slug 2>/dev/null)" && mkdir -p ~/.kstack/projects/$SLUG
 USER=$(whoami)
 DATETIME=$(date +%Y%m%d-%H%M%S)
 ```
@@ -13,11 +13,11 @@ DATETIME=$(date +%Y%m%d-%H%M%S)
 **Design lineage:** Before writing, check for existing design docs on this branch:
 ```bash
 setopt +o nomatch 2>/dev/null || true  # zsh compat
-PRIOR=$(ls -t ~/.gstack/projects/$SLUG/*-$BRANCH-design-*.md 2>/dev/null | head -1)
+PRIOR=$(ls -t ~/.kstack/projects/$SLUG/*-$BRANCH-design-*.md 2>/dev/null | head -1)
 ```
 If `$PRIOR` exists, the new doc gets a `Supersedes:` field referencing it. This creates a revision chain — you can trace how a design evolved across office hours sessions.
 
-Write to `~/.gstack/projects/{slug}/{user}-{branch}-design-{datetime}.md`.
+Write to `~/.kstack/projects/{slug}/{user}-{branch}-design-{datetime}.md`.
 
 After writing the design doc, tell the user:
 **"Design doc saved to: {full path}. Other skills (/plan-ceo-review, /plan-eng-review) will find it automatically."**
@@ -197,8 +197,8 @@ After the loop completes (PASS, max iterations, or convergence guard):
 
 3. Append metrics:
 ```bash
-mkdir -p ~/.gstack/analytics
-echo '{"skill":"office-hours","ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","iterations":ITERATIONS,"issues_found":FOUND,"issues_fixed":FIXED,"remaining":REMAINING,"quality_score":SCORE}' >> ~/.gstack/analytics/spec-review.jsonl 2>/dev/null || true
+mkdir -p ~/.kstack/analytics
+echo '{"skill":"office-hours","ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","iterations":ITERATIONS,"issues_found":FOUND,"issues_fixed":FIXED,"remaining":REMAINING,"quality_score":SCORE}' >> ~/.kstack/analytics/spec-review.jsonl 2>/dev/null || true
 ```
 Replace ITERATIONS, FOUND, FIXED, REMAINING, SCORE with actual values from the review.
 
@@ -399,7 +399,7 @@ Design trajectory with interpretation:
 "You started this as a side project. But you've named specific users, pushed back when challenged, and your designs keep getting sharper each time. I don't think this is a side project anymore. Have you thought about whether this could be a company?"
 This must feel earned, not broadcast. If the evidence doesn't support it, skip entirely.
 
-**Builder Journey Summary** (session 5+): Auto-generate `~/.gstack/builder-journey.md`
+**Builder Journey Summary** (session 5+): Auto-generate `~/.kstack/builder-journey.md`
 with a narrative arc (not a data table). The arc tells the STORY of their journey in
 second person, referencing specific things they said across sessions. Then open it:
 ```bash
@@ -419,7 +419,7 @@ The data speaks. No pitch needed.
 
 Full accumulated signal summary from the profile.
 
-Auto-generate updated `~/.gstack/builder-journey.md` with narrative arc. Open it.
+Auto-generate updated `~/.kstack/builder-journey.md` with narrative arc. Open it.
 
 Then proceed to Founder Resources below.
 
@@ -512,8 +512,8 @@ eval "$(~/.claude/skills/kstack/bin/gstack-slug 2>/dev/null || true)"
 
 2. Log the selection to analytics:
 ```bash
-mkdir -p ~/.gstack/analytics
-echo '{"skill":"office-hours","event":"resources_shown","count":NUM_RESOURCES,"categories":"CAT1,CAT2","ts":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"}' >> ~/.gstack/analytics/skill-usage.jsonl 2>/dev/null || true
+mkdir -p ~/.kstack/analytics
+echo '{"skill":"office-hours","event":"resources_shown","count":NUM_RESOURCES,"categories":"CAT1,CAT2","ts":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"}' >> ~/.kstack/analytics/skill-usage.jsonl 2>/dev/null || true
 ```
 
 3. Use AskUserQuestion to offer opening the resources:
@@ -580,5 +580,5 @@ On D, log declined and stop:
 ~/.claude/skills/kstack/bin/gstack-telemetry-log --event-type handoff --skill office-hours --outcome declined --session-id "$_SESSION_ID" 2>/dev/null || true
 ```
 
-The design doc at `~/.gstack/projects/` is automatically discoverable by downstream skills — they will read it during their pre-review system audit.
+The design doc at `~/.kstack/projects/` is automatically discoverable by downstream skills — they will read it during their pre-review system audit.
 

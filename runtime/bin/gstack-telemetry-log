@@ -11,7 +11,7 @@
 #     --used-browse true --session-id "12345-1710756600"
 #
 # Env overrides (for testing):
-#   KSTACK_STATE_DIR  — override ~/.gstack state directory
+#   KSTACK_STATE_DIR  — override ~/.kstack state directory
 #   KSTACK_DIR        — override auto-detected kstack root
 #
 # NOTE: Uses set -uo pipefail (no -e) — telemetry must never exit non-zero
@@ -24,7 +24,7 @@ SCRIPT_DIR="$KSTACK_DIR/bin"
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) command -v cygpath >/dev/null 2>&1 && SCRIPT_DIR="$(cygpath -m "$SCRIPT_DIR")" ;;
 esac
-STATE_DIR="${KSTACK_STATE_DIR:-$HOME/.gstack}"
+STATE_DIR="${KSTACK_STATE_DIR:-$HOME/.kstack}"
 ANALYTICS_DIR="$STATE_DIR/analytics"
 JSONL_FILE="$ANALYTICS_DIR/skill-usage.jsonl"
 PENDING_DIR="$ANALYTICS_DIR"  # .pending-* files live here
@@ -137,7 +137,7 @@ fi
 # can't be guessed or correlated by someone who knows your machine identity.
 INSTALL_ID=""
 if [ "$TIER" = "community" ]; then
-  ID_FILE="$HOME/.gstack/installation-id"
+  ID_FILE="$HOME/.kstack/installation-id"
   if [ -f "$ID_FILE" ]; then
     INSTALL_ID="$(cat "$ID_FILE" 2>/dev/null)"
   fi

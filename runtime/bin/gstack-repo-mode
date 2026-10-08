@@ -8,7 +8,7 @@
 #   Collaborative: top author < 80%
 #
 # Override: gstack-config set repo_mode solo|collaborative
-# Cache:    ~/.gstack/projects/$SLUG/repo-mode.json (7-day TTL)
+# Cache:    ~/.kstack/projects/$SLUG/repo-mode.json (7-day TTL)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -34,7 +34,7 @@ if [ -n "$OVERRIDE" ] && [ "$OVERRIDE" != "null" ]; then
 fi
 
 # Check cache (7-day TTL)
-CACHE_DIR="$HOME/.gstack/projects/$SLUG"
+CACHE_DIR="$HOME/.kstack/projects/$SLUG"
 CACHE_FILE="$CACHE_DIR/repo-mode.json"
 if [ -f "$CACHE_FILE" ]; then
   CACHE_AGE=$(( $(date +%s) - $(stat -f %m "$CACHE_FILE" 2>/dev/null || stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0) ))
@@ -83,7 +83,7 @@ else
   MODE=collaborative
 fi
 
-# Cache result atomically (fail silently if ~/.gstack is unwritable)
+# Cache result atomically (fail silently if ~/.kstack is unwritable)
 mkdir -p "$CACHE_DIR" 2>/dev/null || true
 CACHE_TMP=$(mktemp "$CACHE_DIR/.repo-mode-XXXXXX" 2>/dev/null || true)
 if [ -n "$CACHE_TMP" ]; then

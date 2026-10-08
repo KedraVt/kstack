@@ -2,7 +2,7 @@
  * Sprint-number discovery (plan B6 / E5) + archival layout (D7).
  *
  * The current sprint's artifacts live in the PROJECT ROOT while the sprint
- * runs; on GREEN everything archives to `.gstack/sprints/sprint_XX/`. Sprint
+ * runs; on GREEN everything archives to `.kstack/sprints/sprint_XX/`. Sprint
  * numbers are discovered by scanning root AND the archive: max+1.
  *
  * HIJACK GUARD: more than one plausible "current" number (multiple distinct
@@ -43,9 +43,9 @@ function scanDir(dir: string): Map<number, string[]> {
   return found;
 }
 
-/** All archived sprint dirs under `.gstack/sprints/` (best-effort). */
+/** All archived sprint dirs under `.kstack/sprints/` (best-effort). */
 export function archivedSprintDirs(cwd: string): string[] {
-  const root = path.join(cwd, ".gstack", "sprints");
+  const root = path.join(cwd, ".kstack", "sprints");
   try {
     return fs
       .readdirSync(root, { withFileTypes: true })
@@ -57,7 +57,7 @@ export function archivedSprintDirs(cwd: string): string[] {
 }
 
 /**
- * Compute the next sprint number from root + `.gstack/sprints/*` discovery.
+ * Compute the next sprint number from root + `.kstack/sprints/*` discovery.
  * Empty project ⇒ 01; gaps are fine ((01,03) ⇒ 04). Anomalies never guess:
  * they pause the workflow with a human-readable reason.
  */
@@ -79,7 +79,7 @@ export function computeNextSprintNumber(cwd: string): SprintDiscovery {
   if (collisions.length > 0) {
     return {
       next: NaN,
-      anomaly: `sprint number ${collisions.map(pad2).join(", ")} exists both in project root and .gstack/sprints/ — archive or remove one copy first`,
+      anomaly: `sprint number ${collisions.map(pad2).join(", ")} exists both in project root and .kstack/sprints/ — archive or remove one copy first`,
     };
   }
 
@@ -90,7 +90,7 @@ export function computeNextSprintNumber(cwd: string): SprintDiscovery {
   if (root.size > 1) {
     return {
       next: NaN,
-      anomaly: `project root holds ${root.size} un-archived sprints (${[...root.keys()].map(pad2).join(", ")}) — archive finished sprints to .gstack/sprints/ first`,
+      anomaly: `project root holds ${root.size} un-archived sprints (${[...root.keys()].map(pad2).join(", ")}) — archive finished sprints to .kstack/sprints/ first`,
     };
   }
 
@@ -100,5 +100,5 @@ export function computeNextSprintNumber(cwd: string): SprintDiscovery {
 
 /** D7 archival target for a completed sprint. */
 export function sprintArchiveDir(cwd: string, sprintNumber: number): string {
-  return path.join(cwd, ".gstack", "sprints", `sprint_${pad2(sprintNumber)}`);
+  return path.join(cwd, ".kstack", "sprints", `sprint_${pad2(sprintNumber)}`);
 }

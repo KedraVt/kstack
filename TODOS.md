@@ -115,7 +115,7 @@ changes manually (MIT, pin a version in the digest header).
 - Files: `orchestrator/workflows.ts` (new `simplify` workflow + optional develop phase),
   `orchestrator/router.ts` + menu (intent patterns: /\b(simplify|clean ?up|delete[- ]list|dead code)\b/i),
   `skills-distilled/gstack-simplify.md` (new digest).
-- Design sketched in session of 2026-08-23 (see conversation summary in `.gstack/plans/` if persisted).
+- Design sketched in session of 2026-08-23 (see conversation summary in `.kstack/plans/` if persisted).
 
 ### Skill digest improvements — especially `kstack-office-hours`
 
@@ -234,13 +234,13 @@ consumer: plan-gate rationale persistence and `/kstack retro` (also still open a
     declared order;
   - mechanized `exclusive` guard: a test reading `tools:` from agent frontmatter
     (`~/.pi/agent/agents/*.md`) validating that a wave never mixes conflicting tools
-    (git-write, ports/dev-servers, shared `.gstack`); manual annotation as override only;
+    (git-write, ports/dev-servers, shared `.kstack`); manual annotation as override only;
   - gate handling (`advance:"manual"`) during waves; result merge in `formatDelegationResults`;
     concurrency via `KSTACK_PI_MAX_PARALLEL` (use the `numberEnv` parser in `orchestrator/config.ts`).
 - **Liveness kill activation** — the observe-only liveness (`KSTACK_PI_LIVENESS_SEC`,
   spawn.ts) must NEVER terminate processes until data from at least 2 real runs shows
   false-positive rates are acceptable (gaps > 240s are normal during long builds/tests).
-  Decide on run-report data in `.gstack/runs/`.
+  Decide on run-report data in `.kstack/runs/`.
 - **`{previous}` `$`-safe fix in the subagent extension** — the same unsafe-replacement bug
   class fixed here via `replaceExact` exists at `~/.pi/agent/extensions/subagent/index.ts`
   (~line 536); separate extension, out of scope for this repo.

@@ -23,7 +23,7 @@ const SPRINT = getWorkflow("sprint")!;
 
 function makeCtx(phaseIndex = 0): any {
   return {
-    state: { workflowId: "sprint", phaseIndex, status: "active", goal: "sprint goal", results: {}, version: 2, attempts: {} },
+    state: { workflowId: "sprint", phaseIndex, status: "active", goal: "sprint goal", results: {}, version: 3, attempts: {} },
     git: {
       branch: "feature/test",
       hasUncommittedChanges: true,
@@ -615,9 +615,9 @@ describe("D4 park cause distinction", () => {
 // --- State migration ---------------------------------------------------------------
 
 describe("state migration (v2 fields default on old states)", () => {
-  test("createState stamps version 2 + fresh attempt counters", () => {
+  test("createState stamps version 3 + fresh attempt counters", () => {
     const s = createState("sprint", "goal");
-    assert.equal(s.version, 2);
+    assert.equal(s.version, 3);
     assert.deepEqual(s.attempts, {});
   });
 
@@ -650,7 +650,7 @@ describe("sprint numbering discovery (E5)", () => {
     const tmp = tmpDir("gstack-num-");
     try {
       writeFileSync(path.join(tmp, "user-story_01.md"), "x");
-      const arch = path.join(tmp, ".gstack", "sprints", "sprint_03");
+      const arch = path.join(tmp, ".kstack", "sprints", "sprint_03");
       fs.mkdirSync(arch, { recursive: true });
       writeFileSync(path.join(arch, "user-story_03.md"), "x");
       assert.deepEqual(computeNextSprintNumber(tmp), { next: 4, anomaly: null });
@@ -662,12 +662,12 @@ describe("sprint numbering discovery (E5)", () => {
   test("archive-only history counts toward the max", () => {
     const tmp = tmpDir("gstack-num-");
     try {
-      const arch = path.join(tmp, ".gstack", "sprints", "sprint_05");
+      const arch = path.join(tmp, ".kstack", "sprints", "sprint_05");
       fs.mkdirSync(arch, { recursive: true });
       writeFileSync(path.join(arch, "user-story_05.md"), "x");
       assert.equal(computeNextSprintNumber(tmp).next, 6);
       assert.deepEqual(archivedSprintDirs(tmp).map((d) => path.basename(d)), ["sprint_05"]);
-      assert.equal(sprintArchiveDir(tmp, 6), path.join(tmp, ".gstack", "sprints", "sprint_06"));
+      assert.equal(sprintArchiveDir(tmp, 6), path.join(tmp, ".kstack", "sprints", "sprint_06"));
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -677,7 +677,7 @@ describe("sprint numbering discovery (E5)", () => {
     const tmp = tmpDir("gstack-num-");
     try {
       writeFileSync(path.join(tmp, "user-story_02.md"), "live?");
-      const arch = path.join(tmp, ".gstack", "sprints", "sprint_02");
+      const arch = path.join(tmp, ".kstack", "sprints", "sprint_02");
       fs.mkdirSync(arch, { recursive: true });
       writeFileSync(path.join(arch, "user-story_02.md"), "archived?");
       const d = computeNextSprintNumber(tmp);
@@ -1199,7 +1199,7 @@ describe("buildResumeContext / activeConstraintLines (Q4)", () => {
 
 describe("input router (Q4): short inputs still re-anchor during an active workflow", () => {
   function fakeRouterCtx(state: any): any {
-    const entries = state ? [{ type: "custom", customType: "gstack-wf-state", data: state }] : [];
+    const entries = state ? [{ type: "custom", customType: "kstack-wf-state", data: state }] : [];
     return { sessionManager: { getEntries: () => entries } };
   }
 

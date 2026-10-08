@@ -15,7 +15,7 @@
 //
 // VERSION path resolution (monorepo support):
 //   1. --version-path <path> CLI flag (highest priority)
-//   2. .gstack/version-path file at the repo root (single-line relative path,
+//   2. .kstack/version-path file at the repo root (single-line relative path,
 //      committed so all collaborators benefit)
 //   3. "VERSION" at the repo root (default, backward-compatible)
 //
@@ -122,12 +122,12 @@ function runCommand(cmd: string, args: string[], timeoutMs = 15000): { ok: boole
   };
 }
 
-// VERSION-path resolution for monorepos. Priority: CLI flag > .gstack/version-path
+// VERSION-path resolution for monorepos. Priority: CLI flag > .kstack/version-path
 // at repo root > "VERSION". Pure function; takes the repo root as an argument so
 // tests can drive it with a fixture dir without mocking git.
 function resolveVersionPath(override: string | undefined, repoRoot: string): string {
   if (override) return override.trim();
-  const configFile = join(repoRoot, ".gstack", "version-path");
+  const configFile = join(repoRoot, ".kstack", "version-path");
   if (existsSync(configFile)) {
     try {
       const firstLine = readFileSync(configFile, "utf8").split("\n")[0]?.trim() ?? "";
@@ -227,7 +227,7 @@ async function fetchGithubClaimed(base: string, versionPath: string, excludePR: 
       ]);
       if (!content.ok) {
         warnings.push(
-          `PR #${pr.number}: could not fetch ${versionPath} (fork, private, or wrong path — try --version-path or .gstack/version-path)`,
+          `PR #${pr.number}: could not fetch ${versionPath} (fork, private, or wrong path — try --version-path or .kstack/version-path)`,
         );
         continue;
       }
@@ -284,7 +284,7 @@ async function fetchGitlabClaimed(base: string, versionPath: string, excludePR: 
     ]);
     if (!content.ok) {
       warnings.push(
-        `MR !${mr.iid}: could not fetch ${versionPath} (wrong path? — try --version-path or .gstack/version-path)`,
+        `MR !${mr.iid}: could not fetch ${versionPath} (wrong path? — try --version-path or .kstack/version-path)`,
       );
       continue;
     }

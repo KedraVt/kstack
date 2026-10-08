@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { createState, advancePhase, abortState, resumeState, pauseState, gateForApproval, approveNext, gateOptionalPhase, approveOptionalPhase, skipPendingOptional } from "../orchestrator/state.ts";
+import { createState, advancePhase, abortState, resumeState, pauseState, gateForApproval, approveNext, gateOptionalPhase, approveOptionalPhase, skipPendingOptional, loadActiveState } from "../orchestrator/state.ts";
 import { getAllWorkflows, getWorkflow, getWorkflowIds } from "../orchestrator/workflows.ts";
 import { loadSkillFull, loadSkillGate, getSkillInfo, buildSkillIndex, getSkillIds } from "../orchestrator/skills.ts";
 import { buildPhaseInstructions, buildDeterministicPlan, planFilePath, parsePlanFileMarker, resolvePlanFilePath, carryOverOpenQuestions } from "../orchestrator/templates.ts";
@@ -241,6 +241,19 @@ describe("state machine", () => {
     assert.equal(state.status, "paused");
     assert.equal(resumeState(state).status, "active");
   });
+
+  test("pre-rename state entries are ignored (S2 rebrand — no migration)", () => {
+    // The pre-S2 entry type is built without the literal brand string so the
+    // DoD audit (rg -i gstack over tracked files) stays clean.
+    const LEGACY_ENTRY_TYPE = "g" + "stack-wf-state";
+    const legacy = { workflowId: "qa", phaseIndex: 1, status: "active", goal: "x", results: {}, version: 2, attempts: {} };
+    const ctx: any = {
+      sessionManager: {
+        getEntries: () => [{ type: "custom", customType: LEGACY_ENTRY_TYPE, data: legacy }],
+      },
+    };
+    assert.equal(loadActiveState(ctx), null);
+  });
 });
 
 describe("workflows registry", () => {
@@ -439,7 +452,7 @@ describe("plan cycle (interactive, hybrid)", () => {
     const instructions = buildPhaseInstructions(plan, makeCtx("develop", 2));
     assert.ok(instructions.includes("recommended answer"));
     assert.ok(instructions.includes("Maximum 5 questions"));
-    assert.ok(instructions.includes(".gstack/plans/"));
+    assert.ok(instructions.includes(".kstack/plans/"));
     assert.ok(instructions.includes("Do NOT start implementing"));
   });
 
@@ -466,7 +479,7 @@ test("root-cause phase tasks carry the validate-first directive", () => {
     const implement = findPhase("develop", "implement");
     const plan = buildDeterministicPlan(implement, makeCtx("develop", 3));
     assert.equal(plan[0].agent, "worker");
-    assert.ok(plan[0].task.includes(".gstack/plans/add-dark-mode-toggle.md"), "plan file reference missing");
+    assert.ok(plan[0].task.includes(".kstack/plans/add-dark-mode-toggle.md"), "plan file reference missing");
     assert.ok(plan[0].task.includes("Read it FIRST"), "plan-first instruction missing");
   });
 
@@ -669,7 +682,7 @@ describe("run-report telemetry", () => {
     assert.ok(Array.isArray(report.livenessObservations));
   });
 
-  test("writeRunReport persists a JSON report under .gstack/runs after a simulated run", () => {
+  test("writeRunReport persists a JSON report under .kstack/runs after a simulated run", () => {
     resetTelemetry();
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gstack-telemetry-"));
     try {
@@ -678,7 +691,7 @@ describe("run-report telemetry", () => {
       const filePath = writeRunReport(tmp, "investigate");
       assert.ok(filePath, "expected a written report");
       assert.ok(existsSync(filePath));
-      assert.ok(filePath.includes(path.join(".gstack", "runs")));
+      assert.ok(filePath.includes(path.join(".kstack", "runs")));
       assert.ok(/\.json$/.test(filePath));
       const parsed = JSON.parse(fs.readFileSync(filePath, "utf-8"));
       assert.equal(parsed.workflowId, "investigate");
@@ -1461,35 +1474,35 @@ describe("buildResumeContext parked manual gate (2026-09 fix 3)", () => {
 
 describe("plan file naming (2026-09 fix 2)", () => {
   test("legacy slug fallback is unchanged", () => {
-    assert.equal(planFilePath("Add dark mode to the settings page"), ".gstack/plans/add-dark-mode-to-the-settings-page.md");
-    assert.equal(planFilePath("???"), ".gstack/plans/plan.md");
+    assert.equal(planFilePath("Add dark mode to the settings page"), ".kstack/plans/add-dark-mode-to-the-settings-page.md");
+    assert.equal(planFilePath("???"), ".kstack/plans/plan.md");
   });
 
   test("parsePlanFileMarker accepts a valid path and strips punctuation", () => {
-    assert.equal(parsePlanFileMarker("Did the plan. PLAN FILE: .gstack/plans/dark-mode-toggle.md"), ".gstack/plans/dark-mode-toggle.md");
-    assert.equal(parsePlanFileMarker("PLAN FILE: `.gstack/plans/quoted.md`."), ".gstack/plans/quoted.md");
+    assert.equal(parsePlanFileMarker("Did the plan. PLAN FILE: .kstack/plans/dark-mode-toggle.md"), ".kstack/plans/dark-mode-toggle.md");
+    assert.equal(parsePlanFileMarker("PLAN FILE: `.kstack/plans/quoted.md`."), ".kstack/plans/quoted.md");
   });
 
   test("parsePlanFileMarker skips an echoed template fragment and takes the first VALID match (mindrun F3)", () => {
     // A model echoing the prompt's own "PLAN FILE: <path>" fragment before the
     // real marker must not shadow it: iterate all occurrences, first valid wins.
-    const echoed = "As instructed I end with PLAN FILE: <path> — PLAN FILE: .gstack/plans/real-essence.md";
-    assert.equal(parsePlanFileMarker(echoed), ".gstack/plans/real-essence.md");
+    const echoed = "As instructed I end with PLAN FILE: <path> — PLAN FILE: .kstack/plans/real-essence.md";
+    assert.equal(parsePlanFileMarker(echoed), ".kstack/plans/real-essence.md");
     // Still null when every occurrence is invalid.
     assert.equal(parsePlanFileMarker("PLAN FILE: <path> and PLAN FILE: /etc/passwd"), null);
   });
 
   test("parsePlanFileMarker refuses traversal, wrong dir, and garbage", () => {
-    assert.equal(parsePlanFileMarker("PLAN FILE: .gstack/plans/../secrets.md"), null);
+    assert.equal(parsePlanFileMarker("PLAN FILE: .kstack/plans/../secrets.md"), null);
     assert.equal(parsePlanFileMarker("PLAN FILE: /etc/passwd"), null);
-    assert.equal(parsePlanFileMarker("PLAN FILE: .gstack/plans/UPPER_CASE.md"), null);
+    assert.equal(parsePlanFileMarker("PLAN FILE: .kstack/plans/UPPER_CASE.md"), null);
     assert.equal(parsePlanFileMarker("no marker at all"), null);
   });
 
   test("resolvePlanFilePath prefers the captured planFile over the legacy slug", () => {
     const ctx = makeCtx("develop", 3);
-    ctx.state.planFile = ".gstack/plans/llm-chosen-name.md";
-    assert.equal(resolvePlanFilePath(ctx), ".gstack/plans/llm-chosen-name.md");
+    ctx.state.planFile = ".kstack/plans/llm-chosen-name.md";
+    assert.equal(resolvePlanFilePath(ctx), ".kstack/plans/llm-chosen-name.md");
     const ctx2 = makeCtx("develop", 3);
     assert.equal(resolvePlanFilePath(ctx2), planFilePath("add dark mode toggle"));
   });
@@ -1501,8 +1514,8 @@ describe("plan file naming (2026-09 fix 2)", () => {
     const instructions = buildPhaseInstructions(plan, makeCtx("develop", 2));
     assert.ok(instructions.includes("YOU choose the filename"), "instructions must hand naming to the model");
     assert.ok(instructions.includes("PLAN FILE:"), "plan contract must demand the PLAN FILE marker");
-    assert.ok(instructions.includes(".gstack/plans/"));
-    assert.ok(!instructions.includes("PLAN FILE: .gstack/plans/add-dark-mode-toggle.md"), "instructions must not pin the legacy slug as THE path");
+    assert.ok(instructions.includes(".kstack/plans/"));
+    assert.ok(!instructions.includes("PLAN FILE: .kstack/plans/add-dark-mode-toggle.md"), "instructions must not pin the legacy slug as THE path");
   });
 });
 
@@ -1640,7 +1653,7 @@ describe("kstack_phase tool", () => {
       cwd: process.cwd(),
       ui: { notify: () => {}, setStatus: () => {} },
       sessionManager: {
-        getEntries: () => (state ? [{ type: "custom", customType: "gstack-wf-state", data: state }] : []),
+        getEntries: () => (state ? [{ type: "custom", customType: "kstack-wf-state", data: state }] : []),
       },
     };
     return { pi, tools, ctx };

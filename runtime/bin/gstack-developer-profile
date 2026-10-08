@@ -8,7 +8,7 @@
 #   --read              (default)  emit KEY: VALUE pairs in builder-profile format
 #                                  for /office-hours compatibility.
 #   --derive            recompute inferred dimensions from question events;
-#                       write updated ~/.gstack/developer-profile.json.
+#                       write updated ~/.kstack/developer-profile.json.
 #   --profile           emit the full profile as JSON (all fields).
 #   --gap               emit declared-vs-inferred gap as JSON.
 #   --trace <dim>       show events that contributed to a dimension.
@@ -21,15 +21,15 @@
 #                       sessions[] and update aggregates. Required fields:
 #                       date, mode. Silent skip on invalid input.
 #
-# Profile file: ~/.gstack/developer-profile.json (unified schema — see
-# docs/designs/PLAN_TUNING_V0.md). Event file: ~/.gstack/projects/{SLUG}/
+# Profile file: ~/.kstack/developer-profile.json (unified schema — see
+# docs/designs/PLAN_TUNING_V0.md). Event file: ~/.kstack/projects/{SLUG}/
 # question-events.jsonl.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # KSTACK_STATE_ROOT takes precedence over KSTACK_HOME (test isolation per D16).
-KSTACK_HOME="${KSTACK_STATE_ROOT:-${KSTACK_HOME:-$HOME/.gstack}}"
+KSTACK_HOME="${KSTACK_STATE_ROOT:-${KSTACK_HOME:-$HOME/.kstack}}"
 PROFILE_FILE="$KSTACK_HOME/developer-profile.json"
 LEGACY_FILE="$KSTACK_HOME/builder-profile.jsonl"
 eval "$("$SCRIPT_DIR/gstack-slug" 2>/dev/null || true)"

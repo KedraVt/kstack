@@ -72,7 +72,7 @@ B=""
 
 `DESIGN_NOT_AVAILABLE` → text-based review + HTML wireframe fallback (say so
 explicitly — mockups are the best part). **CRITICAL PATH RULE:** all design
-artifacts go to `~/.gstack/projects/$SLUG/designs/` — never `.context/`,
+artifacts go to `~/.kstack/projects/$SLUG/designs/` — never `.context/`,
 `docs/`, `/tmp/`, or project-local dirs.
 
 ## Step 0: Design Scope Assessment
@@ -95,7 +95,7 @@ work; text descriptions are opinion.
 
 ```bash
 eval "$(C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-slug 2>/dev/null)"
-_DESIGN_DIR="$HOME/.gstack/projects/$SLUG/designs/<screen-name>-$(date +%Y%m%d)"
+_DESIGN_DIR="$HOME/.kstack/projects/$SLUG/designs/<screen-name>-$(date +%Y%m%d)"
 mkdir -p "$_DESIGN_DIR"
 $D variants --brief "<assembled from plan + DESIGN.md>" --count 3 --output-dir "$_DESIGN_DIR/"
 $D check --image "$_DESIGN_DIR/variant-A.png" --brief "<same brief>"   # per variant

@@ -37,7 +37,7 @@ bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry
 - **Interrogation output** — the prior step's answers (frontier items,
   decisions, rejected alternatives). In an orchestrated run it arrives via
   `{previous}`; standalone, read the design doc at
-  `~/.gstack/projects/$SLUG/*-design-*.md` (latest) or ask the user for the
+  `~/.kstack/projects/$SLUG/*-design-*.md` (latest) or ask the user for the
   brief.
 - **Codebase grounding** — verify every file/symbol the plan names exists:
   `Grep`/`Read` the paths you cite. A plan referencing invented structure is

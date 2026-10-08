@@ -13,7 +13,7 @@ description: >-
   (use kstack-plan-eng-review) or drafting the plan artifact (use kstack-plan-draft).
 metadata:
   version: "1.0.0"
-compatibility: Writes design docs under .gstack/design/; runtime/bin helpers degrade gracefully.
+compatibility: Writes design docs under .kstack/design/; runtime/bin helpers degrade gracefully.
 ---
 
 <!-- provenance: gstack/gstack-office-hours (full upstream body — boilerplate stripped: brain-cache, learnings, eureka instrumentation, freeze machinery) · rewritten S1 2026-02-11 -->
@@ -43,7 +43,7 @@ bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry
 4. List prior design docs for this project:
    ```bash
    eval "$(C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-slug 2>/dev/null)"
-   ls -t ~/.gstack/projects/$SLUG/*-design-*.md 2>/dev/null
+   ls -t ~/.kstack/projects/$SLUG/*-design-*.md 2>/dev/null
    ```
    If they exist: "Prior designs for this project: [titles + dates]".
 5. **Ask via `ask_user_question`: "Before we dig in — what's your goal with
@@ -77,7 +77,7 @@ questions."
 Extract 3–5 keywords from the problem statement and grep prior design docs:
 
 ```bash
-grep -li "<kw1>\|<kw2>\|<kw3>" ~/.gstack/projects/$SLUG/*-design-*.md 2>/dev/null
+grep -li "<kw1>\|<kw2>\|<kw3>" ~/.kstack/projects/$SLUG/*-design-*.md 2>/dev/null
 ```
 
 Matches → surface them ("FYI: related design '{title}' from {date}") and ask

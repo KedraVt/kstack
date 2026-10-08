@@ -4,7 +4,7 @@ import { sprintMaxAttempts, sprintArchMaxAttempts, loopbacksEnabled, verdictsEna
 import { buildRetryFeedback, PHASE_EXPECTATIONS, NEGATIVE_VALUES } from "./verdicts.ts";
 import { securityReviewArtifactRel, SPRINT_PLACEHOLDER } from "./artifacts.ts";
 
-const ENTRY_TYPE = "gstack-wf-state";
+const ENTRY_TYPE = "kstack-wf-state";
 
 export function saveState(pi: ExtensionAPI, state: WorkflowState): void {
   pi.appendEntry(ENTRY_TYPE, state);
@@ -35,7 +35,7 @@ export function createState(workflowId: string, goal: string): WorkflowState {
     status: "active",
     goal,
     results: {},
-    version: 2,
+    version: 3,
     attempts: {},
   };
 }

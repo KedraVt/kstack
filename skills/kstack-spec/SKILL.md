@@ -13,7 +13,7 @@ description: >-
   existing plan (use kstack-plan-eng-review).
 metadata:
   version: "1.0.0"
-compatibility: Requires gh CLI for issue filing + runtime/bin/gstack-redact for leak scanning; $KSTACK_STATE_ROOT for the archive dir (defaults to repo .gstack/).
+compatibility: Requires gh CLI for issue filing + runtime/bin/gstack-redact for leak scanning; $KSTACK_STATE_ROOT for the archive dir (defaults to repo .kstack/).
 ---
 
 <!-- provenance: gstack/gstack-spec (5-phase interrogation, dedupe, redaction sink, issue templates) — boilerplate stripped: brain machinery, plan-mode detection, claude-specific spawn adapted · rewritten S1 2026-02-11 -->
@@ -106,7 +106,7 @@ C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-redact --from-
 
 Exit 3 (HIGH: credentials) → stop, no dispatch, no skip. Exit 2 (MEDIUM) →
 `ask_user_question` confirm. Exit 0 → continue. Resolve `$REDACT_VIS` once
-(local `~/.gstack` config → `gh` → `glab` → unknown=public-strict) and reuse
+(local `~/.kstack` config → `gh` → `glab` → unknown=public-strict) and reuse
 it for every sink.
 
 ## Phase 5: File, archive, optional spawn

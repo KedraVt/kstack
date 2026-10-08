@@ -132,7 +132,7 @@ bump VERSION without asking.
 
 - On the base branch → abort: "Run from a feature branch."
 - `git diff <base>...HEAD --stat` + `git log` + `--name-only`.
-- Discover docs: `find . -maxdepth 2 -name "*.md" -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./.gstack/*" | sort`.
+- Discover docs: `find . -maxdepth 2 -name "*.md" -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./.kstack/*" | sort`.
 - Classify changes: new features · changed behavior · removed functionality ·
   infrastructure.
 

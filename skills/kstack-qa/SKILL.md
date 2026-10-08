@@ -46,7 +46,7 @@ bash C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-telemetry
 exhaustive = +low/cosmetic.
 
 **Setup parameters:** Target URL (auto-detect or required) · tier
-(`--quick`/`--exhaustive`) · output dir (default `.gstack/qa-reports/`) ·
+(`--quick`/`--exhaustive`) · output dir (default `.kstack/qa-reports/`) ·
 scope (full app or diff-scoped) · auth (credentials or cookie file).
 
 ## Setup
@@ -62,7 +62,7 @@ dirty → `ask_user_question`: A) commit current changes first (recommended —
 uncommitted work survives QA's own fix commits), B) stash and pop after,
 C) abort.
 
-**Output dirs:** `mkdir -p .gstack/qa-reports/screenshots`.
+**Output dirs:** `mkdir -p .kstack/qa-reports/screenshots`.
 
 **No test framework detected?** When fix mode will need regression tests and
 none exists, follow `references/test-bootstrap.md` — detect runtime, propose
@@ -186,7 +186,7 @@ For each fixable issue, in severity order:
    trace the bug's codepath (precondition → path → break point); the test MUST
    reproduce the precondition and assert correct behavior (never "renders"/
    "doesn't throw"); include the attribution comment
-   `// Regression: ISSUE-NNN … Report: .gstack/qa-reports/…`; run only the new
+   `// Regression: ISSUE-NNN … Report: .kstack/qa-reports/…`; run only the new
    file; pass → commit `test(qa): regression test for ISSUE-NNN`, fail once →
    fix once, still failing → delete and defer.
 
@@ -232,7 +232,7 @@ Bugs: N critical, N high, N medium, N low
 ```
 
 Full-mode reports use `templates/qa-report-template.md`; keep evidence in
-`.gstack/qa-reports/` (screenshots/, baseline.json). If `TODOS.md` exists:
+`.kstack/qa-reports/` (screenshots/, baseline.json). If `TODOS.md` exists:
 new deferred bugs → TODO entries with severity + repro; fixed TODOs → annotate
 "Fixed by kstack-qa on {branch}, {date}".
 

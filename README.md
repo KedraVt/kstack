@@ -9,7 +9,7 @@ One extension, two layers:
 ## What's new (feat/skill-ingestion branch)
 
 - **Deterministic subagents** — specialists (scout/planner/worker/reviewer) are spawned by the orchestrator itself in isolated `pi` processes; delegation no longer depends on the model's discretion. The `subagent` tool remains for ad-hoc use.
-- **Interactive plan cycle** — scout explores → you are interviewed (grilling protocol rounds with recommended answers + office-hours judgment + eng-review rigor, ≤5 questions/round) → plan written to `.gstack/plans/<slug>.md` → your approval gate (`/kstack next`) → worker implements from the plan file.
+- **Interactive plan cycle** — scout explores → you are interviewed (grilling protocol rounds with recommended answers + office-hours judgment + eng-review rigor, ≤5 questions/round) → plan written to `.kstack/plans/<slug>.md` → your approval gate (`/kstack next`) → worker implements from the plan file.
 - **Manual decision gates** — `develop.plan` and `investigate.root-cause` pause for user approval before code is touched. Optional phases (e.g. `investigate.regression-qa`) park the same way: the workflow pauses and the `/kstack` panel asks you to **Run / Skip / Abort** — no background Yes-defaulted dialog you can answer by accident.
 - **Skill ingestion** — distilled methodology digests (~2K tokens) from kstack's SKILL.md files are injected by the workflow itself: full digest to whoever does the work, compact DoD+best-practices gates for verification and repeats.
 - **Documentation phases** — optional doc-update phase on `develop` and `ship` (Diataxis coverage map, chained generation for missing docs).
@@ -18,7 +18,7 @@ One extension, two layers:
 
 ## What's new (feat/sprint-workflow branch)
 
-- **`sprint` workflow (default-on)** — a 10-phase agile delivery pipeline distilled from `.agents-clean` methodology: understand → user-story → capability → system-design → ⏸ architect gate → backlog → implement → devsecops review → QA verdict → commit/archive. Planning artifacts (`user-story_XX.md`, `system-design_XX.md`, `tasks_XX.md`, …) live in the project root and archive to `.gstack/sprints/sprint_XX/` when the sprint goes green.
+- **`sprint` workflow (default-on)** — a 10-phase agile delivery pipeline distilled from `.agents-clean` methodology: understand → user-story → capability → system-design → ⏸ architect gate → backlog → implement → devsecops review → QA verdict → commit/archive. Planning artifacts (`user-story_XX.md`, `system-design_XX.md`, `tasks_XX.md`, …) live in the project root and archive to `.kstack/sprints/sprint_XX/` when the sprint goes green.
 - **Deterministic verdict routing** — review gates emit machine-parseable verdict lines (`status == red|green|orange`, `security-review == approved|rejected`) inside a `## HANDOFF` section. The orchestrator parses them fail-closed (whitelist-only values, containment-checked), cross-verifies them against the artifact files on disk (dual channel: chat + disk must agree), and routes deterministically — never on the model's say-so.
 - **Parks are code-enforced** — every parked state (security freeze, unreadable verdict, loop exhaustion, numbering anomaly, branch violation, failed phase) is refused by the `kstack_advance` tool itself, not just discouraged in prose: a repeat call cannot advance past a park on the model's say-so. Only the `/kstack` panel (or `/kstack next` where applicable) can resume, re-run, accept or abort.
 - **Branch enforcement** — sprint gates that audit developer output (`devsecops-review`, `qa-verdict`) park fail-closed when entered on main/master: MASTER_DOD requires `task/<slug>` branches for implementation work. Document-level phases (`architect-gate`, planning) legitimately run on main.
@@ -98,7 +98,7 @@ While a workflow is active, every interactive input is prefixed with a resume co
 
 1. **understand** — requirements analysis in the main context
 2. **explore** — the scout subagent gathers codebase facts (its own context window)
-3. **plan** — *you are interviewed*. Using the grilling protocol (design-tree rounds of ≤5 questions, each with a recommended answer), office-hours product judgment, and plan-eng-review rigor, the orchestrator converges on scope with you and writes `.gstack/plans/<slug>.md`
+3. **plan** — *you are interviewed*. Using the grilling protocol (design-tree rounds of ≤5 questions, each with a recommended answer), office-hours product judgment, and plan-eng-review rigor, the orchestrator converges on scope with you and writes `.kstack/plans/<slug>.md`
 4. ⏸ you read the actual plan file, then `/kstack next`
 5. **implement** — worker reads the plan file directly; QA, review, ship and docs follow autonomously
 
@@ -275,7 +275,7 @@ gstack-pi/
 │   ├── artifacts.ts         Sprint-stamped artifact filenames + phase→artifact map — single source for templates, verdicts, freeze path, kstack_phase
 │   ├── handoff.ts           ## HANDOFF extraction for {previous} (tail fallback)
 │   ├── skip.ts              Structural-skip guards (root-cause collapse, QA fix loop)
-│   ├── telemetry.ts         Per-step run reports (.gstack/runs)
+│   ├── telemetry.ts         Per-step run reports (.kstack/runs)
 │   ├── text.ts              $-safe interpolation
 │   ├── config.ts            Feature flags (KSTACK_PI_*)
 │   ├── command.ts           /kstack command handler (+ /kstack next)
@@ -423,7 +423,7 @@ the root-cause scout->planner chain collapses to ONE validate-only planner step.
 | `KSTACK_PI_LIVENESS_SEC` | 240 | observe-only silence threshold, seconds; `off` disables |
 | `KSTACK_PI_MAX_RUN_TOKENS` | disabled | orderly chain stop after cumulative token usage exceeds it |
 
-Run reports land in `.gstack/runs/<ISO-timestamp>-<workflowId>.json` (per-step durations, tool calls, turns, token usage, handoff levels, incompleteness, timeout class, liveness observations).
+Run reports land in `.kstack/runs/<ISO-timestamp>-<workflowId>.json` (per-step durations, tool calls, turns, token usage, handoff levels, incompleteness, timeout class, liveness observations).
 
 ## Security & trust boundaries
 
@@ -442,9 +442,9 @@ Therefore:
 
 The deterministic delegation runs as a fire-and-forget background chain. Diagnose in this order:
 
-1. **Session breadcrumbs** — every delegation milestone is persisted as a `gstack-delegation-event` session entry (`started`, `retrying`, `completed`, `failed`, `timeout`, `budget-exceeded`, `interrupted`). A `started` with no terminal event followed by an `interrupted` annotation means the host died mid-delegation (crash or restart).
+1. **Session breadcrumbs** — every delegation milestone is persisted as a `kstack-delegation-event` session entry (`started`, `retrying`, `completed`, `failed`, `timeout`, `budget-exceeded`, `interrupted`). A `started` with no terminal event followed by an `interrupted` annotation means the host died mid-delegation (crash or restart).
 2. **Debug log** — set `KSTACK_PI_DEBUG=<file>` before launching pi; every spawn attempt, pid, timeout, abort and provider error is appended there.
-3. **Run reports** — `.gstack/runs/<ISO>-<workflow>.json` carries per-step durations, tool calls, token usage, handoff levels and liveness observations.
+3. **Run reports** — `.kstack/runs/<ISO>-<workflow>.json` carries per-step durations, tool calls, token usage, handoff levels and liveness observations.
 
 **Subagent fails fast with a provider error.** Errors like `Provider finish_reason: network_error` surface in the delegation summary and the failure event. pi auto-retries internally (3 attempts); the orchestrator adds one chain-level retry. If the provider outage persists, switch models (`--model`) and re-run. This is a provider problem, not an orchestrator bug.
 

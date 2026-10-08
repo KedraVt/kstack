@@ -105,7 +105,7 @@ The verification is "I read the source that creates this symbol", not "I
 grep'd for the name and didn't find it." Deeper framework-aware verification
 (model introspection, migration-history-aware checks, ORM dialect detection)
 is deliberately out of scope for the lighter gate — see the deferred
-`~/.gstack-dev/plans/1539-framework-aware-review.md` design doc.
+`~/.kstack-dev/plans/1539-framework-aware-review.md` design doc.
 
 The FP classes the gate kills (measured against Django Sprint 2.5 #1539):
 
@@ -284,12 +284,12 @@ The plan should be complete enough that when implementation begins, every test i
 After producing the coverage diagram, write a test plan artifact to the project directory so `/qa` and `/qa-only` can consume it as primary test input:
 
 ```bash
-eval "$(~/.claude/skills/kstack/bin/gstack-slug 2>/dev/null)" && mkdir -p ~/.gstack/projects/$SLUG
+eval "$(~/.claude/skills/kstack/bin/gstack-slug 2>/dev/null)" && mkdir -p ~/.kstack/projects/$SLUG
 USER=$(whoami)
 DATETIME=$(date +%Y%m%d-%H%M%S)
 ```
 
-Write to `~/.gstack/projects/{slug}/{user}-{branch}-eng-review-test-plan-{datetime}.md`:
+Write to `~/.kstack/projects/{slug}/{user}-{branch}-eng-review-test-plan-{datetime}.md`:
 
 ```markdown
 # Test Plan
@@ -590,7 +590,7 @@ backslashes serialize cleanly — never use hand-rolled `echo` / `printf`.
 
 ```bash
 eval "$(~/.claude/skills/kstack/bin/gstack-slug 2>/dev/null)"
-TASKS_DIR="${HOME}/.gstack/projects/${SLUG:-unknown}"
+TASKS_DIR="${HOME}/.kstack/projects/${SLUG:-unknown}"
 mkdir -p "$TASKS_DIR"
 TASKS_FILE="$TASKS_DIR/tasks-eng-review-$(date +%Y%m%d-%H%M%S).jsonl"
 COMMIT=$(git rev-parse HEAD 2>/dev/null || echo unknown)
@@ -656,8 +656,8 @@ Check the git log for this branch. If there are prior commits suggesting a previ
 After producing the Completion Summary above, persist the review result.
 
 **PLAN MODE EXCEPTION — ALWAYS RUN:** This command writes review metadata to
-`~/.gstack/` (user config directory, not project files). The skill preamble
-already writes to `~/.gstack/sessions/` and `~/.gstack/analytics/` — this is
+`~/.kstack/` (user config directory, not project files). The skill preamble
+already writes to `~/.kstack/sessions/` and `~/.kstack/analytics/` — this is
 the same pattern. The review dashboard depends on this data. Skipping this
 command breaks the review readiness dashboard in /ship.
 
@@ -666,7 +666,7 @@ command breaks the review readiness dashboard in /ship.
 ~/.claude/skills/kstack/bin/gstack-decision-log '{"decision":"Eng review (MODE): ARCH_SUMMARY","rationale":"KEY_DECISION","scope":"branch","source":"skill","confidence":8}' 2>/dev/null || true
 ```
 
-The second command records the architecture verdict as a durable cross-session decision (so a future session inherits the chosen approach and what was hardened, not just the count). Same `~/.gstack/` write pattern as review-log, non-interactive, best-effort (`|| true`). Substitute `ARCH_SUMMARY` (e.g. "N findings, all folded" or "M unresolved") and `KEY_DECISION` (the load-bearing architecture call from the report, one line — omit if the review found nothing durable).
+The second command records the architecture verdict as a durable cross-session decision (so a future session inherits the chosen approach and what was hardened, not just the count). Same `~/.kstack/` write pattern as review-log, non-interactive, best-effort (`|| true`). Substitute `ARCH_SUMMARY` (e.g. "N findings, all folded" or "M unresolved") and `KEY_DECISION` (the load-bearing architecture call from the report, one line — omit if the review found nothing durable).
 
 Substitute values from the Completion Summary:
 - **TIMESTAMP**: current ISO 8601 datetime

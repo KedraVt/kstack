@@ -6,7 +6,7 @@
 #   _kstack_codex_auth_probe      — multi-signal auth check (env + file)
 #   _kstack_codex_version_check   — warn on known-bad Codex CLI versions
 #   _kstack_codex_timeout_wrapper — gtimeout -> timeout -> unwrapped fallback
-#   _kstack_codex_log_event       — telemetry emission to ~/.gstack/analytics/
+#   _kstack_codex_log_event       — telemetry emission to ~/.kstack/analytics/
 #
 # Hygiene rules (enforced by test/codex-hardening.test.ts):
 #   - Never set -e / set -u / trap / IFS= / PATH= in this file.
@@ -69,7 +69,7 @@ _kstack_codex_timeout_wrapper() {
 # --- Telemetry event --------------------------------------------------------
 
 _kstack_codex_log_event() {
-  # Emit a telemetry event to ~/.gstack/analytics/skill-usage.jsonl.
+  # Emit a telemetry event to ~/.kstack/analytics/skill-usage.jsonl.
   # Gated on $_TEL != "off" (caller sets this from gstack-config).
   # Event types: codex_timeout, codex_auth_failed, codex_cli_missing,
   #              codex_version_warning.
@@ -78,12 +78,12 @@ _kstack_codex_log_event() {
   local _event="$1"
   local _duration="${2:-0}"
   [ "${_TEL:-off}" = "off" ] && return 0
-  mkdir -p "$HOME/.gstack/analytics" 2>/dev/null || return 0
+  mkdir -p "$HOME/.kstack/analytics" 2>/dev/null || return 0
   local _ts
   _ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)
   printf '{"skill":"codex","event":"%s","duration_s":"%s","ts":"%s"}\n' \
     "$_event" "$_duration" "$_ts" \
-    >> "$HOME/.gstack/analytics/skill-usage.jsonl" 2>/dev/null || true
+    >> "$HOME/.kstack/analytics/skill-usage.jsonl" 2>/dev/null || true
 }
 
 # --- Learnings log on hang --------------------------------------------------

@@ -166,9 +166,9 @@ treated as the higher tier by the fail-closed parser.
 C) accept risk (document + review date) D) defer to TODOS.md.
 
 **Trend tracking (posture mode):** if a prior report exists in
-`.gstack/security-reports/`, diff findings by fingerprint (category + file +
+`.kstack/security-reports/`, diff findings by fingerprint (category + file +
 normalized title): resolved / persistent / new → IMPROVING / DEGRADING /
-STABLE. If `.gstack/` is not gitignored, flag it — reports stay local.
+STABLE. If `.kstack/` is not gitignored, flag it — reports stay local.
 
 **Output artifact** (dual channel): write
 `devsecops/security-review-artifact_XX.md` ending with EXACTLY ONE verdict
@@ -191,7 +191,7 @@ problems-security: none | <summary for developers>
 <threat model table over the new boundaries>
 ```
 
-In posture mode also write `.gstack/security-reports/{date}-{HHMMSS}.json`
+In posture mode also write `.kstack/security-reports/{date}-{HHMMSS}.json`
 (date, mode, scope, phases_run, attack_surface counts, findings with
 fingerprint/severity/confidence/status/phase/category/recommendation,
 filter_stats, totals, trend).

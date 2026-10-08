@@ -4,22 +4,22 @@
 # Usage:
 #   gstack-brain-sync --once           drain queue, commit, push (default)
 #   gstack-brain-sync --status         print sync health as JSON
-#   gstack-brain-sync --skip-file <p>  add <p> to ~/.gstack/.brain-skip.txt
+#   gstack-brain-sync --skip-file <p>  add <p> to ~/.kstack/.brain-skip.txt
 #   gstack-brain-sync --drop-queue --yes   clear queue without committing
 #   gstack-brain-sync --discover-new   scan allowlist dirs, enqueue changed files
 #
 # Invoked by the preamble at skill START and END boundaries. No persistent
 # daemon. Typical run <1s when queue empty; ~200-800ms with network push.
 #
-# Singleton enforcement: flock on ~/.gstack/.brain-sync.lock. Concurrent
+# Singleton enforcement: flock on ~/.kstack/.brain-sync.lock. Concurrent
 # invocations queue and serialize.
 #
 # Env:
-#   KSTACK_HOME — override ~/.gstack (aligns with writers).
+#   KSTACK_HOME — override ~/.kstack (aligns with writers).
 
 set -uo pipefail
 
-KSTACK_HOME="${KSTACK_HOME:-$HOME/.gstack}"
+KSTACK_HOME="${KSTACK_HOME:-$HOME/.kstack}"
 QUEUE="$KSTACK_HOME/.brain-queue.jsonl"
 ALLOWLIST="$KSTACK_HOME/.brain-allowlist"
 PRIVACY_MAP="$KSTACK_HOME/.brain-privacy-map.json"

@@ -18,11 +18,11 @@
 setopt +o nomatch 2>/dev/null || true  # zsh compat
 BRANCH=$(git branch --show-current 2>/dev/null | tr '/' '-')
 REPO=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")
-# Compute project slug for ~/.gstack/projects/ lookup
+# Compute project slug for ~/.kstack/projects/ lookup
 _PLAN_SLUG=$(git remote get-url origin 2>/dev/null | sed 's|.*[:/]\([^/]*/[^/]*\)\.git$|\1|;s|.*[:/]\([^/]*/[^/]*\)$|\1|' | tr '/' '-' | tr -cd 'a-zA-Z0-9._-') || true
 _PLAN_SLUG="${_PLAN_SLUG:-$(basename "$PWD" | tr -cd 'a-zA-Z0-9._-')}"
 # Search common plan file locations (project designs first, then personal/local)
-for PLAN_DIR in "$HOME/.gstack/projects/$_PLAN_SLUG" "$HOME/.claude/plans" "$HOME/.codex/plans" ".gstack/plans"; do
+for PLAN_DIR in "$HOME/.kstack/projects/$_PLAN_SLUG" "$HOME/.claude/plans" "$HOME/.codex/plans" ".kstack/plans"; do
   [ -d "$PLAN_DIR" ] || continue
   PLAN=$(ls -t "$PLAN_DIR"/*.md 2>/dev/null | xargs grep -l "$BRANCH" 2>/dev/null | head -1)
   [ -z "$PLAN" ] && PLAN=$(ls -t "$PLAN_DIR"/*.md 2>/dev/null | xargs grep -l "$REPO" 2>/dev/null | head -1)

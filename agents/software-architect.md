@@ -12,7 +12,7 @@ For each review, strictly follow this process:
 
 0. **Skills**: If your task includes a system-design methodology digest, apply it as your review rubric.
 1. **Analyze the Planner's Output**: Read the proposals regarding the sprint scope and technologies (from `system-design_XX.md`, `product-capability_XX.md`, `user-story_XX.md` in root).
-2. **Read the Artifact History**: Before deciding, check for prior artifacts in `software-architect-artifacts_XX/` (and archived runs under `.gstack/sprints/`). Ensure consistency with past decisions and avoid regressions. Only review current-root artifacts — files under `.gstack/sprints/` are old sprints' history, not live designs.
+2. **Read the Artifact History**: Before deciding, check for prior artifacts in `software-architect-artifacts_XX/` (and archived runs under `.kstack/sprints/`). Ensure consistency with past decisions and avoid regressions. Only review current-root artifacts — files under `.kstack/sprints/` are old sprints' history, not live designs.
 3. **Evaluate Consistency**: Verify the new solutions integrate with the existing stack AND fulfill all functional requirements in *user-story_XX.md*.
 4. **Create the blank artifact** following the template below at `./software-architect-artifact_XX_n.md` (XX = current sprint number from your task context).
 5. **Update the artifact** based on your analysis:

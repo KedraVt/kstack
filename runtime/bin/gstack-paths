@@ -9,9 +9,9 @@
 # CI / container env where HOME may be unset.
 #
 # Chains:
-#   KSTACK_STATE_ROOT: KSTACK_HOME -> CLAUDE_PLUGIN_DATA (only when CLAUDE_PLUGIN_ROOT=*kstack*) -> $HOME/.gstack -> .gstack
+#   KSTACK_STATE_ROOT: KSTACK_HOME -> CLAUDE_PLUGIN_DATA (only when CLAUDE_PLUGIN_ROOT=*kstack*) -> $HOME/.kstack -> .kstack
 #   PLAN_ROOT:         KSTACK_PLAN_DIR -> CLAUDE_PLANS_DIR -> $HOME/.claude/plans -> .claude/plans
-#   TMP_ROOT:          TMPDIR -> TMP -> .gstack/tmp (and mkdir -p, best-effort)
+#   TMP_ROOT:          TMPDIR -> TMP -> .kstack/tmp (and mkdir -p, best-effort)
 #
 # Security: output values are not sanitized — callers may receive paths with
 # shell-special characters if env vars contain them. Skills should always quote
@@ -28,9 +28,9 @@ elif [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && echo "${CLAUDE_PLUGIN_ROOT:-}" | grep -
   # be picked up, writing all kstack state into the wrong directory.
   _state_root="$CLAUDE_PLUGIN_DATA"
 elif [ -n "${HOME:-}" ]; then
-  _state_root="$HOME/.gstack"
+  _state_root="$HOME/.kstack"
 else
-  _state_root=".gstack"
+  _state_root=".kstack"
 fi
 
 # Plan root: where /context-save and /codex consult write plan files.
@@ -46,14 +46,14 @@ fi
 
 # Tmp root: where ephemeral files (codex stderr captures, etc.) live.
 # Honor TMPDIR / TMP for Windows + container compat; fall back to a
-# project-local .gstack/tmp so we never write to a system /tmp that may
+# project-local .kstack/tmp so we never write to a system /tmp that may
 # be read-only or shared.
 if [ -n "${TMPDIR:-}" ]; then
   _tmp_root="$TMPDIR"
 elif [ -n "${TMP:-}" ]; then
   _tmp_root="$TMP"
 else
-  _tmp_root=".gstack/tmp"
+  _tmp_root=".kstack/tmp"
 fi
 
 # Best-effort mkdir; if it fails (read-only fs, permission denied), the caller

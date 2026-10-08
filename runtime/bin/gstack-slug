@@ -7,7 +7,7 @@
 # shell injection when consumed via source or eval.
 set -euo pipefail
 
-CACHE_DIR="$HOME/.gstack/slug-cache"
+CACHE_DIR="$HOME/.kstack/slug-cache"
 PROJECT_DIR="$(pwd)"
 # Encode absolute path as cache key: /Users/j/foo → _Users_j_foo
 CACHE_KEY=$(printf '%s' "$PROJECT_DIR" | tr '/' '_')
@@ -34,7 +34,7 @@ SLUG="${SLUG:-$(basename "$PWD" | tr -cd 'a-zA-Z0-9._-')}"
 # 3b. Re-sanitize unconditionally before the value is echoed into `eval`/`source`
 #     output. The compute (2) and fallback (3) paths already filter, but a value
 #     read straight from the cache file (1) does NOT — a poisoned
-#     ~/.gstack/slug-cache/<key> would otherwise inject shell into
+#     ~/.kstack/slug-cache/<key> would otherwise inject shell into
 #     `eval "$(gstack-slug)"`. Filtering here honors the [a-zA-Z0-9._-] invariant
 #     promised in the header on every path, and heals a poisoned cache on write (4).
 SLUG=$(printf '%s' "$SLUG" | tr -cd 'a-zA-Z0-9._-')

@@ -53,10 +53,10 @@ function argVal(args: string[], flag: string): string | undefined {
   return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
 }
 
-/** Resolve the VERSION file path: --version-path, else .gstack/version-path, else "VERSION". */
+/** Resolve the VERSION file path: --version-path, else .kstack/version-path, else "VERSION". */
 function resolveVersionPath(cwd: string, explicit?: string): string {
   if (explicit) return join(cwd, explicit);
-  const pin = join(cwd, ".gstack", "version-path");
+  const pin = join(cwd, ".kstack", "version-path");
   if (existsSync(pin)) {
     const p = readFileSync(pin, "utf-8").trim();
     if (p) return join(cwd, p);

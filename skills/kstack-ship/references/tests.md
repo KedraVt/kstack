@@ -23,7 +23,7 @@ setopt +o nomatch 2>/dev/null || true  # zsh compat
 ls jest.config.* vitest.config.* playwright.config.* .rspec pytest.ini pyproject.toml phpunit.xml 2>/dev/null
 ls -d test/ tests/ spec/ __tests__/ cypress/ e2e/ 2>/dev/null
 # Check opt-out marker
-[ -f .gstack/no-test-bootstrap ] && echo "BOOTSTRAP_DECLINED"
+[ -f .kstack/no-test-bootstrap ] && echo "BOOTSTRAP_DECLINED"
 ```
 
 **If test framework detected** (config files or test directories found):
@@ -36,7 +36,7 @@ Store conventions as prose context for use in Phase 8e.5 or Step 7. **Skip the r
 **If NO runtime detected** (no config files found): Use AskUserQuestion:
 "I couldn't detect your project's language. What runtime are you using?"
 Options: A) Node.js/TypeScript B) Ruby/Rails C) Python D) Go E) Rust F) PHP G) Elixir H) This project doesn't need tests.
-If user picks H → write `.gstack/no-test-bootstrap` and continue without tests.
+If user picks H → write `.kstack/no-test-bootstrap` and continue without tests.
 
 **If runtime detected but no test framework — bootstrap:**
 
@@ -68,7 +68,7 @@ B) [Alternative] — [rationale]. Includes: [packages]
 C) Skip — don't set up testing right now
 RECOMMENDATION: Choose A because [reason based on project context]"
 
-If user picks C → write `.gstack/no-test-bootstrap`. Tell user: "If you change your mind later, delete `.gstack/no-test-bootstrap` and re-run." Continue without tests.
+If user picks C → write `.kstack/no-test-bootstrap`. Tell user: "If you change your mind later, delete `.kstack/no-test-bootstrap` and re-run." Continue without tests.
 
 If multiple runtimes detected (monorepo) → ask which runtime to set up first, with option to do both sequentially.
 

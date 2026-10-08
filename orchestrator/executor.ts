@@ -110,7 +110,7 @@ export function ctxAlive(ctx: unknown): boolean {
  */
 function delegationEvent(pi: ExtensionAPI, data: Record<string, unknown>): void {
   try {
-    pi.appendEntry("gstack-delegation-event", { at: new Date().toISOString(), ...data });
+    pi.appendEntry("kstack-delegation-event", { at: new Date().toISOString(), ...data });
   } catch {
     /* best-effort */
   }
@@ -126,7 +126,7 @@ export function annotateOrphanedDelegation(pi: ExtensionAPI, ctx: ExtensionConte
     const entries = ((ctx.sessionManager as any)?.getEntries?.() ?? []) as any[];
     for (let i = entries.length - 1; i >= 0; i--) {
       const e = entries[i];
-      if (e?.type === "custom" && e.customType === "gstack-delegation-event") {
+      if (e?.type === "custom" && e.customType === "kstack-delegation-event") {
         if (e.data?.event === "started" || e.data?.event === "retrying") {
           delegationEvent(pi, {
             phaseId: e.data.phaseId,

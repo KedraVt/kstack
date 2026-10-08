@@ -12,7 +12,7 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 eval "$("$SCRIPT_DIR/gstack-slug" 2>/dev/null)"
-KSTACK_HOME="${KSTACK_HOME:-$HOME/.gstack}"
+KSTACK_HOME="${KSTACK_HOME:-$HOME/.kstack}"
 mkdir -p "$KSTACK_HOME/projects/$SLUG"
 
 INPUT="$1"

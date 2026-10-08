@@ -116,7 +116,7 @@ function addedLinesFor(localSha: string, remoteSha: string): string {
 
 function logSkip(reason: string): void {
   try {
-    const home = process.env.KSTACK_HOME || path.join(os.homedir(), ".gstack");
+    const home = process.env.KSTACK_HOME || path.join(os.homedir(), ".kstack");
     const dir = path.join(home, "security");
     fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(

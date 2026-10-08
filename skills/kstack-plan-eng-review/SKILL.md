@@ -49,8 +49,8 @@ Recommend A when a branch diff exists, otherwise B.
 ```bash
 eval "$(C:/Users/Mattia/.pi/agent/extensions/gstack-pi/runtime/bin/gstack-slug 2>/dev/null)"
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr '/' '-' || echo 'no-branch')
-DESIGN=$(ls -t ~/.gstack/projects/$SLUG/*-$BRANCH-design-*.md 2>/dev/null | head -1)
-[ -z "$DESIGN" ] && DESIGN=$(ls -t ~/.gstack/projects/$SLUG/*-design-*.md 2>/dev/null | head -1)
+DESIGN=$(ls -t ~/.kstack/projects/$SLUG/*-$BRANCH-design-*.md 2>/dev/null | head -1)
+[ -z "$DESIGN" ] && DESIGN=$(ls -t ~/.kstack/projects/$SLUG/*-design-*.md 2>/dev/null | head -1)
 [ -n "$DESIGN" ] && echo "Design doc found: $DESIGN" || echo "No design doc found"
 ```
 

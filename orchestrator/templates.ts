@@ -115,16 +115,16 @@ export function planFileSlug(goal: string): string {
 }
 
 /** Directory every plan file must live in. */
-const PLAN_DIR = ".gstack/plans";
+const PLAN_DIR = ".kstack/plans";
 
 /**
  * Accept a model-chosen plan file path (plan-naming fix): must stay inside the
  * plans directory and be a safe single-path-segment kebab-case slug. Anything
  * else — traversal, subdirectories, wrong casing/characters, wrong extension —
- * is refused so a sloppy model answer can never write outside .gstack/plans.
+ * is refused so a sloppy model answer can never write outside .kstack/plans.
  */
 export function isValidPlanFile(value: string): boolean {
-  return /^\.gstack\/plans\/[a-z0-9][a-z0-9-]*\.md$/.test(value);
+  return /^\.kstack\/plans\/[a-z0-9][a-z0-9-]*\.md$/.test(value);
 }
 
 /**
@@ -695,7 +695,7 @@ Stop when: every changed area has a Diataxis classification and the dictated fac
 Goal: {goal} | Branch: {branch}
 
 1. Analyze the branch diff against the base branch (git diff/log) and classify changes (new features / changed behavior / removed functionality)
-2. Discover all markdown docs (maxdepth 2, excluding .git/node_modules/.gstack)
+2. Discover all markdown docs (maxdepth 2, excluding .git/node_modules/.kstack)
 3. Build a Diataxis coverage map per changed area (tutorial / how-to / reference / explanation) and apply factual updates the diff dictates
 4. Where docs are missing entirely, research the code (read implementations end-to-end + tests) and write them following Diataxis; write reference docs first
 5. Sweep cross-doc consistency (versions, paths, counts, stale references)
@@ -711,7 +711,7 @@ Stop when: every changed area has a Diataxis classification and the dictated fac
 Goal: {goal} | Branch: {branch}
 
 1. Analyze the branch diff against the base branch (git diff/log) and classify changes (new features / changed behavior / removed functionality)
-2. Discover all markdown docs (maxdepth 2, excluding .git/node_modules/.gstack)
+2. Discover all markdown docs (maxdepth 2, excluding .git/node_modules/.kstack)
 3. Build a Diataxis coverage map per changed area (tutorial / how-to / reference / explanation) and apply factual updates the diff dictates
 4. Where docs are missing entirely, research the code (read implementations end-to-end + tests) and write them following Diataxis; write reference docs first
 5. Sweep cross-doc consistency (versions, paths, counts, stale references)
@@ -748,14 +748,14 @@ Write ${qaArtifactName("{sprint}")} ending with EXACTLY ONE of these three lines
 - 'status == orange'
 Repeat the SAME line verbatim inside your ## HANDOFF — the orchestrator cross-checks both channels before routing.`,
     "commit-archive": `## DELIVERABLE
-Sprint closed: all work committed via Conventional Commits, artifacts archived to .gstack/sprints/sprint_{sprint}/, archive manifest written.
+Sprint closed: all work committed via Conventional Commits, artifacts archived to .kstack/sprints/sprint_{sprint}/, archive manifest written.
 
 ## STOP CONDITION
 Stop when: git status is clean, the archive directory contains all sprint_{sprint} artifacts, and the manifest lists them.
 
 ## CONTEXT
 Sprint {sprint} | Goal: {goal} | Branch: {branch}
-This phase runs ONLY after explicit user approval (the orchestrator entry-gates it). Steps: 1) verify suite green, 2) commit any uncommitted work (Conventional Commits), 3) move ALL sprint artifacts (user-story/capability/system-design/ADR/tasks/QA/review files) into .gstack/sprints/sprint_{sprint}/, 4) write manifest.md listing the moved files.`,
+This phase runs ONLY after explicit user approval (the orchestrator entry-gates it). Steps: 1) verify suite green, 2) commit any uncommitted work (Conventional Commits), 3) move ALL sprint artifacts (user-story/capability/system-design/ADR/tasks/QA/review files) into .kstack/sprints/sprint_{sprint}/, 4) write manifest.md listing the moved files.`,
   };
 
   // Explicit phase.task wins over the generic per-id template (same
