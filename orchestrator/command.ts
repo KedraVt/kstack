@@ -82,6 +82,7 @@ export async function handleKstackCommand(args: string, ctx: ExtensionCommandCon
       created: `Created ${res.file} with the kstack rules block.`,
       installed: `Installed the kstack rules block in ${res.file}.`,
       upgraded: `Upgraded the legacy rules block in ${res.file} to kstack.`,
+      refreshed: `Refreshed the kstack rules block in ${res.file}.`,
       unchanged: `${res.file} already has the current kstack block.`,
     } as const;
     ctx.ui.notify(msgs[res.status], "info");

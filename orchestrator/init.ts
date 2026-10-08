@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const BEGIN = "<!-- kstack:begin -->";
@@ -32,11 +32,24 @@ ${END}`;
 
 export interface InitResult {
   file: string;
-  status: "created" | "installed" | "upgraded" | "unchanged";
+  status: "created" | "installed" | "upgraded" | "refreshed" | "unchanged";
 }
 
 function esc(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Temp-write + rename, same pattern as lib/download.ts: an interrupted write
+// must never leave a truncated AGENTS.md behind.
+function writeAtomic(file: string, contents: string): void {
+  const tmp = `${file}.part-${process.pid}`;
+  try {
+    writeFileSync(tmp, contents);
+    renameSync(tmp, file);
+  } catch (err) {
+    try { unlinkSync(tmp); } catch { /* best effort */ }
+    throw err;
+  }
 }
 
 /**
@@ -54,17 +67,23 @@ export function initAgentsMd(cwd: string): InitResult {
   }
 
   const text = readFileSync(file, "utf8");
-  const kstackSpan = /<!-- kstack:begin -->[\s\S]*?<!-- kstack:end -->/;
+  const kstackSpans = /<!-- kstack:begin -->[\s\S]*?<!-- kstack:end -->/g;
   const legacySpan = new RegExp(`${esc(LEGACY_BEGIN)}[\\s\\S]*?${esc(LEGACY_END)}`);
 
   const upgraded = legacySpan.test(text);
   let next = upgraded ? text.replace(legacySpan, BLOCK) : text;
-  if (kstackSpan.test(next)) {
-    next = next.replace(kstackSpan, BLOCK);
-  } else if (!upgraded) {
-    next = `${text.trimEnd()}\n\n${BLOCK}\n`;
-  }
+  // Normalize every managed-block span and keep only the first — a file
+  // carrying both a legacy and a kstack block (or repeated paste-ins) would
+  // otherwise keep a permanent duplicate.
+  let seen = false;
+  next = next.replace(kstackSpans, () => (seen ? "" : ((seen = true), BLOCK)));
+  next = next.replace(/\n{3,}/g, "\n\n");
+  if (!seen) next = `${next.trimEnd()}\n\n${BLOCK}\n`;
 
-  if (next !== text) writeFileSync(file, next);
-  return { file, status: upgraded ? "upgraded" : next === text ? "unchanged" : "installed" };
+  if (next !== text) writeAtomic(file, next);
+  const status = upgraded ? "upgraded"
+    : next === text ? "unchanged"
+    : text.includes(BEGIN) ? "refreshed"
+    : "installed";
+  return { file, status };
 }

@@ -1756,7 +1756,7 @@ describe("/kstack init", () => {
       const file = path.join(dir, "AGENTS.md");
       writeFileSync(file, "HEAD\n\n<!-- kstack:begin -->\nold content\n<!-- kstack:end -->\n\nTAIL\n");
       const res = initAgentsMd(dir);
-      assert.equal(res.status, "installed");
+      assert.equal(res.status, "refreshed");
       const text = readFileSync(file, "utf8");
       assert.ok(!text.includes("old content"));
       assert.ok(text.includes("HEAD\n\n<!-- kstack:begin -->"));
@@ -1782,6 +1782,29 @@ describe("/kstack init", () => {
       // and a second run is a no-op
       const res2 = initAgentsMd(dir);
       assert.equal(res2.status, "unchanged");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("dedupes when both legacy and kstack blocks are present", () => {
+    const dir = tmpdir();
+    try {
+      const file = path.join(dir, "AGENTS.md");
+      writeFileSync(
+        file,
+        `HEAD\n\n<!-- kstack:begin -->\nstale\n<!-- kstack:end -->\n\nMID\n\n${LEGACY_BEGIN}\nold rules\n${LEGACY_END}\n\nTAIL\n`,
+      );
+      const res = initAgentsMd(dir);
+      assert.equal(res.status, "upgraded");
+      const text = readFileSync(file, "utf8");
+      assert.equal(text.match(/<!-- kstack:begin -->/g)?.length, 1);
+      assert.equal(text.match(/<!-- kstack:end -->/g)?.length, 1);
+      assert.ok(!text.includes(LEGACY_BEGIN));
+      assert.ok(text.includes("HEAD") && text.includes("MID") && text.includes("TAIL"));
+      const res2 = initAgentsMd(dir);
+      assert.equal(res2.status, "unchanged");
+      assert.equal(readFileSync(file, "utf8"), text);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
