@@ -1,8 +1,48 @@
+/**
+ * S3 step model: an atomic work-delivery unit inside a phase. `skill` is
+ * SINGULAR (0-or-1 per D19); `task` supports {previous}/{x}_summary
+ * interpolation like chain-step tasks. Absent `steps[]` on a phase means the
+ * implicit single step — the legacy path, byte-verbatim.
+ */
+export interface WorkflowStep {
+  id: string;
+  execution: "main" | "subagent";
+  /** Agent definition for delegated steps (execution: "subagent"). */
+  agent?: string;
+  /**
+   * Step instructions; interpolated like phase tasks ({goal}, {previous},
+   * {x}_summary). For main steps, the DELIVERABLE contract re-injected on
+   * resume is extracted from this text (mainContractFor) — a step without a
+   * `## DELIVERABLE`/`## OUTPUT CONTRACT` block resumes with no contract.
+   */
+  task: string;
+  /** 0-or-1 skill id delivered just-in-time for this step (D19). */
+  skill?: string;
+}
+
+/**
+ * One selectable item in the pre-flight selection-gate component, produced by
+ * gateInventory(workflow). kind "entry" is rendered ⚠ (side-effect gate).
+ */
+export interface GateRow {
+  phaseId: string;
+  /** Display name (phase name + position). */
+  name: string;
+  kind: "optional" | "entry" | "manual";
+  /** True for entry gates (side-effect phases) — rendered with ⚠. */
+  warning?: boolean;
+}
+
 export interface WorkflowPhase {
   id: string;
   name: string;
   execution: "main" | "subagent";
   agent?: string;
+  /**
+   * S3: declared steps of a stepped phase. Absent/empty = implicit single
+   * step (legacy path, byte-verbatim — no WorkflowStep is materialized).
+   */
+  steps?: WorkflowStep[];
   /**
    * Optional task override for single-agent phases. When absent, the generic
    * template keyed by phase id is used (buildAgentTask). Placeholders
@@ -127,8 +167,32 @@ export interface WorkflowState {
   results: Record<string, PhaseResult>;
   /** Skill digests already delivered in full during this run — repeats get the DoD gate only. */
   skillsDelivered?: string[];
-  /** State schema version (v2 added the sprint-loop fields; v3 = post-S2 kstack entry type). Old states load with fresh defaults. */
-  version?: 2 | 3;
+  /**
+   * S3 ledger: per-run identifier persisted at creation — restarts/resumes
+   * append to the SAME .kstack/ledger/<workflowId>-<runId>.jsonl file.
+   * Absent on v≤3 loads (the ledger falls back to a shared "adhoc" lane).
+   */
+  runId?: string;
+  /**
+   * S3: 0-based position of the CURRENT step inside phases[phaseIndex].steps.
+   * Defined ⟺ the current phase declares steps[] (INV-01); implicit-step
+   * phases never read or write it. Absent on v≤3 loads — access as `?? 0`.
+   */
+  stepIndex?: number;
+  /**
+   * S3/D20: pre-flight gate resolution mode. Absent or "human-gate" ⇒ today's
+   * park-for-human semantics; "selection-gate" ⇒ gates resolve from
+   * `gateOverrides`; gates WITHOUT an override fall back to the
+   * `KSTACK_PI_OPTIONAL_PHASES` env policy (default `ask` = park for human).
+   */
+  gateMode?: "human-gate" | "selection-gate";
+  /**
+   * S3/D20: persisted per-gate choices from the selection-gate panel. "skip"
+   * is legal only on optional-phase rows (INV-05; enforced at selection).
+   */
+  gateOverrides?: Record<string, "auto" | "human" | "skip">;
+  /** State schema version (v2 added the sprint-loop fields; v3 = post-S2 kstack entry type; v4 = S3 step model + gate fields). Old states load with fresh defaults. */
+  version?: 2 | 3 | 4;
   /** Completed-run counters per phase id — drives loop ceilings. Missing = fresh (backward-compatible). */
   attempts?: Record<string, number>;
   /** Orchestrator-parsed verdict for the current verdict-bearing phase (consumed by advancePhase). */

@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { WorkflowState, PhaseResult, WorkflowPhase, ParsedVerdict, VerdictParkCause } from "./types.ts";
+import type { WorkflowState, PhaseResult, WorkflowPhase, WorkflowStep, ParsedVerdict, VerdictParkCause } from "./types.ts";
 import { sprintMaxAttempts, sprintArchMaxAttempts, loopbacksEnabled, verdictsEnabled } from "./config.ts";
 import { buildRetryFeedback, PHASE_EXPECTATIONS, NEGATIVE_VALUES } from "./verdicts.ts";
 import { securityReviewArtifactRel, SPRINT_PLACEHOLDER } from "./artifacts.ts";
@@ -20,7 +20,33 @@ export function loadActiveState(ctx: ExtensionContext): WorkflowState | null {
         state &&
         (state.status === "active" || state.status === "paused" || state.status === "awaiting_approval")
       ) {
-        return state;
+        // Session-entry normalization (S3 review): the entry channel carries
+        // no schema guarantee — a corrupt/hand-edited state must not smuggle
+        // unknown gate values or a non-string runId downstream (runId feeds
+        // the ledger filename).
+        const normalized: WorkflowState = { ...state };
+        if (normalized.gateMode !== "selection-gate" && normalized.gateMode !== "human-gate") {
+          delete normalized.gateMode;
+          delete normalized.gateOverrides;
+        } else {
+          const ov = normalized.gateOverrides;
+          normalized.gateOverrides =
+            ov && typeof ov === "object"
+              ? (Object.fromEntries(
+                  Object.entries(ov).filter(([, v]) => v === "auto" || v === "human" || v === "skip"),
+                ) as WorkflowState["gateOverrides"])
+              : {};
+        }
+        if (typeof normalized.runId !== "string") delete normalized.runId;
+        // stepIndex is routing state too: a negative/NaN forged value flips
+        // insidePhase at the executor and skips skipWhen/optional/⚠ entry
+        // gates on a stepped phase (S3 security review, EoP class). Over-high
+        // positives are already clamped at delivery, so only drop non-integer
+        // or negative values here.
+        if (!Number.isInteger(normalized.stepIndex) || (normalized.stepIndex as number) < 0) {
+          delete normalized.stepIndex;
+        }
+        return normalized;
       }
       return null;
     }
@@ -35,8 +61,14 @@ export function createState(workflowId: string, goal: string): WorkflowState {
     status: "active",
     goal,
     results: {},
-    version: 3,
+    // v4 (S3): gate fields exist from creation (INV-06); stepIndex stays
+    // absent until a stepped phase is entered (INV-01).
+    version: 4,
     attempts: {},
+    gateMode: "human-gate",
+    gateOverrides: {},
+    // S3 ledger run id — a restart/resume appends to the same JSONL file.
+    runId: `${new Date().toISOString()}-${Math.random().toString(36).slice(2, 6)}`,
   };
 }
 
@@ -127,10 +159,18 @@ export function isSecurityFrozen(state: WorkflowState): boolean {
 }
 
 export function advancePhase(state: WorkflowState, phaseId: string, result: PhaseResult, totalPhases: number, opts?: AdvanceOptions): WorkflowState {
+  const phase = opts?.phases?.find((p) => p.id === phaseId);
   const next: WorkflowState = {
     ...state,
+    // S3/INV-01: leaving a phase always clears stepIndex — the next (or
+    // looped-back) phase establishes its own at entry. Implicit phases never
+    // carry it anyway, so this is a no-op for legacy runs.
+    stepIndex: undefined,
     attempts: { ...(state.attempts ?? {}) },
-    results: { ...state.results, [phaseId]: result },
+    // Phase-level summaries re-inject into every later phase's "Completed
+    // phases" block — the cap applies to STEPPED phases only: implicit phases
+    // stored verbatim summaries pre-S3 and keep byte-identity (C2/C17).
+    results: { ...state.results, [phaseId]: { ...result, summary: phase?.steps?.length ? capResultSummary(result.summary) : result.summary } },
     pendingVerdict: undefined,
     verdictPark: undefined,
     pausedReason: undefined,
@@ -147,7 +187,6 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
     next.retryContext = undefined;
   }
 
-  const phase = opts?.phases?.find((p) => p.id === phaseId);
   // B6 fix: with deterministic verdict parsing disabled, verdict-bearing
   // phases must NOT auto-advance. The kill-switch's documented contract is
   // "gates rely on human reading; no auto-routing" — meaning no routing in
@@ -211,6 +250,9 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
     }
 
     if (action.kind === "loop-back" && targetIndex >= 0) {
+      // The purge covers EVERY phase that re-executes: the loop target plus
+      // all phases between it and this gate (phases[targetIndex..phaseIndex]).
+      purgeStepResults(next.results, opts!.phases!, targetIndex, state.phaseIndex);
       const ceiling = ceilingFor(phase.loopBackTo, phase.maxAttempts);
       const runsDone = (next.attempts[phase.loopBackTo] ?? 0) + 1;
       next.attempts[phase.loopBackTo] = runsDone;
@@ -276,6 +318,10 @@ export function forceApproveParked(state: WorkflowState, phases?: WorkflowPhase[
     ...state,
     status: "active",
     phaseIndex: state.phaseIndex + 1,
+    // INV-01: moving phaseIndex must clear stepIndex — a stale value would
+    // flip insidePhase on the next phase, silently skipping its entry gates
+    // and all steps before the clamped last one (S3 review).
+    stepIndex: undefined,
     verdictPark: undefined,
     pendingVerdict: undefined,
     pausedReason: undefined,
@@ -296,10 +342,15 @@ export function returnParkedWithContext(state: WorkflowState, phases: WorkflowPh
   const targetIndex = phases.findIndex((p) => p.id === phase.loopBackTo);
   if (targetIndex < 0) return null;
   const prior = state.pendingVerdict?.parsed;
-  return {
+  const next: WorkflowState = {
     ...state,
     status: "active",
     phaseIndex: targetIndex,
+    // INV-01: same stale-stepIndex clear as every phaseIndex-moving
+    // transition — the loop target starts at its first step, not wherever
+    // the gate phase happened to leave the cursor.
+    stepIndex: undefined,
+    results: { ...state.results },
     verdictPark: undefined,
     pausedReason: undefined,
     retryContext: {
@@ -315,11 +366,22 @@ export function returnParkedWithContext(state: WorkflowState, phases: WorkflowPh
           .join("\n\n") || "(no structured blockers extracted — see the phase report above)",
     },
   };
+  // INV-04: the whole re-run span (loop target through the gate) re-executes —
+  // same purge as advancePhase's verdict loop-back; the rejected attempt's
+  // step summaries must not render as completed work.
+  purgeStepResults(next.results, phases, targetIndex, state.phaseIndex);
+  return next;
 }
 
 /** D3 unfreeze: clear the freeze; caller then advances manually. */
-export function unfreeze(state: WorkflowState): WorkflowState {
-  return { ...state, frozenUntilHuman: false, freezeInfo: undefined, pausedReason: undefined, status: "active" };
+export function unfreeze(state: WorkflowState, phases?: WorkflowPhase[]): WorkflowState {
+  // Unfreeze re-RUNS the parked phase (launchPhase → executeCurrentPhase) — a
+  // stale stepIndex would skip its entry gates and resume mid-step instead of
+  // restarting clean. Same class as the four phaseIndex-moving transitions.
+  const next: WorkflowState = { ...state, frozenUntilHuman: false, freezeInfo: undefined, pausedReason: undefined, status: "active", stepIndex: undefined, results: { ...state.results } };
+  // INV-04: the parked phase re-runs — its step keys are attempt-local.
+  if (phases) purgeStepResults(next.results, phases, state.phaseIndex, state.phaseIndex);
+  return next;
 }
 
 /**
@@ -337,7 +399,8 @@ export function forceContinuePastGate(state: WorkflowState, phases?: WorkflowPha
   const gate = phases?.[state.phaseIndex];
   const attempts = { ...(state.attempts ?? {}) };
   if (gate?.loopBackTo) delete attempts[gate.loopBackTo];
-  return { ...state, status: "active", phaseIndex: state.phaseIndex + 1, pendingVerdict: undefined, pausedReason: undefined, attempts };
+  // INV-01: moving phaseIndex clears stepIndex (stale cursor → skipped gates).
+  return { ...state, status: "active", phaseIndex: state.phaseIndex + 1, stepIndex: undefined, pendingVerdict: undefined, pausedReason: undefined, attempts };
 }
 
 /**
@@ -398,6 +461,76 @@ export function skipPendingOptional(state: WorkflowState, phases: WorkflowPhase[
   );
 }
 
+/**
+ * Summaries re-inject into every later prompt ({previous}, Completed-steps
+ * tails, resume context) — an unbounded report is an unbounded prompt
+ * amplification. ~4000 chars keeps the signal and bounds the surface; the
+ * verbatim summary still lands in the ledger (INV-L2 caps nothing there).
+ */
+function capResultSummary(summary: string): string {
+  return summary.length > 4000 ? `${summary.slice(0, 4000)}\n…[truncated]` : summary;
+}
+
+/**
+ * S3/INV-04: `results["<phase>.<step>"]` keys are attempt-local, not
+ * run-level truth — a rejected/interrupted attempt's step summaries must not
+ * re-inject into the re-run's `{previous}`, `{x.y_summary}` or the
+ * Completed-steps tail. Purges those keys for every stepped phase in
+ * `phases[fromIndex..toIndex]` inclusive. Used by every transition that
+ * re-runs phases: verdict loop-back (advancePhase), human-initiated return
+ * (returnParkedWithContext), gate re-issue (reissueGate) and unfreeze.
+ */
+function purgeStepResults(results: WorkflowState["results"], phases: WorkflowPhase[], fromIndex: number, toIndex: number): void {
+  for (const p of phases.slice(fromIndex, toIndex + 1)) {
+    if (!p.steps?.length) continue;
+    for (const k of Object.keys(results)) {
+      if (k.startsWith(p.id + ".")) delete results[k];
+    }
+  }
+}
+
+/**
+ * S3 step machine (INV-01/INV-02): record one step's result under
+ * `results["<phase>.<step>"]` and advance stepIndex to the NEXT step. The
+ * phase-level `results[phase.id]` is deliberately untouched — it is written
+ * by advancePhase when the LAST step completes (phase verdict = final step's
+ * output). A failed step parks at the SAME stepIndex so a resume re-delivers
+ * it (its recorded status is "failed", not "completed").
+ */
+export function recordStepResult(
+  state: WorkflowState,
+  phase: WorkflowPhase,
+  result: PhaseResult,
+): { state: WorkflowState; step: WorkflowStep; isLast: boolean } | null {
+  const steps = phase.steps;
+  if (!steps?.length) return null;
+  // Same clamp as the delivery path (executor): a corrupt over-high stepIndex
+  // delivers the LAST step's instructions — record its result consistently
+  // instead of erroring on an index the operator never saw.
+  const si = Math.min(state.stepIndex ?? 0, steps.length - 1);
+  const step = steps[si];
+  if (!step) return null;
+  result = { ...result, summary: capResultSummary(result.summary) };
+  const key = `${phase.id}.${step.id}`;
+  if (result.status === "failed") {
+    return {
+      state: {
+        ...state,
+        status: "paused",
+        pausedReason: `step-failed:${key}`,
+        results: { ...state.results, [key]: result },
+      },
+      step,
+      isLast: si === steps.length - 1,
+    };
+  }
+  return {
+    state: { ...state, results: { ...state.results, [key]: result }, stepIndex: si + 1 },
+    step,
+    isLast: si + 1 >= steps.length,
+  };
+}
+
 export function pauseState(state: WorkflowState): WorkflowState {
   return { ...state, status: "paused" };
 }
@@ -449,5 +582,10 @@ export function reissueGate(state: WorkflowState, phases: WorkflowPhase[]): Work
     // rejection's runsDone = attempts + 1 < ceiling).
     attempts[gatePhase.loopBackTo] = ceiling - 2;
   }
-  return { ...state, status: "active", pausedReason: undefined, attempts };
+  // Re-running the gate phase restarts it — INV-01: a stale step cursor must
+  // not carry into the re-run (harmless today: no stepped phase is a gate).
+  const next: WorkflowState = { ...state, status: "active", stepIndex: undefined, pausedReason: undefined, attempts, results: { ...state.results } };
+  // INV-04: the gate phase re-runs — purge its attempt-local step keys.
+  purgeStepResults(next.results, phases, state.phaseIndex, state.phaseIndex);
+  return next;
 }
