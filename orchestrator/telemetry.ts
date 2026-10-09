@@ -12,9 +12,12 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { ensureOperationalDirsIgnored } from "./ledger.ts";
 
 export interface RunReportStep {
   phaseId: string;
+  /** Workflow-step id when this entry is a delegated WorkflowStep — phaseId stays the real phase. */
+  stepId?: string;
   stepIndex: number;
   agent: string;
   durationMs: number;
@@ -78,6 +81,7 @@ export function recordDelegatedStep(step: RunReportStep): void {
   // Normalize so every persisted report carries the full stable key set.
   current.steps.push({
     phaseId: step.phaseId,
+    stepId: step.stepId,
     stepIndex: step.stepIndex,
     agent: step.agent,
     durationMs: step.durationMs,
@@ -115,7 +119,10 @@ export function buildRunReport(workflowId: string): RunReport {
 
 /** Filesystem-safe timestamp: colons are illegal in Windows file names. */
 export function runReportFileName(startedAt: string, workflowId: string): string {
-  return `${startedAt.replace(/:/g, "-")}-${workflowId}.json`;
+  // Same allowlist as ledgerPathFor — workflowId reaches here via persisted
+  // state (defense-in-depth; the workflow registry currently gates it).
+  const safe = (v: string) => v.replace(/[^\w-]/g, "-");
+  return `${startedAt.replace(/:/g, "-")}-${safe(workflowId)}.json`;
 }
 
 /**
@@ -128,7 +135,21 @@ export function writeRunReport(cwd: string, workflowId: string): string | null {
     const report = buildRunReport(workflowId);
     const dir = path.join(cwd, ".kstack", "runs");
     fs.mkdirSync(dir, { recursive: true });
+    ensureOperationalDirsIgnored(cwd);
+    // Same symlink-plant containment as appendLedger: a hostile .kstack/runs
+    // symlink must not turn the write into file creation outside the repo.
+    const rel = path.relative(fs.realpathSync(cwd), fs.realpathSync(dir));
+    if (rel.startsWith("..") || path.isAbsolute(rel)) return null;
     const filePath = path.join(dir, runReportFileName(report.startedAt, workflowId));
+    // File-level containment: the dir realpath does not cover a symlink at
+    // the filename itself (lstat catches dangling links too).
+    let lst: fs.Stats | null = null;
+    try {
+      lst = fs.lstatSync(filePath);
+    } catch {
+      /* ENOENT — new file, fine */
+    }
+    if (lst?.isSymbolicLink()) return null;
     fs.writeFileSync(filePath, JSON.stringify(report, null, 2), "utf-8");
     current = null;
     tokensUsedTotal = 0;

@@ -21,3 +21,6 @@ mindrun-*.md
 # devin environment + graft hooks (local, never committed)
 .devin/
 .ignore
+# kstack operational dirs (session data — never commit)
+.kstack/ledger/
+.kstack/runs/
