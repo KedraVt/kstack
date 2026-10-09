@@ -8,7 +8,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { createState, advancePhase, routeVerdict, parkForUnreadableVerdict, forceApproveParked, returnParkedWithContext, isSecurityFrozen, unfreeze, forceContinuePastGate, reissueGate } from "../orchestrator/state.ts";
+import { createState, advancePhase, routeVerdict, parkForUnreadableVerdict, forceApproveParked, returnParkedWithContext, isSecurityFrozen, unfreeze, forceContinuePastGate, reissueGate, resumeState } from "../orchestrator/state.ts";
 import { launchPhase } from "../orchestrator/executor.ts";
 import { decisionBlockedByInFlightChain, handleSprintPanel } from "../orchestrator/command.ts";
 import { getAllWorkflows, getWorkflow } from "../orchestrator/workflows.ts";
@@ -554,6 +554,31 @@ describe("D4 park helpers", () => {
     assert.equal(next.pendingVerdict, undefined);
     assert.equal(next.pausedReason, undefined);
   });
+
+  test("phaseIndex-moving park transitions clear a stale stepIndex (S3 review: gate-bypass class)", () => {
+    // A stepIndex surviving a phaseIndex move flips insidePhase on the new
+    // phase — entry gates skipped, only the last step delivered. Latent today
+    // (no stepped phase neighbors a gate) but the invariant must hold.
+    const withCursor = { stepIndex: 2 };
+
+    const approved = forceApproveParked(parkForUnreadableVerdict(sprintState(8, withCursor), "qa-verdict", "no-verdict"));
+    assert.equal(approved.stepIndex, undefined, "forceApproveParked");
+
+    const returned = returnParkedWithContext(parkForUnreadableVerdict(sprintState(8, withCursor), "qa-verdict", "no-verdict"), SPRINT.phases);
+    assert.ok(returned);
+    assert.equal(returned!.stepIndex, undefined, "returnParkedWithContext");
+
+    const continued = forceContinuePastGate(sprintState(7, { ...withCursor, pausedReason: "loop-exhausted:implement", pendingVerdict: { phaseId: "devsecops-review", parsed: null, excerpt: "" } }));
+    assert.equal(continued.stepIndex, undefined, "forceContinuePastGate");
+
+    const reissued = reissueGate(sprintState(7, { ...withCursor, pausedReason: "loop-exhausted:implement" }), SPRINT.phases);
+    assert.equal(reissued.stepIndex, undefined, "reissueGate (non-resume path)");
+
+    // And the resume paths still KEEP the cursor — same-phase mid-step resume
+    // is the legitimate carrier.
+    const kept = resumeState(sprintState(2, { ...withCursor, pausedReason: "step-failed:plan.draft" }));
+    assert.equal(kept.stepIndex, 2, "resumeState keeps stepIndex (same-phase mid-step)");
+  });
 });
 
 describe("D4 park cause distinction", () => {
@@ -615,9 +640,9 @@ describe("D4 park cause distinction", () => {
 // --- State migration ---------------------------------------------------------------
 
 describe("state migration (v2 fields default on old states)", () => {
-  test("createState stamps version 3 + fresh attempt counters", () => {
+  test("createState stamps version 4 + fresh attempt counters", () => {
     const s = createState("sprint", "goal");
-    assert.equal(s.version, 3);
+    assert.equal(s.version, 4); // v4: stepIndex/gateMode/gateOverrides (S3 step model)
     assert.deepEqual(s.attempts, {});
   });
 
@@ -1363,6 +1388,72 @@ describe("in-flight decision guards (2026-09 fix 4)", () => {
     release();
     await new Promise((r) => setTimeout(r, 10));
     assert.match(buildResumeContext(sprintState(0)), /re-parked meanwhile/, "rider reverts after the chain settles");
+  });
+
+  test("human gate resolutions land in the ledger (S3 review: repudiation hole)", async () => {
+    const { readLedger } = await import("../orchestrator/ledger.ts");
+    const cwd = tmpDir("kstack-panel-ledger-");
+    try {
+      const mkPanel = (select: string, confirm = false) => ({
+        cmdCtx: {
+          cwd,
+          ui: {
+            notify: () => {},
+            setStatus: () => {},
+            input: async () => "fix it",
+            select: async () => select,
+            confirm: async () => confirm,
+          },
+        } as any,
+        pi: { appendEntry: () => {} } as any,
+      });
+
+      // "Return phase with context" — a verdict-park resolution writes
+      // kind:"gate" decision:"return" addressed at the PARKED phase.
+      const parked = parkForUnreadableVerdict(sprintState(8), "devsecops-review", "artifact-mismatch");
+      const p1 = mkPanel("Return phase with context");
+      assert.equal(await handleSprintPanel(parked, p1.cmdCtx, p1.pi), true);
+      let entries = readLedger(cwd, parked);
+      let gate = entries.find((e) => e.kind === "gate" && e.payload.decision === "return");
+      assert.ok(gate, "the human 'Return' click must be ledgered");
+      assert.equal(gate!.payload.gateId, "devsecops-review", "gateId names the parked phase, not the loop target");
+
+      // "Abort workflow" — the shared abortWorkflow funnel writes
+      // decision:"abort" (covers all 8 abort call sites).
+      const parked2 = parkForUnreadableVerdict(sprintState(8), "qa-verdict", "artifact-mismatch");
+      const p2 = mkPanel("Abort workflow", true);
+      assert.equal(await handleSprintPanel(parked2, p2.cmdCtx, p2.pi), true);
+      entries = readLedger(cwd, parked2);
+      gate = entries.find((e) => e.kind === "gate" && e.payload.decision === "abort");
+      assert.ok(gate, "the human 'Abort' click must be ledgered");
+      assert.equal(gate!.payload.gateId, "qa-verdict");
+
+      // Loop-exhaustion park: pausedReason encodes the LOOP TARGET
+      // ("implement after 4 runs"), but the release must attribute the GATE
+      // phase the workflow is parked at (devsecops-review) — pass-5 review.
+      const exhausted = sprintState(7, { status: "paused" as const, pausedReason: "loop-exhausted:implement after 4 runs" });
+      const p3 = mkPanel("Accept result — continue past the gate");
+      // "Accept" launches a real delegation whose spawned child would hold the
+      // tmp dir — flip ctx.ui stale right after the select resolves so the
+      // chain's ctxAlive() probe kills it before the spawn.
+      const liveUi = p3.cmdCtx.ui;
+      let uiLive = true;
+      Object.defineProperty(p3.cmdCtx, "ui", {
+        get: () => { if (!uiLive) throw new Error("stale ctx"); return liveUi; },
+      });
+      liveUi.select = async () => { uiLive = false; return "Accept result — continue past the gate"; };
+      assert.equal(await handleSprintPanel(exhausted, p3.cmdCtx, p3.pi), true);
+      entries = readLedger(cwd, exhausted);
+      gate = entries.find((e) => e.kind === "gate" && e.payload.decision === "run");
+      assert.ok(gate, "the human 'Accept' click must be ledgered");
+      assert.equal(gate!.payload.gateId, "devsecops-review", "gateId names the parked gate phase, not the loop target");
+    } finally {
+      // The "return"/"accept" resolutions launch fire-and-forget chains that
+      // may still be settling (a spawned child holds the tmp dir on Windows) —
+      // retry the removal long enough to outlive the chain's fast failure.
+      await new Promise((r) => setTimeout(r, 500));
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 60, retryDelay: 250 });
+    }
   });
 });
 

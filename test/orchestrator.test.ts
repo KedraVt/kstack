@@ -4,12 +4,12 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { createState, advancePhase, abortState, resumeState, pauseState, gateForApproval, approveNext, gateOptionalPhase, approveOptionalPhase, skipPendingOptional, loadActiveState } from "../orchestrator/state.ts";
+import { createState, advancePhase, abortState, resumeState, pauseState, gateForApproval, approveNext, gateOptionalPhase, approveOptionalPhase, skipPendingOptional, loadActiveState, recordStepResult, returnParkedWithContext, unfreeze, reissueGate } from "../orchestrator/state.ts";
 import { getAllWorkflows, getWorkflow, getWorkflowIds } from "../orchestrator/workflows.ts";
 import { loadSkillFull, loadSkillGate, getSkillInfo, buildSkillIndex, getSkillIds } from "../orchestrator/skills.ts";
-import { buildPhaseInstructions, buildDeterministicPlan, planFilePath, parsePlanFileMarker, resolvePlanFilePath, carryOverOpenQuestions } from "../orchestrator/templates.ts";
+import { buildPhaseInstructions, buildDeterministicPlan, planFilePath, parsePlanFileMarker, resolvePlanFilePath, carryOverOpenQuestions, buildStepInstructions, buildStepTask, mainContractFor } from "../orchestrator/templates.ts";
 import type { WorkflowContext, WorkflowPhase } from "../orchestrator/types.ts";
-import { launchPhase, ctxAlive, isPhaseInFlight, advanceBlockReason, releasePhaseInFlight, buildResumeContext, activeConstraintLines, statusLineFor } from "../orchestrator/executor.ts";
+import { launchPhase, ctxAlive, isPhaseInFlight, advanceBlockReason, releasePhaseInFlight, buildResumeContext, activeConstraintLines, statusLineFor, executeCurrentPhase } from "../orchestrator/executor.ts";
 import { initOrchestrator } from "../orchestrator/index.ts";
 import { activityLabelFromEvent } from "../orchestrator/spawn.ts";
 import { runSubagent, resolveTimeoutMs } from "../orchestrator/spawn.ts";
@@ -23,6 +23,7 @@ import {
   resetTelemetry,
 } from "../orchestrator/telemetry.ts";
 import { initAgentsMd } from "../orchestrator/init.ts";
+import { gateInventory, configureGates } from "../orchestrator/gates.ts";
 
 // --- Live subagent activity labels ----------------------------------------
 
@@ -393,16 +394,19 @@ describe("skill ingestion", () => {
 
 describe("skill tiering in orchestrator instructions", () => {
   test("MAIN phases embed full methodology (canonical catalog source)", () => {
-    const plan = findPhase("develop", "plan");
-    assert.equal(plan.execution, "main");
-    const instructions = buildPhaseInstructions(plan, makeCtx("develop", 2));
+    // develop.plan migrated to steps (S3) — its skills now ship per-step via
+    // buildStepInstructions. This test targets a still-implicit main phase to
+    // keep asserting the phase-level digest path byte-for-byte.
+    const phase = findPhase("sprint", "system-design");
+    assert.equal(phase.execution, "main");
+    const instructions = buildPhaseInstructions(phase, makeCtx("sprint", 3));
     // Canonical catalog: the SKILL.md frontmatter (`name: <dir>`) is embedded.
     // The marker proves the FULL methodology shipped — not just the compact gate.
-    assert.ok(instructions.includes("name: kstack-grilling"), "kstack-grilling protocol missing");
-    assert.ok(instructions.includes("frontier"), "interview protocol content missing");
+    assert.ok(instructions.includes("name: kstack-system-design"), "system-design methodology missing");
+    assert.ok(instructions.includes("Ubiquitous Language"), "domain-modeling content missing");
     assert.ok(
-      instructions.includes("name: kstack-plan-eng-review"),
-      "eng rigor missing",
+      instructions.includes("name: kstack-adr"),
+      "adr methodology missing",
     );
   });
 
@@ -1638,6 +1642,23 @@ describe("statusLineFor", () => {
     assert.equal(statusLineFor({ ...state, status: "completed" as const }, sprint), undefined);
     assert.equal(statusLineFor({ ...state, status: "aborted" as const }, sprint), undefined);
   });
+
+  test("stepped phase names the current step: `phase (n/m) · step <id> (i/k)`", () => {
+    const develop = getWorkflow("develop")!;
+    const planIdx = develop.phases.findIndex((p) => p.id === "plan");
+    assert.ok(planIdx >= 0 && develop.phases[planIdx].steps?.length === 3);
+    const state = { ...createState("develop", "g"), phaseIndex: planIdx, stepIndex: 1 };
+    assert.equal(
+      statusLineFor(state, develop),
+      "Full Development Cycle: Interactive Planning (3/8) · step draft (2/3)",
+    );
+  });
+
+  test("implicit phases carry no step suffix — unchanged pre-S3 shape", () => {
+    const develop = getWorkflow("develop")!;
+    const state = { ...createState("develop", "g"), phaseIndex: 0 };
+    assert.equal(statusLineFor(state, develop), "Full Development Cycle: Understand Requirements (1/8)");
+  });
 });
 
 describe("kstack_phase tool", () => {
@@ -1807,6 +1828,1471 @@ describe("/kstack init", () => {
       assert.equal(readFileSync(file, "utf8"), text);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// --- S3: Step model + pilota ------------------------------------------------
+
+describe("S3 step model — types & state v4 (TASK_01)", () => {
+  test("createState produces a v4 state with gate fields", () => {
+    const state = createState("develop", "build a thing");
+    assert.equal(state.version, 4);
+    assert.equal(state.gateMode, "human-gate");
+    assert.deepEqual(state.gateOverrides, {});
+    // stepIndex is defined only while a stepped phase is current (INV-01)
+    assert.equal(state.stepIndex, undefined);
+  });
+
+  test("a hand-written v3-shaped state loads tolerantly — step/gate fields absent", () => {
+    const legacy = {
+      workflowId: "develop",
+      phaseIndex: 0,
+      status: "active",
+      goal: "x",
+      results: {},
+      version: 3,
+      attempts: {},
+    };
+    const ctx: any = {
+      sessionManager: {
+        getEntries: () => [{ type: "custom", customType: "kstack-wf-state", data: legacy }],
+      },
+    };
+    const loaded = loadActiveState(ctx);
+    assert.ok(loaded, "v3 state must load");
+    assert.equal(loaded!.version, 3);
+    assert.equal(loaded!.stepIndex, undefined);
+    assert.equal(loaded!.gateMode, undefined);
+    assert.equal(loaded!.gateOverrides, undefined);
+  });
+
+  test("loadActiveState normalizes gate fields — unknown gateMode/override values rejected", () => {
+    const poisoned = {
+      workflowId: "develop",
+      phaseIndex: 0,
+      status: "active",
+      goal: "x",
+      results: {},
+      version: 4,
+      gateMode: "bogus",
+      gateOverrides: { plan: "auto" },
+      runId: 42,
+    };
+    const ctx: any = {
+      sessionManager: {
+        getEntries: () => [{ type: "custom", customType: "kstack-wf-state", data: poisoned }],
+      },
+    };
+    const loaded = loadActiveState(ctx);
+    assert.ok(loaded);
+    assert.equal(loaded!.gateMode, undefined, "unknown gateMode must drop (absent = human-gate default)");
+    assert.equal(loaded!.gateOverrides, undefined, "overrides must not survive an invalid gateMode");
+    assert.equal(loaded!.runId, undefined, "non-string runId must drop — it feeds the ledger filename");
+
+    // stepIndex is routing state (S3 security pass-3): a forged negative/NaN
+    // flips insidePhase and skips a stepped phase's entry gates.
+    const forIdx = (stepIndex: unknown) =>
+      loadActiveState({
+        sessionManager: { getEntries: () => [{ type: "custom", customType: "kstack-wf-state", data: { ...poisoned, stepIndex } }] },
+      } as any);
+    assert.equal(forIdx(-1)!.stepIndex, undefined, "negative stepIndex must drop");
+    assert.equal(forIdx(NaN)!.stepIndex, undefined, "NaN stepIndex must drop");
+    assert.equal(forIdx(1.5)!.stepIndex, undefined, "non-integer stepIndex must drop");
+    assert.equal(forIdx(2)!.stepIndex, 2, "a valid mid-step index survives (delivery clamps over-high)");
+
+    const partial = {
+      ...poisoned,
+      gateMode: "selection-gate",
+      gateOverrides: { plan: "auto", qa: "nope", ship: "skip" },
+      runId: "ok-run",
+    };
+    const ctx2: any = {
+      sessionManager: {
+        getEntries: () => [{ type: "custom", customType: "kstack-wf-state", data: partial }],
+      },
+    };
+    const l2 = loadActiveState(ctx2);
+    assert.equal(l2!.gateMode, "selection-gate");
+    assert.deepEqual(l2!.gateOverrides, { plan: "auto", ship: "skip" }, "only auto|human|skip values may survive");
+    assert.equal(l2!.runId, "ok-run");
+  });
+
+  test("WorkflowPhase accepts steps[]; GateRow kinds cover optional/entry/manual", () => {
+    const step: import("../orchestrator/types.ts").WorkflowStep = {
+      id: "s1",
+      execution: "main",
+      task: "do the thing",
+      skill: "kstack-grilling",
+    };
+    const phase: WorkflowPhase = { id: "p", name: "P", execution: "main", optional: false, steps: [step] };
+    assert.equal(phase.steps?.length, 1);
+    assert.equal(phase.steps![0].skill, "kstack-grilling");
+    const rows: import("../orchestrator/types.ts").GateRow[] = [
+      { phaseId: "a", name: "A", kind: "optional" },
+      { phaseId: "b", name: "B", kind: "entry", warning: true },
+      { phaseId: "c", name: "C", kind: "manual" },
+    ];
+    assert.deepEqual(rows.map((r) => r.kind), ["optional", "entry", "manual"]);
+  });
+});
+
+describe("S3 pilot — skill registry (TASK_04)", () => {
+  test("kstack-plan-draft is registered and its DoD gate parses", () => {
+    const info = getSkillInfo("kstack-plan-draft");
+    assert.ok(info, "kstack-plan-draft missing from REGISTRY — s2 draft step would run skill-less");
+    assert.ok(existsSync(info!.skillPath), `canonical SKILL.md missing at ${info!.skillPath}`);
+    const gate = loadSkillGate("kstack-plan-draft");
+    assert.ok(gate, "loadSkillGate returned null — '## DoD gate' section missing");
+    assert.ok(gate!.includes("## DoD gate"), "gate must carry the parsed section header");
+  });
+});
+
+describe("S3 step builders — templates (TASK_02)", () => {
+  const STEPPED: WorkflowPhase = {
+    id: "plan",
+    name: "Interactive Planning",
+    execution: "main",
+    optional: false,
+    advance: "manual",
+    steps: [
+      {
+        id: "interrogate",
+        execution: "main",
+        skill: "kstack-grilling",
+        task: "## DELIVERABLE\nAn answered decision frontier.\n\n## STOP CONDITION\nStop when: the frontier is empty.\n\n## CONTEXT\n{open_questions}",
+      },
+      { id: "draft", execution: "main", skill: "kstack-plan-draft", task: "## DELIVERABLE\nPlan file written.\n\n## STOP CONDITION\nStop when: file exists." },
+      { id: "eng-review", execution: "main", skill: "kstack-plan-eng-review", task: "## DELIVERABLE\nReview verdict.\n\n## STOP CONDITION\nStop when: reviewed." },
+    ],
+  };
+
+  test("byte-stable prefix: retry context lands ONLY in the volatile tail", () => {
+    const ctx = makeCtx("develop", 2);
+    const a = buildStepInstructions(STEPPED, STEPPED.steps![0], ctx);
+    const retryCtx: WorkflowContext = {
+      ...ctx,
+      state: {
+        ...ctx.state,
+        retryContext: { targetPhaseId: "plan", attempt: 2, maxAttempts: 4, feedback: "BLOCKER: fix the thing first" },
+      },
+    };
+    const b = buildStepInstructions(STEPPED, STEPPED.steps![0], retryCtx);
+    assert.ok(b.length > a.length, "retry context must add output");
+    assert.ok(b.startsWith(a), "the stable prefix must be byte-identical — retry delta belongs at the tail only");
+    assert.ok(b.slice(a.length).includes("BLOCKER: fix the thing first"), "retry feedback missing from tail");
+  });
+
+  test("step skill block: full on first delivery, DoD gate on repeat, none when skill absent", () => {
+    const ctx = makeCtx("develop", 2);
+    const first = buildStepInstructions(STEPPED, STEPPED.steps![0], ctx);
+    assert.ok(first.includes("#### Skill gate: kstack-grilling"), "skill block header missing");
+    assert.ok(first.includes("Full skill documentation for deep consultation"), "first delivery must embed the FULL skill");
+
+    const repeat = buildStepInstructions(STEPPED, STEPPED.steps![0], {
+      ...ctx,
+      state: { ...ctx.state, skillsDelivered: ["kstack-grilling"] },
+    });
+    assert.ok(repeat.includes("## DoD gate: kstack-grilling"), "repeat delivery must degrade to the parsed DoD gate");
+    assert.ok(!repeat.includes("Full skill documentation for deep consultation"), "repeat must not re-embed the full skill");
+
+    const noSkill: WorkflowPhase = { ...STEPPED, steps: [{ id: "x", execution: "main", task: "work" }] };
+    const bare = buildStepInstructions(noSkill, noSkill.steps![0], ctx);
+    assert.ok(!bare.includes("Skill gate"), "0-skill step must emit no skill block (D19)");
+
+    const unknown: WorkflowPhase = { ...STEPPED, steps: [{ id: "x", execution: "main", task: "work", skill: "no-such-skill" }] };
+    const skipped = buildStepInstructions(unknown, unknown.steps![0], ctx);
+    assert.ok(!skipped.includes("Skill gate"), "unknown skill id must be skipped, never thrown");
+  });
+
+  test("prior-step results render in the volatile tail; dotted keys stay out of the phase list", () => {
+    const ctx = makeCtx("develop", 2);
+    ctx.state.results = {
+      understand: { status: "completed", summary: "understood the ask" },
+      "plan.interrogate": { status: "completed", summary: "frontier answered" },
+    };
+    const out = buildStepInstructions(STEPPED, STEPPED.steps![1], ctx);
+    assert.ok(out.includes("understand: understood the ask") || out.includes("**understand**: understood the ask"), "phase-level results must still render");
+    assert.ok(!/### Completed phases[\s\S]*plan\.interrogate/.test(out), "dotted step keys must not appear in the phase-level list");
+    assert.ok(out.includes("interrogate") && out.includes("frontier answered"), "prior step summary must surface in the tail");
+    // ordering: step results must come AFTER the stable prefix (tail position)
+    assert.ok(out.indexOf("frontier answered") > out.indexOf("### Completed"), "step summaries belong after the stable prefix");
+  });
+
+  test("widened {x_summary} interpolation resolves dotted step keys", () => {
+    const ctx = makeCtx("develop", 2);
+    ctx.state.results["plan.draft"] = { status: "completed", summary: "draft ready at .kstack/plans/x.md" };
+    const phase: WorkflowPhase = {
+      ...STEPPED,
+      steps: [{ id: "eng-review", execution: "main", task: "Review {plan.draft_summary} now." }],
+    };
+    const out = buildStepInstructions(phase, phase.steps![0], ctx);
+    assert.ok(out.includes("Review draft ready at .kstack/plans/x.md now."), "{plan.draft_summary} must resolve through the dotted key");
+  });
+
+  test("{previous} resolves to the previous step's recorded summary", () => {
+    const ctx = makeCtx("develop", 2);
+    ctx.state.results["plan.interrogate"] = { status: "completed", summary: "Q&A settled: scope is minimal" };
+    const phase: WorkflowPhase = { ...STEPPED, steps: [STEPPED.steps![0], { ...STEPPED.steps![1], task: "Draft from: {previous}" }] };
+    const out = buildStepInstructions(phase, phase.steps![1], ctx);
+    assert.ok(out.includes("Draft from: Q&A settled: scope is minimal"), "{previous} must carry the last step's summary");
+    const first = buildStepInstructions(phase, phase.steps![0], ctx);
+    assert.ok(!first.includes("{previous}"), "first step has no {previous} content");
+  });
+
+  test("mainContractFor(phase, ctx, step) returns the step task's own DELIVERABLE/STOP lines", () => {
+    const step = STEPPED.steps![0];
+    const contract = mainContractFor(STEPPED, { state: makeCtx("develop", 2).state }, step);
+    assert.ok(contract.includes("An answered decision frontier"), "step DELIVERABLE must be extracted");
+    assert.ok(contract.includes("the frontier is empty"), "step STOP CONDITION must be extracted");
+    assert.ok(!contract.includes("## CONTEXT"), "step CONTEXT is not part of the contract");
+    // No step → the phase-level contract path is unchanged.
+    const phaseLevel = mainContractFor(STEPPED, { state: makeCtx("develop", 2).state });
+    assert.ok(phaseLevel.includes("plan file") || phaseLevel.includes(".kstack/plans"), "phase contract fallback intact");
+  });
+
+  test("buildStepTask = step.task + FULL skill + OUTPUT_CONTRACT (never buildDeterministicPlan)", () => {
+    const task = buildStepTask({ id: "audit", execution: "subagent", agent: "reviewer", skill: "kstack-review", task: "## DELIVERABLE\nAudit the diff." });
+    assert.ok(task.includes("Audit the diff."), "task text missing");
+    assert.ok(task.includes("## Skill methodology: kstack-review"), "delegated steps always embed the FULL skill");
+    assert.ok(!task.includes("## DoD gate: kstack-review"), "delegated steps must never get the bare gate");
+    assert.ok(task.trim().endsWith("DO NOT REDO: what the next agent must NOT redo") || task.includes("## OUTPUT CONTRACT"), "OUTPUT_CONTRACT must close the task");
+
+    const bare = buildStepTask({ id: "x", execution: "subagent", agent: "worker", task: "plain task" });
+    assert.ok(bare.startsWith("plain task"), "no-skill step keeps its task verbatim");
+    assert.ok(bare.includes("## OUTPUT CONTRACT"), "OUTPUT_CONTRACT still required");
+    assert.ok(!bare.includes("## METHODOLOGY"), "no skill → no methodology block");
+
+    const unknown = buildStepTask({ id: "x", execution: "subagent", agent: "worker", skill: "ghost-skill", task: "plain" });
+    assert.ok(unknown.includes("## OUTPUT CONTRACT"), "unknown skill id must not break the task");
+  });
+
+  test("duplicate steps[].id is a dev-time defect — instruction build must throw", () => {
+    const dup: WorkflowPhase = {
+      id: "p", name: "P", execution: "main", optional: false,
+      steps: [
+        { id: "a", execution: "main", task: "x" },
+        { id: "a", execution: "main", task: "y" },
+      ],
+    };
+    assert.throws(
+      () => buildStepInstructions(dup, dup.steps![0], makeCtx("develop", 0)),
+      /duplicate|unique/i,
+      "duplicate step ids collide on results['phase.step'] keys and findIndex resolution",
+    );
+  });
+
+  test("a subagent step under KSTACK_PI_DETERMINISTIC=off gets subagent-tool guidance + FULL digest", () => {
+    const saved = process.env.KSTACK_PI_DETERMINISTIC;
+    process.env.KSTACK_PI_DETERMINISTIC = "off";
+    try {
+      const phase: WorkflowPhase = {
+        id: "p", name: "P", execution: "main", optional: false,
+        steps: [
+          { id: "probe", execution: "subagent", agent: "scout", skill: "kstack-plan-draft", task: "## DELIVERABLE\nProbe. {previous}" },
+        ],
+      };
+      const out = buildStepInstructions(phase, phase.steps![0], makeCtx("develop", 0));
+      assert.ok(out.includes("`subagent`"), "the model must be told to delegate via the subagent tool");
+      assert.ok(out.includes('"agent": "scout"'), "the JSON params must name the step's agent");
+      assert.ok(
+        out.includes("## Skill methodology: kstack-plan-draft"),
+        "first delivery must embed the FULL digest inside the delegated task — a bare DoD gate starves the step",
+      );
+    } finally {
+      if (saved === undefined) delete process.env.KSTACK_PI_DETERMINISTIC; else process.env.KSTACK_PI_DETERMINISTIC = saved;
+    }
+  });
+});
+
+// --- TASK_03 + TASK_06: step state machine, executor dispatch, develop.plan pilot ---
+
+describe("S3 pilot — develop.plan is a 3-step phase (TASK_06)", () => {
+  test("plan declares interrogate → draft → eng-review, each main + one skill (D19)", () => {
+    const plan = findPhase("develop", "plan");
+    assert.ok(plan.steps && plan.steps.length === 3, "plan must declare exactly 3 steps");
+    assert.deepEqual(plan.steps!.map((s) => s.id), ["interrogate", "draft", "eng-review"]);
+    assert.deepEqual(plan.steps!.map((s) => s.skill), ["kstack-grilling", "kstack-plan-draft", "kstack-plan-eng-review"]);
+    assert.ok(plan.steps!.every((s) => s.execution === "main"), "pilot steps are all main");
+    assert.equal(plan.advance, "manual", "the human gate still fires once — after step 3");
+    // Non-plan develop phases stay implicit (mixed interop is the point).
+    assert.ok(getWorkflow("develop")!.phases.filter((p) => p.id !== "plan").every((p) => !p.steps?.length),
+      "every other develop phase must remain implicit");
+  });
+});
+
+describe("S3 step state machine — recordStepResult (TASK_03)", () => {
+  const STEP_PHASE: WorkflowPhase = {
+    id: "plan", name: "Plan", execution: "main", optional: false, advance: "manual",
+    steps: [
+      { id: "a", execution: "main", task: "A" },
+      { id: "b", execution: "main", task: "B" },
+      { id: "c", execution: "main", task: "C" },
+    ],
+  };
+
+  test("records results['phase.step'], bumps stepIndex, reports isLast", () => {
+    const s = { ...createState("develop", "g"), phaseIndex: 2, stepIndex: 0 };
+    const r = recordStepResult(s, STEP_PHASE, { status: "completed", summary: "did A" });
+    assert.ok(r, "stepped phase must produce a record");
+    assert.equal(r!.state.results["plan.a"]?.summary, "did A");
+    assert.equal(r!.state.stepIndex, 1);
+    assert.equal(r!.isLast, false);
+    assert.equal(r!.step.id, "a");
+    assert.equal(r!.state.status, "active", "mid-step completion keeps the workflow active");
+    // Phase-level key is NOT written yet — that belongs to the final step's advance.
+    assert.equal(r!.state.results["plan"], undefined);
+  });
+
+  test("last step → isLast; advancePhase then records results[phase] and clears stepIndex", () => {
+    const phases = getWorkflow("develop")!.phases;
+    const s: import("../orchestrator/types.ts").WorkflowState = {
+      ...createState("develop", "g"),
+      phaseIndex: 2,
+      stepIndex: 2,
+      results: {
+        "plan.a": { status: "completed", summary: "a" },
+        "plan.b": { status: "completed", summary: "b" },
+      },
+    };
+    const r = recordStepResult(s, STEP_PHASE, { status: "completed", summary: "did C" });
+    assert.equal(r!.isLast, true);
+    const fin = advancePhase(r!.state, "plan", { status: "completed", summary: "did C" }, phases.length, { phases });
+    assert.equal(fin.results["plan"]?.summary, "did C", "phase-level result = final step's summary");
+    assert.equal(fin.stepIndex, undefined, "stepIndex is defined iff the CURRENT phase is stepped (INV-01)");
+    assert.equal(fin.phaseIndex, 3);
+    // Per-step results persist for audit + {x.y_summary} interpolation.
+    assert.equal(fin.results["plan.c"]?.summary, "did C");
+  });
+
+  test("a failed step pauses at the SAME stepIndex — resume re-delivers it", () => {
+    const s = { ...createState("develop", "g"), phaseIndex: 2, stepIndex: 1 };
+    const r = recordStepResult(s, STEP_PHASE, { status: "failed", summary: "b blew up" });
+    assert.equal(r!.state.status, "paused");
+    assert.equal(r!.state.stepIndex, 1, "failed step index must not move — the retry re-runs it");
+    assert.equal(r!.state.results["plan.b"]?.status, "failed");
+  });
+
+  test("returns null for an implicit phase", () => {
+    const implicit = findPhase("develop", "understand");
+    assert.equal(recordStepResult({ ...createState("develop", "g"), phaseIndex: 0 }, implicit, { status: "completed", summary: "x" }), null);
+  });
+
+  test("loop-back clears the target phase's stale step results", () => {
+    const phases = getWorkflow("sprint")!.phases.map((p) =>
+      p.id === "implement"
+        ? { ...p, steps: [{ id: "be", execution: "subagent" as const, agent: "backend-developer", task: "x" }] }
+        : p,
+    );
+    const state: import("../orchestrator/types.ts").WorkflowState = {
+      ...createState("sprint", "g"),
+      phaseIndex: 8, // qa-verdict
+      sprintNumber: 1,
+      results: {
+        "implement.be": { status: "completed", summary: "attempt-1 code" },
+        implement: { status: "completed", summary: "phase summary" },
+      },
+      pendingVerdict: { phaseId: "qa-verdict", parsed: { verdicts: { status: "red" }, vars: {} } as any, excerpt: "" },
+      stepIndex: 0,
+    };
+    const next = advancePhase(state, "qa-verdict", { status: "completed", summary: "qa red" }, phases.length, { phases });
+    assert.equal(next.phaseIndex, 6, "red verdict loops back to implement");
+    assert.equal(next.results["implement.be"], undefined, "stale step results of the loop target must not leak into the retry");
+    assert.equal(next.stepIndex, undefined);
+  });
+
+  test("loop-back clears stale step keys for EVERY re-run phase, not only the target", () => {
+    const phases: WorkflowPhase[] = [
+      { id: "p-a", name: "A", execution: "main", optional: false, steps: [{ id: "s1", execution: "main", task: "x" }] },
+      { id: "p-b", name: "B", execution: "main", optional: false, steps: [{ id: "s1", execution: "main", task: "x" }] },
+      { id: "qa-verdict", name: "Gate", execution: "subagent", optional: false, loopBackTo: "p-a", maxAttempts: 5 },
+    ];
+    const state: import("../orchestrator/types.ts").WorkflowState = {
+      ...createState("sprint", "g"),
+      phaseIndex: 2,
+      sprintNumber: 1,
+      results: {
+        "p-a.s1": { status: "completed", summary: "a attempt-1" },
+        "p-b.s1": { status: "completed", summary: "b attempt-1" },
+        "p-a": { status: "completed", summary: "phase a" },
+      },
+      pendingVerdict: { phaseId: "qa-verdict", parsed: { verdicts: { status: "red" }, vars: {} } as any, excerpt: "" },
+    };
+    const next = advancePhase(state, "qa-verdict", { status: "completed", summary: "qa red" }, phases.length, { phases });
+    assert.equal(next.phaseIndex, 0, "red verdict loops back to p-a");
+    assert.equal(next.results["p-a.s1"], undefined, "the loop target's step keys must clear");
+    assert.equal(next.results["p-b.s1"], undefined, "p-b re-runs too — its stale step keys must clear as well");
+  });
+
+  test("human-initiated returns purge stale step keys too (pass-6 review: INV-04)", () => {
+    // The verdict-park return path performs the same loop-back transition as
+    // advancePhase's — a stepped loop target must re-run with a clean slate.
+    const phases: WorkflowPhase[] = [
+      { id: "impl", name: "Impl", execution: "main", optional: false, steps: [{ id: "s1", execution: "main", task: "x" }] },
+      { id: "gate", name: "Gate", execution: "subagent", optional: false, loopBackTo: "impl", maxAttempts: 5 },
+    ];
+    const parked: import("../orchestrator/types.ts").WorkflowState = {
+      ...createState("sprint", "g"),
+      phaseIndex: 1,
+      sprintNumber: 1,
+      verdictPark: "gate",
+      results: {
+        "impl.s1": { status: "completed", summary: "rejected attempt's step output" },
+        impl: { status: "completed", summary: "phase summary" },
+      },
+      pendingVerdict: { phaseId: "gate", parsed: { verdicts: { status: "red" }, vars: {} } as any, excerpt: "" },
+    };
+    const returned = returnParkedWithContext(parked, phases);
+    assert.ok(returned);
+    assert.equal(returned!.phaseIndex, 0);
+    assert.equal(returned!.results["impl.s1"], undefined, "the rejected attempt's step keys must not re-inject into the re-run");
+    assert.equal(returned!.results["impl"]?.status, "completed", "phase-level results are untouched");
+
+    // reissueGate: the (stepped) gate phase itself re-runs → its step keys purge.
+    const exhausted: import("../orchestrator/types.ts").WorkflowState = {
+      ...createState("sprint", "g"),
+      phaseIndex: 1,
+      sprintNumber: 1,
+      status: "paused",
+      pausedReason: "loop-exhausted:impl after 4 runs",
+      results: { "gate.s9": { status: "completed", summary: "stale" } },
+    };
+    const steppedGate = phases.map((p) => (p.id === "gate" ? { ...p, steps: [{ id: "s9", execution: "main" as const, task: "x" }] } : p));
+    const reissued = reissueGate(exhausted, steppedGate);
+    assert.equal(reissued.results["gate.s9"], undefined, "a re-run gate phase must not inherit its previous attempt's step keys");
+
+    // unfreeze: the (stepped) parked phase re-runs → its step keys purge.
+    const frozen: import("../orchestrator/types.ts").WorkflowState = {
+      ...createState("sprint", "g"),
+      phaseIndex: 0,
+      sprintNumber: 1,
+      frozenUntilHuman: true,
+      results: { "impl.s1": { status: "completed", summary: "frozen attempt's step output" } },
+    };
+    const unfrozen = unfreeze(frozen, phases);
+    assert.equal(unfrozen.results["impl.s1"], undefined, "an unfrozen phase re-runs clean");
+    // …and the prior attempt's keys in the SOURCE state are untouched (no mutation).
+    assert.equal(frozen.results["impl.s1"]?.status, "completed");
+  });
+
+  test("capResultSummary applies to STEPPED phases only — implicit phases keep verbatim summaries (C2/C17)", () => {
+    const longSummary = "z".repeat(5000);
+    const phases: WorkflowPhase[] = [
+      { id: "plain", name: "Plain", execution: "main", optional: false },
+      { id: "stepped", name: "Stepped", execution: "main", optional: false, steps: [{ id: "s1", execution: "main", task: "x" }] },
+    ];
+    const s = { ...createState("sprint", "g"), phaseIndex: 0 };
+    const afterPlain = advancePhase(s, "plain", { status: "completed", summary: longSummary }, phases.length, { phases });
+    assert.equal(afterPlain.results["plain"]!.summary, longSummary, "implicit (legacy) phases store summaries verbatim — byte-identity preserved");
+    const stepped = { ...afterPlain, phaseIndex: 1 };
+    const afterStepped = advancePhase(stepped, "stepped", { status: "completed", summary: longSummary }, phases.length, { phases });
+    assert.ok(afterStepped.results["stepped"]!.summary.length <= 4100, "stepped-phase summaries stay capped (amplification bound)");
+  });
+
+  test("recordStepResult caps an oversized summary (belt for the kstack_advance boundary)", () => {
+    const s = { ...createState("develop", "g"), phaseIndex: 2, stepIndex: 0 };
+    const r = recordStepResult(s, STEP_PHASE, { status: "completed", summary: "y".repeat(9000) });
+    assert.ok(r!.state.results["plan.a"]!.summary.length <= 4100, "unbounded summaries re-inject into every later prompt");
+  });
+});
+
+// Shared S3 harness: fake ExtensionAPI/ExtensionContext pair whose session
+// entries are inspectable. Module scope — reused by the executor, gate and
+// ledger describes below. Each harness gets an isolated cwd under one temp
+// root so appendLedger/writeRunReport NEVER touch the repo's .kstack/.
+const HARNESS_TMP_ROOT = mkdtempSync(path.join(os.tmpdir(), "kstack-harness-"));
+let harnessSeq = 0;
+function fakeHarness(initialState: unknown) {
+  const entries: any[] = initialState ? [{ type: "custom", customType: "kstack-wf-state", data: initialState }] : [];
+  const tools = new Map<string, any>();
+  const sent: string[] = [];
+  const notes: Array<{ msg: string; level: string }> = [];
+  const handlers = new Map<string, any>();
+  const pi: any = {
+    registerTool: (t: any) => tools.set(t.name, t),
+    registerCommand: () => {},
+    on: (ev: string, fn: any) => handlers.set(ev, fn),
+    exec: async () => ({ stdout: "", stderr: "" }),
+    appendEntry: (_t: string, d: any) => entries.push({ type: "custom", customType: _t, data: d }),
+    sendUserMessage: (m: string) => sent.push(m),
+  };
+  const cwd = path.join(HARNESS_TMP_ROOT, `t${harnessSeq++}`);
+  fs.mkdirSync(cwd, { recursive: true });
+  const ctx: any = {
+    cwd,
+    ui: { notify: (msg: string, level: string) => notes.push({ msg, level }), setStatus: () => {} },
+    sessionManager: { getEntries: () => entries },
+  };
+  return { pi, tools, ctx, entries, sent, notes, handlers };
+}
+const lastState = (h: ReturnType<typeof fakeHarness>) => h.entries.filter((e: any) => e.customType === "kstack-wf-state").at(-1)!.data;
+
+describe("S3 executor — stepped dispatch (TASK_03)", () => {
+
+  test("kstack_advance on a stepped phase records results['phase.step'] and hands the next step", async () => {
+    const state = { ...createState("develop", "g"), phaseIndex: 2, stepIndex: 0 };
+    const h = fakeHarness(state);
+    initOrchestrator(h.pi);
+    const res = await h.tools.get("kstack_advance").execute("t", { summary: "frontier settled", status: "completed" }, undefined, undefined, h.ctx);
+    assert.ok(res.content[0].text.includes("draft"), "the tool result must name the next step");
+    const s = lastState(h);
+    assert.equal(s.stepIndex, 1);
+    assert.equal(s.results["plan.interrogate"]?.summary, "frontier settled");
+    assert.equal(s.results["plan"], undefined, "phase result only at the LAST step");
+    assert.equal(s.status, "active");
+    // The next step's chain is fire-and-forget — wait for it to deliver step 2
+    // exactly once and release the in-flight marker (also unblocks later tests:
+    // the in-flight registry is module-level and keyed on develop:2).
+    for (let i = 0; i < 200 && isPhaseInFlight("develop", 2); i++) await new Promise((r) => setTimeout(r, 10));
+    assert.ok(h.sent.some((m) => m.includes("Step 2/3") && m.includes("draft")), "step-2 instructions must be delivered exactly once");
+  });
+
+  test("final step advance records the phase result and parks at the manual gate ONCE", async () => {
+    const state = {
+      ...createState("develop", "g"),
+      phaseIndex: 2,
+      stepIndex: 2,
+      results: {
+        "plan.interrogate": { status: "completed", summary: "q&a" },
+        "plan.draft": { status: "completed", summary: "drafted" },
+      },
+    };
+    const h = fakeHarness(state);
+    initOrchestrator(h.pi);
+    releasePhaseInFlight("develop", 2); // in-flight registry is module-level — drop any stale marker
+    const res = await h.tools.get("kstack_advance").execute("t", { summary: "reviewed — PLAN FILE: .kstack/plans/x.md", status: "completed" }, undefined, undefined, h.ctx);
+    assert.ok(res.content[0].text.includes("decision phase") || res.content[0].text.includes("PAUSED"), "manual gate must park after the last step");
+    const s = lastState(h);
+    assert.equal(s.status, "awaiting_approval", "one human gate after step 3");
+    assert.equal(s.results["plan.eng-review"]?.status, "completed");
+    assert.equal(s.results["plan"]?.status, "completed", "phase-level result recorded for {plan_summary} consumers");
+    assert.equal(s.stepIndex, undefined);
+    assert.equal(s.phaseIndex, 3);
+  });
+
+  test("kstack_phase re-fetches the CURRENT step's instructions (compaction guard)", async () => {
+    const state = { ...createState("develop", "g"), phaseIndex: 2, stepIndex: 1 };
+    const h = fakeHarness(state);
+    initOrchestrator(h.pi);
+    const res = await h.tools.get("kstack_phase").execute("t", {}, undefined, undefined, h.ctx);
+    assert.ok(res.content[0].text.includes("Step 2/3"), "step position must be named");
+    assert.ok(res.content[0].text.includes("draft"), "current step id must be named");
+  });
+
+  test("executeCurrentPhase delivers step-0 instructions on entry and persists stepIndex=0", async () => {
+    const h = fakeHarness(undefined);
+    const state = { ...createState("develop", "g"), phaseIndex: 2 };
+    await executeCurrentPhase(h.pi, h.ctx, state as any);
+    const persisted = h.entries.find((e) => e.data.stepIndex === 0);
+    assert.ok(persisted, "INV-01: entering a stepped phase must persist stepIndex");
+    assert.ok(h.sent.some((m) => m.includes("Step 1/3") && m.includes("interrogate")), "step-1 instructions must be delivered");
+  });
+
+  test("mid-step resume re-delivers the CURRENT step (no result → re-deliver)", async () => {
+    const h = fakeHarness(undefined);
+    const state = {
+      ...createState("develop", "g"),
+      phaseIndex: 2,
+      stepIndex: 1,
+      results: { "plan.interrogate": { status: "completed", summary: "done" } },
+    };
+    await executeCurrentPhase(h.pi, h.ctx, state as any);
+    assert.ok(h.sent.some((m) => m.includes("Step 2/3") && m.includes("draft")), "restart must re-deliver step 2");
+  });
+
+  test("resume banner 'Completed:' lists phase keys only — a finished step is not a finished phase", () => {
+    const state = {
+      ...createState("develop", "g"),
+      phaseIndex: 2,
+      stepIndex: 1,
+      results: {
+        understand: { status: "completed", summary: "scoped" },
+        "plan.interrogate": { status: "completed", summary: "q&a" },
+      },
+    };
+    const text = buildResumeContext(state as any);
+    assert.match(text, /Current step: draft \(2\/3\)/, "the step posture line names the current step");
+    const completedLine = text.split("\n").find((l) => l.startsWith("Completed:"));
+    assert.ok(completedLine?.includes("understand"), "completed phases still listed");
+    assert.ok(
+      !completedLine!.includes("plan.interrogate"),
+      "dotted step keys must not render as completed phases (design: phase keys only — mirroring the prior-results filter in buildStepInstructions)",
+    );
+  });
+
+  test("a delegated step spawns its subagent; kstack_advance is refused while it runs", async () => {
+    const wf: import("../orchestrator/types.ts").Workflow = {
+      id: "s3-stepped-test", name: "Stepped Test", description: "t", intents: [],
+      phases: [{
+        id: "mix", name: "Mixed", execution: "main", optional: false,
+        steps: [
+          { id: "probe", execution: "subagent", agent: "scout", task: "## DELIVERABLE\nProbe it." },
+          { id: "finish", execution: "main", task: "## DELIVERABLE\nFinish up from {previous}." },
+        ],
+      }],
+    };
+    getAllWorkflows().push(wf);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    try {
+      const spawned: string[] = [];
+      const state = { ...createState("s3-stepped-test", "g"), phaseIndex: 0 };
+      const h = fakeHarness(state);
+      initOrchestrator(h.pi);
+      launchPhase(h.pi, h.ctx, state as any, (p, c, s) =>
+        executeCurrentPhase(p, c, s, {
+          spawnFn: async (req: any) => {
+            spawned.push(req.agent);
+            await gate;
+            return { ok: true, output: "probe done", exitCode: 0, durationMs: 1 } as any;
+          },
+        } as any),
+      );
+      for (let i = 0; i < 200 && spawned.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+      assert.deepEqual(spawned, ["scout"], "the delegated step must spawn its subagent");
+
+      // While the delegation is in flight, kstack_advance must refuse.
+      const refused = await h.tools.get("kstack_advance").execute("t", { summary: "premature", status: "completed" }, undefined, undefined, h.ctx);
+      assert.ok(/still running|wait/i.test(refused.content[0].text), "advance during a delegated step must be refused");
+
+      release();
+      for (let i = 0; i < 200 && h.sent.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+      assert.ok(h.sent.some((m) => m.includes("probe done")), "delegated output must reach the model for review");
+
+      // Review → advance records the step result and delivers the next step.
+      const adv = await h.tools.get("kstack_advance").execute("t", { summary: "probe reviewed", status: "completed" }, undefined, undefined, h.ctx);
+      assert.ok(adv.content[0].text.includes("finish"), "next step must be named");
+      assert.equal(lastState(h).results["mix.probe"]?.summary, "probe reviewed");
+      assert.equal(lastState(h).stepIndex, 1);
+    } finally {
+      release();
+      const i = getAllWorkflows().indexOf(wf);
+      if (i >= 0) getAllWorkflows().splice(i, 1);
+    }
+  });
+
+  test("a delegated step's task interpolation never mangles the {previous} literal inside its skill digest", async () => {
+    // kstack-plan-draft SKILL.md documents `{previous}` literally (backtick-quoted).
+    // Interpolating AFTER the digest is embedded replaces that documentation too.
+    const wf: import("../orchestrator/types.ts").Workflow = {
+      id: "s3-interp-test", name: "Interp", description: "t", intents: [],
+      phases: [{
+        id: "mix", name: "Mixed", execution: "main", optional: false,
+        steps: [
+          { id: "probe", execution: "subagent", agent: "scout", skill: "kstack-plan-draft", task: "## DELIVERABLE\nProbe. Prior: {previous}" },
+          { id: "finish", execution: "main", task: "## DELIVERABLE\nFinish." },
+        ],
+      }],
+    };
+    getAllWorkflows().push(wf);
+    try {
+      const state = { ...createState("s3-interp-test", "g"), phaseIndex: 0 };
+      const h = fakeHarness(state);
+      let task = "";
+      await executeCurrentPhase(h.pi, h.ctx, state as any, {
+        spawnFn: async (req: any) => { task = req.task; return { ok: true, output: "done", exitCode: 0, durationMs: 1 } as any; },
+      } as any);
+      assert.ok(task.includes("Prior: (no prior output)"), "the step's own {previous} token must interpolate");
+      assert.ok(task.includes("`{previous}`"), "the literal {previous} documented inside the skill digest must survive verbatim");
+    } finally {
+      const i = getAllWorkflows().indexOf(wf);
+      if (i >= 0) getAllWorkflows().splice(i, 1);
+      releasePhaseInFlight("s3-interp-test", 0);
+    }
+  });
+
+  test("a delegated step under KSTACK_PI_DETERMINISTIC=off still delivers delegation guidance", async () => {
+    const saved = process.env.KSTACK_PI_DETERMINISTIC;
+    process.env.KSTACK_PI_DETERMINISTIC = "off";
+    const wf: import("../orchestrator/types.ts").Workflow = {
+      id: "s3-nodet-test", name: "NoDet", description: "t", intents: [],
+      phases: [{
+        id: "mix", name: "Mixed", execution: "main", optional: false,
+        steps: [
+          { id: "probe", execution: "subagent", agent: "scout", skill: "kstack-plan-draft", task: "## DELIVERABLE\nProbe it." },
+          { id: "finish", execution: "main", task: "## DELIVERABLE\nFinish." },
+        ],
+      }],
+    };
+    getAllWorkflows().push(wf);
+    try {
+      const state = { ...createState("s3-nodet-test", "g"), phaseIndex: 0 };
+      const h = fakeHarness(state);
+      let spawned = 0;
+      await executeCurrentPhase(h.pi, h.ctx, state as any, {
+        spawnFn: async () => { spawned++; return { ok: true, output: "x", exitCode: 0, durationMs: 1 } as any; },
+      } as any);
+      assert.equal(spawned, 0, "deterministic delegation is off — no chain spawn");
+      const msg = h.sent.at(-1) ?? "";
+      assert.ok(msg.includes("`subagent`"), "the model must be instructed to delegate via the subagent tool");
+      assert.ok(msg.includes('"agent": "scout"'), "the step's agent must be named in the tool params");
+      assert.ok(msg.includes("## Skill methodology: kstack-plan-draft"), "the delegated task must carry the FULL digest");
+    } finally {
+      const i = getAllWorkflows().indexOf(wf);
+      if (i >= 0) getAllWorkflows().splice(i, 1);
+      releasePhaseInFlight("s3-nodet-test", 0);
+      if (saved === undefined) delete process.env.KSTACK_PI_DETERMINISTIC; else process.env.KSTACK_PI_DETERMINISTIC = saved;
+    }
+  });
+});
+
+// --- S3: pre-flight gate configuration (TASK_05 / D20) ----------------------
+
+describe("S3 pre-flight gate inventory (TASK_05)", () => {
+  test("sprint yields one row per gated phase; subagent+manual dedupes to a single ⚠ entry row", () => {
+    const rows = gateInventory(getWorkflow("sprint")!);
+    const byId = new Map(rows.map((r) => [r.phaseId, r]));
+    assert.deepEqual(rows.map((r) => r.phaseId), ["understand", "system-design", "architect-gate", "backlog", "commit-archive"]);
+    assert.equal(byId.get("architect-gate")!.kind, "entry");
+    assert.equal(byId.get("architect-gate")!.warning, true, "entry gates are marked ⚠");
+    assert.equal(byId.get("commit-archive")!.kind, "entry");
+    assert.equal(byId.get("understand")!.kind, "manual");
+    assert.equal(byId.get("system-design")!.kind, "manual");
+    assert.equal(byId.get("backlog")!.kind, "manual");
+    // Verdict gates are routing gates, not human gates — never rows.
+    assert.ok(!byId.has("implement") && !byId.has("devsecops-review") && !byId.has("qa-verdict"));
+  });
+
+  test("ship: push-pr excluded explicitly; optional phases produce optional rows", () => {
+    const rows = gateInventory(getWorkflow("ship")!);
+    assert.ok(!rows.some((r) => r.phaseId === "push-pr"), "push-pr must never be a pre-flight row");
+    assert.deepEqual(rows.map((r) => [r.phaseId, r.kind]), [["update-docs", "optional"]]);
+  });
+
+  test("develop: plan manual gate + three optional phases; quick is gate-free", () => {
+    assert.deepEqual(
+      gateInventory(getWorkflow("develop")!).map((r) => [r.phaseId, r.kind]),
+      [["plan", "manual"], ["qa", "optional"], ["ship", "optional"], ["document", "optional"]],
+    );
+    assert.deepEqual(gateInventory(getWorkflow("quick")!), [], "gate-free workflow ⇒ no dialog");
+  });
+
+  test("env predicates mirror the gate sites — disabled machinery means no rows", () => {
+    const keys = ["KSTACK_PI_MANUAL_GATES", "KSTACK_PI_DETERMINISTIC", "KSTACK_PI_OPTIONAL_PHASES"];
+    const saved = keys.map((k) => [k, process.env[k]] as const);
+    try {
+      process.env.KSTACK_PI_MANUAL_GATES = "off";
+      assert.deepEqual(gateInventory(getWorkflow("sprint")!), [], "manual gates off ⇒ no human gates can fire");
+      delete process.env.KSTACK_PI_MANUAL_GATES;
+      process.env.KSTACK_PI_DETERMINISTIC = "off";
+      assert.deepEqual(
+        gateInventory(getWorkflow("sprint")!).map((r) => [r.phaseId, r.kind]),
+        [
+          ["understand", "manual"],
+          ["system-design", "manual"],
+          ["architect-gate", "manual"],
+          ["backlog", "manual"],
+          ["commit-archive", "manual"],
+        ],
+        "entry gates can't fire without deterministic delegation, but the post-completion manual gate still does — degrade to a manual row, don't vanish",
+      );
+      delete process.env.KSTACK_PI_DETERMINISTIC;
+      process.env.KSTACK_PI_OPTIONAL_PHASES = "skip";
+      assert.deepEqual(gateInventory(getWorkflow("ship")!), [], "env-skip already decided optional phases");
+    } finally {
+      for (const [k, v] of saved) {
+        if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      }
+    }
+  });
+});
+
+describe("S3 selection-gate consultation (TASK_05)", () => {
+  test("optional row override 'skip' auto-skips the phase; 'human' parks like ask mode", async () => {
+    const shipWf = getWorkflow("ship")!;
+    const lastIdx = shipWf.phases.length - 1; // update-docs — last phase, so skipping completes
+    assert.equal(shipWf.phases[lastIdx].id, "update-docs");
+    assert.ok(shipWf.phases[lastIdx].optional);
+
+    const skipped = { ...createState("ship", "g"), phaseIndex: lastIdx, gateMode: "selection-gate" as const, gateOverrides: { "update-docs": "skip" as const } };
+    const h1 = fakeHarness(skipped);
+    await executeCurrentPhase(h1.pi, h1.ctx, skipped as any);
+    const s1 = lastState(h1);
+    assert.equal(s1.results["update-docs"]?.status, "skipped", "override skip must auto-skip");
+    assert.equal(s1.status, "completed", "skipping the last phase completes the workflow");
+
+    const human = { ...createState("ship", "g"), phaseIndex: lastIdx, gateMode: "selection-gate" as const, gateOverrides: { "update-docs": "human" as const } };
+    const h2 = fakeHarness(human);
+    await executeCurrentPhase(h2.pi, h2.ctx, human as any);
+    const s2 = lastState(h2);
+    assert.equal(s2.status, "awaiting_approval", "override human parks exactly like ask mode");
+    assert.equal(s2.pendingOptional, true);
+  });
+
+  test("human-gate mode ignores gateOverrides entirely (status quo)", async () => {
+    const shipWf = getWorkflow("ship")!;
+    const lastIdx = shipWf.phases.length - 1;
+    const state = { ...createState("ship", "g"), phaseIndex: lastIdx, gateMode: "human-gate" as const, gateOverrides: { "update-docs": "skip" as const } };
+    const h = fakeHarness(state);
+    await executeCurrentPhase(h.pi, h.ctx, state as any);
+    const s = lastState(h);
+    assert.equal(s.status, "awaiting_approval", "human-gate mode never consults overrides");
+  });
+
+  test("manual row override 'auto' skips the post-completion park; 'human' parks", async () => {
+    // sprint.understand is main+manual; the next phase (user-story) is main — no spawn needed.
+    for (const [override, parked] of [["auto", false], ["human", true]] as const) {
+      const state = { ...createState("sprint", "g"), phaseIndex: 0, sprintNumber: 7, gateMode: "selection-gate" as const, gateOverrides: { understand: override } };
+      const h = fakeHarness(state);
+      initOrchestrator(h.pi);
+      const res = await h.tools.get("kstack_advance").execute("t", { summary: "understood", status: "completed" }, undefined, undefined, h.ctx);
+      const s = lastState(h);
+      if (parked) {
+        assert.equal(s.status, "awaiting_approval", "override human parks exactly as today");
+        assert.ok(res.content[0].text.includes("decision phase") || res.content[0].text.includes("PAUSED"));
+      } else {
+        assert.equal(s.status, "active", "override auto must skip the manual park");
+        assert.equal(s.phaseIndex, 1);
+        assert.ok(res.content[0].text.includes("Advancing to"));
+      }
+      for (let i = 0; i < 200 && isPhaseInFlight("sprint", 1); i++) await new Promise((r) => setTimeout(r, 10));
+      releasePhaseInFlight("sprint", 1);
+    }
+  });
+
+  test("selection-gate 'auto' on a manual gate is audited — kind:'gate' decision:'auto' lands in the ledger", async () => {
+    const state = { ...createState("sprint", "g"), phaseIndex: 0, sprintNumber: 7, gateMode: "selection-gate" as const, gateOverrides: { understand: "auto" as const } };
+    const h = fakeHarness(state);
+    initOrchestrator(h.pi);
+    await h.tools.get("kstack_advance").execute("t", { summary: "understood", status: "completed" }, undefined, undefined, h.ctx);
+    const s = lastState(h);
+    assert.equal(s.status, "active", "auto still skips the park");
+    const entries = readLedger(h.ctx.cwd, s);
+    assert.ok(
+      entries.some((e) => e.kind === "gate" && e.payload.gateId === "understand" && e.payload.decision === "auto"),
+      "an auto-suppressed manual gate must be audited under the phase id (gateId↔phaseId join)",
+    );
+    for (let i = 0; i < 200 && isPhaseInFlight("sprint", 1); i++) await new Promise((r) => setTimeout(r, 10));
+    releasePhaseInFlight("sprint", 1);
+  });
+
+  test("entry row override 'auto' runs the side-effect phase without the entry park", async () => {
+    // sprint.commit-archive is subagent+manual — its entry gate parks BEFORE the delegation.
+    const wf = getWorkflow("sprint")!;
+    const idx = wf.phases.findIndex((p) => p.id === "commit-archive");
+    assert.ok(idx >= 0);
+    let spawned = 0;
+    const state = { ...createState("sprint", "g"), phaseIndex: idx, sprintNumber: 7, gateMode: "selection-gate" as const, gateOverrides: { "commit-archive": "auto" as const } };
+    const h = fakeHarness(state);
+    await executeCurrentPhase(h.pi, h.ctx, state as any, {
+      spawnFn: async () => { spawned++; return { ok: true, output: "archived", exitCode: 0, durationMs: 1 } as any; },
+    } as any);
+    assert.equal(spawned, 1, "override auto must run the entry-gated phase directly");
+    assert.equal(lastState(h).entryGate, undefined, "no entry park recorded");
+
+    const human = { ...createState("sprint", "g"), phaseIndex: idx, sprintNumber: 7, gateMode: "selection-gate" as const, gateOverrides: { "commit-archive": "human" as const } };
+    const h2 = fakeHarness(human);
+    await executeCurrentPhase(h2.pi, h2.ctx, human as any);
+    assert.equal(lastState(h2).entryGate, true, "override human parks at entry exactly as today");
+  });
+});
+
+describe("S3 gate-configure dialog (TASK_05)", () => {
+  test("component maps rows to overrides; entry/manual rows never offer skip (INV-05)", async () => {
+    const rows = gateInventory(getWorkflow("develop")!); // plan manual + qa/ship/document optional
+    let captured: any;
+    const resultPromise = configureGates(rows, {
+      ui: {
+        custom: (factory: any) => new Promise((resolve) => {
+          const produced = factory(null, null, null, resolve);
+          if (produced instanceof Promise) produced.then((c) => (captured = c));
+          else captured = produced;
+        }),
+      },
+    } as any);
+    assert.ok(captured, "ctx.ui.custom factory must produce a component");
+    // INV-05: skip is only selectable on optional rows — read the SettingsList items.
+    const items = (captured as any).items as Array<{ id: string; values?: string[] }>;
+    const planRow = items.find((i) => i.id === "plan")!;
+    assert.ok(!planRow.values!.includes("skip"), "manual rows must not offer skip");
+    const qaRow = items.find((i) => i.id === "qa")!;
+    assert.ok(qaRow.values!.includes("skip"), "optional rows offer skip");
+    const modeRow = items.find((i) => i.id === "__mode__")!;
+    assert.ok(modeRow.values!.includes("selection-gate") && modeRow.values!.includes("human-gate"));
+    captured.handleInput("\x1b"); // escape dismisses → undefined
+    assert.equal(await resultPromise, undefined, "dismissed dialog resolves undefined (caller defaults to human-gate)");
+  });
+
+  function captureDialog(rows: ReturnType<typeof gateInventory>) {
+    let captured: any;
+    const resultPromise = configureGates(rows, {
+      ui: {
+        custom: (factory: any) => new Promise((resolve) => {
+          captured = factory(null, null, null, resolve);
+        }),
+      },
+    } as any, "Full Development Cycle");
+    return { captured, resultPromise };
+  }
+
+  // develop rows: [__mode__, plan, qa, ship, document, __done__]
+  const DOWN = "\x1b[B";
+  const ENTER = "\r";
+
+  test("the panel renders a title naming the workflow — never a bare list", async () => {
+    const { captured, resultPromise } = captureDialog(gateInventory(getWorkflow("develop")!));
+    const lines: string[] = captured.render(80);
+    assert.ok(
+      lines.slice(0, 3).some((l) => l.includes("Full Development Cycle")),
+      "the dialog's first lines must name the workflow it configures",
+    );
+    captured.handleInput("\x1b");
+    await resultPromise;
+  });
+
+  test("keyboard submit maps rows to gateMode + gateOverrides (selection-gate)", async () => {
+    const { captured, resultPromise } = captureDialog(gateInventory(getWorkflow("develop")!));
+    captured.handleInput(ENTER); // __mode__ cycles human-gate → selection-gate
+    captured.handleInput(DOWN); // plan
+    captured.handleInput(DOWN); // qa
+    captured.handleInput(ENTER); // qa cycles human → auto
+    captured.handleInput(DOWN); // ship
+    captured.handleInput(DOWN); // document
+    captured.handleInput(DOWN); // __done__
+    captured.handleInput(ENTER); // submit
+    assert.deepEqual(await resultPromise, {
+      gateMode: "selection-gate",
+      gateOverrides: { qa: "auto" },
+    });
+  });
+
+  test("entry rows render the ⚠ marker and default to 'human' (D20)", async () => {
+    const { captured, resultPromise } = captureDialog(gateInventory(getWorkflow("sprint")!));
+    const items = (captured as any).items as Array<{ id: string; label: string; currentValue: string }>;
+    const entry = items.find((i) => i.id === "architect-gate")!;
+    assert.ok(entry.label.includes("⚠"), "side-effect entry gates must render the ⚠ marker, not just carry a data flag");
+    assert.equal(entry.currentValue, "human", "entry gates default to human");
+    assert.ok(!items.find((i) => i.id === "understand")!.label.includes("⚠"), "non-entry rows carry no ⚠");
+    captured.handleInput("\x1b");
+    await resultPromise;
+  });
+
+  test("human-gate submit drops per-gate choices — they are inert state under human-gate semantics", async () => {
+    const { captured, resultPromise } = captureDialog(gateInventory(getWorkflow("develop")!));
+    captured.handleInput(DOWN); // plan
+    captured.handleInput(DOWN); // qa
+    captured.handleInput(ENTER); // qa → auto (but mode stays human-gate)
+    captured.handleInput(DOWN); // ship
+    captured.handleInput(DOWN); // document
+    captured.handleInput(DOWN); // __done__
+    captured.handleInput(ENTER); // submit
+    assert.deepEqual(await resultPromise, { gateMode: "human-gate", gateOverrides: {} });
+  });
+});
+
+// --- S3: append-only ledger (TASK_07 / D28) ---------------------------------
+
+import { appendLedger, ledgerPathFor, readLedger } from "../orchestrator/ledger.ts";
+
+describe("S3 append-only ledger (TASK_07)", () => {
+  test("a step completion writes one verbatim kind:'step' entry under .kstack/ledger", async () => {
+    const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-ledger-"));
+    try {
+      const state = { ...createState("develop", "g"), phaseIndex: 2, stepIndex: 0 };
+      const h = fakeHarness(state);
+      h.ctx.cwd = cwd;
+      initOrchestrator(h.pi);
+      const res = await h.tools.get("kstack_advance").execute("t", { summary: "frontier settled", status: "completed" }, undefined, undefined, h.ctx);
+      assert.ok(!res.isError);
+      const dir = path.join(cwd, ".kstack", "ledger");
+      const files = fs.readdirSync(dir);
+      assert.equal(files.length, 1, "one ledger file per run");
+      assert.ok(files[0].endsWith(".jsonl"));
+      const entries = readFileSync(path.join(dir, files[0]), "utf-8").trim().split("\n").map((l) => JSON.parse(l));
+      const step = entries.find((e) => e.kind === "step");
+      assert.ok(step, "a step completion must be ledgered");
+      assert.equal(step.workflowId, "develop");
+      assert.equal(step.phaseId, "plan");
+      assert.equal(step.stepId, "interrogate");
+      assert.equal(step.payload.summary, "frontier settled", "INV-L2: summary verbatim");
+      assert.ok(typeof step.at === "string" && step.at.includes("T"), "ISO-8601 timestamp");
+      for (let i = 0; i < 200 && isPhaseInFlight("develop", 2); i++) await new Promise((r) => setTimeout(r, 10));
+      releasePhaseInFlight("develop", 2);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("appends never truncate — a resumed run keeps its earlier entries", () => {
+    const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-ledger-"));
+    try {
+      const state = { ...createState("develop", "g") };
+      appendLedger(cwd, state, { kind: "step", phaseId: "plan", stepId: "interrogate", payload: { summary: "first" } });
+      appendLedger(cwd, state, { kind: "step", phaseId: "plan", stepId: "draft", payload: { summary: "second" } });
+      const file = ledgerPathFor(cwd, state);
+      const lines = readFileSync(file, "utf-8").trim().split("\n").map((l) => JSON.parse(l));
+      assert.equal(lines.length, 2);
+      assert.equal(lines[0].payload.summary, "first");
+      assert.equal(lines[1].payload.summary, "second");
+      // And a second append AFTER reading still appends (the file was not rewritten).
+      appendLedger(cwd, state, { kind: "phase", phaseId: "plan", payload: { summary: "done" } });
+      assert.equal(readFileSync(file, "utf-8").trim().split("\n").length, 3);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("a write failure degrades to a notify — the state machine never blocks (INV-L3)", () => {
+    const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-ledger-"));
+    try {
+      // .kstack exists as a FILE → mkdir inside appendLedger must fail.
+      writeFileSync(path.join(cwd, ".kstack"), "not a dir");
+      const state = { ...createState("develop", "g") };
+      const errors: string[] = [];
+      const ok = appendLedger(cwd, state, { kind: "step", phaseId: "plan", stepId: "s1", payload: { summary: "x" } }, (m) => errors.push(m));
+      assert.equal(ok, false);
+      assert.ok(errors.length === 1 && /ledger/i.test(errors[0]), "failure surfaced once, as a warning");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("gate decisions land as kind:'gate' entries with their decision", async () => {
+    const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-ledger-"));
+    try {
+      // develop.qa is optional + NOT last: the ask-mode park writes a human gate entry.
+      const wf = getWorkflow("develop")!;
+      const idx = wf.phases.findIndex((p) => p.id === "qa");
+      assert.ok(idx >= 0 && wf.phases[idx].optional && idx < wf.phases.length - 1);
+      const state = { ...createState("develop", "g"), phaseIndex: idx };
+      const h = fakeHarness(state);
+      h.ctx.cwd = cwd;
+      await executeCurrentPhase(h.pi, h.ctx, state as any);
+      const s = lastState(h);
+      assert.equal(s.status, "awaiting_approval");
+      const entries = readLedger(cwd, state);
+      const gate = entries.find((e) => e.kind === "gate" && e.phaseId === "qa");
+      assert.ok(gate, "the optional-phase park is a recorded gate decision");
+      assert.equal(gate.payload.gateId, "qa");
+      assert.equal(gate.payload.decision, "human");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("resume-gate: re-delivering the LAST step with a missing artifact adds a note", async () => {
+    const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-ledger-"));
+    try {
+      // qa-verdict is a sprint phase with a real artifact contract
+      // (qaArtifactPath); give a synthetic workflow a stepped phase reusing
+      // that id so phaseArtifactPaths resolves.
+      const wf: import("../orchestrator/types.ts").Workflow = {
+        id: "s3-resumegate-test", name: "ResumeGate", description: "t", intents: [],
+        phases: [{
+          id: "qa-verdict", name: "QA Verdict", execution: "main", optional: false,
+          steps: [
+            { id: "run", execution: "main", task: "## DELIVERABLE\nRun." },
+            { id: "report", execution: "main", task: "## DELIVERABLE\nReport." },
+          ],
+        }],
+      };
+      getAllWorkflows().push(wf);
+      try {
+        const state = {
+          ...createState("s3-resumegate-test", "g"),
+          phaseIndex: 0,
+          sprintNumber: 3,
+          stepIndex: 1, // LAST step — the resume-gate applies here only
+          results: { "qa-verdict.run": { status: "completed" as const, summary: "ran" } },
+        };
+        const h = fakeHarness(state);
+        h.ctx.cwd = cwd;
+        await executeCurrentPhase(h.pi, h.ctx, state as any);
+        const last = h.sent.at(-1) ?? "";
+        assert.ok(/artifact|missing|expected/i.test(last), "missing artifact must be named in the re-delivered instruction");
+      } finally {
+        const i = getAllWorkflows().indexOf(wf);
+        if (i >= 0) getAllWorkflows().splice(i, 1);
+      }
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("session_before_compact persists a fresh state snapshot", async () => {
+    const state = { ...createState("develop", "g"), phaseIndex: 2, stepIndex: 1 };
+    const h = fakeHarness(state);
+    initOrchestrator(h.pi);
+    const handler = h.handlers.get("session_before_compact");
+    assert.ok(handler, "the precompact hook must be registered");
+    const before = h.entries.length;
+    await handler({ type: "session_before_compact", reason: "threshold", willRetry: false }, h.ctx);
+    assert.ok(h.entries.length > before, "a state snapshot lands before compaction proceeds");
+  });
+
+  test("a symlink AT the ledger filename refuses the append (pass-6 review: file-level containment)", () => {
+    const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-ledger-"));
+    const outside = path.join(cwd, "outside-target.txt");
+    try {
+      // v≤3/hand-built states land in the predictable "adhoc" lane — the only
+      // place a planted filename-symlink is actionable.
+      const state: any = { ...createState("develop", "g") };
+      delete state.runId;
+      const file = ledgerPathFor(cwd, state); // <cwd>/.kstack/ledger/develop-adhoc.jsonl
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      let linked = false;
+      try {
+        fs.symlinkSync(outside, file, "file");
+        linked = true;
+      } catch {
+        /* Windows without developer-mode refuses symlink() — skip the probe */
+      }
+      if (!linked) return;
+      const errors: string[] = [];
+      const ok = appendLedger(cwd, state, { kind: "step", phaseId: "plan", stepId: "s1", payload: { summary: "x" } }, (m) => errors.push(m));
+      assert.equal(ok, false, "a symlinked ledger file must refuse the append");
+      assert.ok(errors.length === 1 && /symlink/i.test(errors[0]), "the refusal names the cause");
+      assert.equal(existsSync(outside), false, "nothing may be written through the link");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("sinks bootstrap .kstack/ledger + .kstack/runs into the repo .gitignore (idempotent)", () => {
+    const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-ledger-"));
+    try {
+      const state = { ...createState("develop", "g") };
+      appendLedger(cwd, state, { kind: "step", phaseId: "plan", stepId: "s1", payload: { summary: "x" } });
+      const gi = readFileSync(path.join(cwd, ".gitignore"), "utf-8");
+      assert.ok(gi.includes(".kstack/ledger/"), "ledger dir is gitignored");
+      assert.ok(gi.includes(".kstack/runs/"), "run-report dir is gitignored");
+      assert.ok(!gi.includes(".kstack/plans"), "intentional artifacts stay committable");
+      // Second write: lines are not duplicated.
+      appendLedger(cwd, state, { kind: "step", phaseId: "plan", stepId: "s2", payload: { summary: "y" } });
+      const gi2 = readFileSync(path.join(cwd, ".gitignore"), "utf-8");
+      assert.equal(gi2.split("\n").filter((l) => l.trim() === ".kstack/ledger/").length, 1);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+// --- S3: stuck detector + budgets (TASK_08 / D28) ----------------------------
+
+import { newStepRun, feedStepEvent, detectStuck, checkStepBudgets, stepBudgetDefaults } from "../orchestrator/stuck.ts";
+
+function toolStart(runTool: string, args: any) {
+  return { type: "tool_execution_start", toolName: runTool, args };
+}
+function toolEnd(runTool: string, ok = true, text = "obs") {
+  return { type: "tool_execution_end", toolName: runTool, result: { content: [{ type: "text", text }] }, isError: !ok };
+}
+function msgEnd(text = "reasoning", usage?: any) {
+  return { type: "message_end", message: { role: "assistant", content: [{ type: "text", text }], usage } };
+}
+
+describe("S3 stuck detector (TASK_08)", () => {
+  test("rule 1 — identical action+observation trips at 4 consecutive repeats, not before", () => {
+    const run = newStepRun();
+    for (let i = 0; i < 3; i++) {
+      feedStepEvent(run, toolStart("read", { path: "a.ts" }));
+      feedStepEvent(run, toolEnd("read", true, "same output"));
+      assert.equal(detectStuck(run), null, `must not trip at ${i + 1} repeats`);
+    }
+    feedStepEvent(run, toolStart("read", { path: "a.ts" }));
+    feedStepEvent(run, toolEnd("read", true, "same output"));
+    assert.equal(detectStuck(run), "identical-action");
+  });
+
+  test("rule 1 — a DIFFERENT observation resets the streak", () => {
+    const run = newStepRun();
+    for (let i = 0; i < 6; i++) {
+      feedStepEvent(run, toolStart("read", { path: "a.ts" }));
+      feedStepEvent(run, toolEnd("read", true, `output ${i}`));
+    }
+    assert.equal(detectStuck(run), null, "same action, different observations is not a loop");
+  });
+
+  test("rule 2 — three consecutive action errors trip; a success resets", () => {
+    const run = newStepRun();
+    feedStepEvent(run, toolStart("bash", { command: "make" }));
+    feedStepEvent(run, toolEnd("bash", false, "err"));
+    feedStepEvent(run, toolStart("bash", { command: "make" }));
+    feedStepEvent(run, toolEnd("bash", false, "err"));
+    assert.equal(detectStuck(run), null);
+    feedStepEvent(run, toolStart("bash", { command: "make" }));
+    feedStepEvent(run, toolEnd("bash", false, "err"));
+    assert.equal(detectStuck(run), "action-errors");
+
+    const ok = newStepRun();
+    feedStepEvent(ok, toolStart("bash", { command: "a" }));
+    feedStepEvent(ok, toolEnd("bash", false, "err"));
+    feedStepEvent(ok, toolStart("bash", { command: "b" }));
+    feedStepEvent(ok, toolEnd("bash", true, "fine"));
+    feedStepEvent(ok, toolStart("bash", { command: "c" }));
+    feedStepEvent(ok, toolEnd("bash", false, "err"));
+    assert.equal(detectStuck(ok), null, "interleaved success breaks the error streak");
+  });
+
+  test("rule 3 — three consecutive assistant messages with no tool call trip", () => {
+    const run = newStepRun();
+    feedStepEvent(run, msgEnd("thinking 1"));
+    feedStepEvent(run, msgEnd("thinking 2"));
+    assert.equal(detectStuck(run), null);
+    feedStepEvent(run, msgEnd("thinking 3"));
+    assert.equal(detectStuck(run), "monologue");
+
+    const active = newStepRun();
+    feedStepEvent(active, msgEnd("plan"));
+    feedStepEvent(active, toolStart("ls", { path: "." }));
+    feedStepEvent(active, toolEnd("ls", true, "files"));
+    feedStepEvent(active, msgEnd("note"));
+    feedStepEvent(active, msgEnd("note2"));
+    assert.equal(detectStuck(active), null, "a tool call between messages breaks the monologue");
+  });
+
+  test("rule 3 — user/tool-result message_end events reset the streak (interview regression)", () => {
+    // develop.plan.interrogate is a pure Q&A step: assistant question → user
+    // reply → assistant question… Before the fix, non-assistant message_end
+    // events early-returned WITHOUT resetting monologueStreak, so three
+    // ordinary interview rounds parked the run mid-interview.
+    const userEnd = (text: string) => ({ type: "message_end", message: { role: "user", content: [{ type: "text", text }] } });
+    const run = newStepRun();
+    for (let round = 0; round < 6; round++) {
+      feedStepEvent(run, msgEnd(`question ${round}`));
+      feedStepEvent(run, userEnd(`answer ${round}`));
+    }
+    assert.equal(detectStuck(run), null, "interactive Q&A rounds must never trip the monologue rule");
+
+    // A tool-result-shaped message_end resets the same way.
+    const toolMsg = newStepRun();
+    feedStepEvent(toolMsg, msgEnd("a"));
+    feedStepEvent(toolMsg, msgEnd("b"));
+    feedStepEvent(toolMsg, { type: "message_end", message: { role: "tool", content: [{ type: "text", text: "result" }] } });
+    feedStepEvent(toolMsg, msgEnd("c"));
+    feedStepEvent(toolMsg, msgEnd("d"));
+    assert.equal(detectStuck(toolMsg), null, "a tool-result message must reset the streak");
+
+    // And without any feedback, the rule still trips (detector not gutted).
+    const bare = newStepRun();
+    feedStepEvent(bare, msgEnd("1"));
+    feedStepEvent(bare, msgEnd("2"));
+    feedStepEvent(bare, msgEnd("3"));
+    assert.equal(detectStuck(bare), "monologue");
+  });
+
+  test("rule 4 — alternating action pairs trip at 6 repeats", () => {
+    const run = newStepRun();
+    // A,B,A,B,A,B = 6 actions alternating between two distinct keys.
+    for (let i = 0; i < 5; i++) {
+      const tool = i % 2 === 0 ? "read" : "edit";
+      feedStepEvent(run, toolStart(tool, { path: "x" }));
+      feedStepEvent(run, toolEnd(tool, true, `o${i}`));
+      assert.equal(detectStuck(run), null);
+    }
+    feedStepEvent(run, toolStart("edit", { path: "x" }));
+    assert.equal(detectStuck(run), "alternating");
+  });
+
+  test("rule 5 — repeated context-window errors trip", () => {
+    const run = newStepRun();
+    const ctxErr = () => feedStepEvent(run, { type: "auto_retry_start", errorMessage: "context length exceeded: maximum context window is 128k" });
+    ctxErr();
+    ctxErr();
+    assert.equal(detectStuck(run), null);
+    ctxErr();
+    assert.equal(detectStuck(run), "context-errors");
+  });
+
+  test("budgets — soft-warn at 80%, hard trip at 100%, warn fires once per dimension", () => {
+    const limits = { turns: 10, tokens: 1000, usd: 1, ms: 60_000, usdPerMin: 10 };
+    const run = newStepRun(1_000_000);
+    run.turns = 8; // exactly 80%
+    let r = checkStepBudgets(run, limits, 1_000_000);
+    assert.deepEqual(r.warn, ["turns"]);
+    assert.equal(r.exceeded, null);
+    r = checkStepBudgets(run, limits, 1_000_000);
+    assert.deepEqual(r.warn, [], "warn fires once per dimension");
+    run.turns = 10;
+    r = checkStepBudgets(run, limits, 1_000_000);
+    assert.equal(r.exceeded, "turns");
+  });
+
+  test("budgets — wall-clock and cost-velocity dimensions", () => {
+    const limits = { ...stepBudgetDefaults(), ms: 1000, usdPerMin: 60 };
+    const run = newStepRun(0);
+    assert.equal(checkStepBudgets(run, limits, 799).warn.length, 0);
+    assert.deepEqual(checkStepBudgets(run, limits, 800).warn, ["ms"]);
+    assert.equal(checkStepBudgets(run, limits, 1000).exceeded, "ms");
+
+    const costRun = newStepRun(0);
+    // usdPerMin has a 6s warmup floor (elapsedMin < 0.1 → 0) so a first cost
+    // event at ~1ms can't instant-trip; at 6.5s elapsed $7 ⇒ ~$64.6/min > 60.
+    // (Separate limits: the ms cap would trip before usdPerMin at 6.5s.)
+    const costLimits = { ...stepBudgetDefaults(), usdPerMin: 60 };
+    costRun.costUsd = 7;
+    assert.equal(checkStepBudgets(costRun, costLimits, 500).exceeded, null); // warmup floor holds
+    assert.equal(checkStepBudgets(costRun, costLimits, 6500).exceeded, "usdPerMin");
+  });
+
+  test("budgets — object-shaped Usage.cost feeds the usd dims (pass-5 review)", () => {
+    // pi's Usage.cost is { input, output, cacheRead, cacheWrite, total } — an
+    // OBJECT. Reading it as a scalar yielded NaN→0 and made both usd dims dead
+    // code. Feed a real-shaped usage and assert the usd dim can trip.
+    const run = newStepRun(0);
+    feedStepEvent(run, {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        usage: { input: 10, output: 5, cost: { input: 0.1, output: 0.2, cacheRead: 0, cacheWrite: 0, total: 0.3 } },
+      },
+    } as any);
+    assert.ok(run.costUsd > 0.29 && run.costUsd < 0.31, `object cost must land (${run.costUsd})`);
+    const limits = { ...stepBudgetDefaults(), usd: 0.2 };
+    assert.equal(checkStepBudgets(run, limits, 60_000).exceeded, "usd");
+  });
+
+  test("env defaults are conservative and 'off' disables a dimension", () => {
+    const d = stepBudgetDefaults();
+    assert.ok(d.turns >= 20 && d.turns <= 200, `turns default sane (${d.turns})`);
+    assert.ok(d.ms >= 300_000, `ms default sane (${d.ms})`);
+  });
+});
+
+describe("S3 stuck/budget wiring (TASK_08)", () => {
+  test("a delegated step that loops is aborted and parks with stuck:<rule>:<phase>.<step>", async () => {
+    const wf: import("../orchestrator/types.ts").Workflow = {
+      id: "s3-stuck-test", name: "Stuck Test", description: "t", intents: [],
+      phases: [{
+        id: "mix", name: "Mixed", execution: "main", optional: false,
+        steps: [
+          { id: "probe", execution: "subagent", agent: "scout", task: "## DELIVERABLE\nProbe." },
+          { id: "finish", execution: "main", task: "## DELIVERABLE\nFinish." },
+        ],
+      }],
+    };
+    getAllWorkflows().push(wf);
+    try {
+      const state = { ...createState("s3-stuck-test", "g"), phaseIndex: 0 };
+      const h = fakeHarness(state);
+      let abortSeen = false;
+      await executeCurrentPhase(h.pi, h.ctx, state as any, {
+        spawnFn: async (req: any) => {
+          // The child loops on an identical action — feed the raw event tap.
+          for (let i = 0; i < 4; i++) {
+            req.onEvent?.(toolStart("read", { path: "same.ts" }));
+            req.onEvent?.(toolEnd("read", true, "same"));
+          }
+          // Cooperative abort: the detector tripped → shouldAbort() true.
+          abortSeen = req.shouldAbort?.() === true;
+          return { ok: false, output: "", error: "aborted: detector", exitCode: null, durationMs: 5, incomplete: true } as any;
+        },
+      } as any);
+      assert.ok(abortSeen, "shouldAbort must flip once the detector trips");
+      const s = lastState(h);
+      assert.equal(s.status, "paused", "a tripped detector parks the run — never a silent kill");
+      assert.match(s.pausedReason ?? "", /^stuck:identical-action:mix\.probe$/, `pausedReason was ${s.pausedReason}`);
+    } finally {
+      const i = getAllWorkflows().indexOf(wf);
+      if (i >= 0) getAllWorkflows().splice(i, 1);
+      releasePhaseInFlight("s3-stuck-test", 0);
+    }
+  });
+
+  test("main-step events feed the detector while a stepped phase is active", async () => {
+    const state = { ...createState("develop", "g"), phaseIndex: 2, stepIndex: 0 };
+    const h = fakeHarness(state);
+    initOrchestrator(h.pi);
+    // Deliver step 1 (main) — the watch begins at instruction delivery.
+    await executeCurrentPhase(h.pi, h.ctx, state as any);
+    const toolStartH = h.handlers.get("tool_execution_start");
+    const toolEndH = h.handlers.get("tool_execution_end");
+    assert.ok(toolStartH && toolEndH, "main-step watch must subscribe to tool events");
+    for (let i = 0; i < 4; i++) {
+      await toolStartH({ type: "tool_execution_start", toolCallId: `c${i}`, toolName: "read", args: { file_path: "same.ts" } }, h.ctx);
+      await toolEndH({ type: "tool_execution_end", toolCallId: `c${i}`, toolName: "read", result: { content: [] }, isError: false }, h.ctx);
+    }
+    const s = lastState(h);
+    assert.equal(s.status, "paused");
+    assert.match(s.pausedReason ?? "", /^stuck:identical-action:plan\.interrogate$/, `pausedReason was ${s.pausedReason}`);
+  });
+
+  test("the detector is inert on implicit-step phases (no watch is started)", async () => {
+    const state = { ...createState("develop", "g"), phaseIndex: 0 }; // understand — implicit
+    const h = fakeHarness(state);
+    initOrchestrator(h.pi);
+    await executeCurrentPhase(h.pi, h.ctx, state as any);
+    const toolStartH = h.handlers.get("tool_execution_start");
+    const toolEndH = h.handlers.get("tool_execution_end");
+    if (toolStartH && toolEndH) {
+      for (let i = 0; i < 5; i++) {
+        await toolStartH({ type: "tool_execution_start", toolCallId: `c${i}`, toolName: "read", args: { file_path: "x.ts" } }, h.ctx);
+        await toolEndH({ type: "tool_execution_end", toolCallId: `c${i}`, toolName: "read", result: { content: [] }, isError: false }, h.ctx);
+      }
+    }
+    assert.notEqual(lastState(h).status, "paused", "implicit phases carry no step watch — nothing trips");
+  });
+});
+
+// --- TASK_10: develop.plan pilot acceptance — the full 3-step run -------------
+
+describe("S3 acceptance — develop.plan three-step run (TASK_10)", () => {
+  const waitFor = async (cond: () => boolean) => {
+    for (let i = 0; i < 200 && !cond(); i++) await new Promise((r) => setTimeout(r, 10));
+    assert.ok(cond(), "timed out waiting for the fire-and-forget chain");
+  };
+  const delivered = (h: ReturnType<typeof fakeHarness>, marker: string) =>
+    h.sent.some((m) => m.includes(marker));
+
+  test("interrogate → draft → eng-review run end-to-end: skills, steps, ledger, single human gate", async () => {
+    const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-accept-"));
+    try {
+      const wf = getWorkflow("develop")!;
+      const planIdx = wf.phases.findIndex((p) => p.id === "plan");
+      assert.ok(planIdx >= 0, "develop.plan exists");
+      const state = { ...createState("develop", "acceptance goal"), phaseIndex: planIdx };
+      const h = fakeHarness(state);
+      h.ctx.cwd = cwd;
+      initOrchestrator(h.pi);
+
+      // Entry: step 1/3 delivers with the FULL kstack-grilling skill.
+      await executeCurrentPhase(h.pi, h.ctx, state as any);
+      assert.ok(delivered(h, "Step 1/3") && delivered(h, "interrogate"), "step 1 instructions delivered");
+      assert.ok(delivered(h, "#### Skill gate: kstack-grilling"), "s1 must carry its own skill");
+      assert.equal(lastState(h).stepIndex, 0);
+
+      const advance = (summary: string) =>
+        h.tools.get("kstack_advance").execute("t2", { summary, status: "completed" }, undefined, undefined, h.ctx);
+
+      // Step 1 done → step 2 delivered with the FULL kstack-plan-draft skill.
+      let res = await advance("frontier settled");
+      assert.ok(!res.isError);
+      await waitFor(() => delivered(h, "Step 2/3"));
+      assert.ok(delivered(h, "#### Skill gate: kstack-plan-draft"), "s2 must carry its own skill");
+      assert.equal(lastState(h).stepIndex, 1);
+      assert.equal(lastState(h).results["plan.interrogate"]?.summary, "frontier settled");
+
+      // Restart mid-step: a fresh executor pass on the same state re-delivers
+      // the CURRENT step (stepIndex unchanged, no result recorded for draft).
+      h.sent.length = 0;
+      await executeCurrentPhase(h.pi, h.ctx, lastState(h) as any);
+      assert.ok(delivered(h, "Step 2/3"), "mid-step resume re-delivers step 2");
+
+      // Step 2 done → step 3 delivered with kstack-plan-eng-review.
+      res = await advance("plan written to .kstack/plans/accept.md");
+      assert.ok(!res.isError);
+      await waitFor(() => delivered(h, "Step 3/3"));
+      assert.ok(delivered(h, "#### Skill gate: kstack-plan-eng-review"), "s3 must carry its own skill");
+      assert.equal(lastState(h).stepIndex, 2);
+
+      // Step 3 done → phase completes, human gate parks ONCE, ledger holds
+      // step×3 + phase + gate entries for the run.
+      res = await advance("reviewed — PLAN FILE: .kstack/plans/accept.md");
+      const s = lastState(h);
+      assert.equal(s.status, "awaiting_approval", "the manual gate parks once after step 3");
+      assert.equal(s.results["plan"]?.status, "completed");
+      assert.equal(s.stepIndex, undefined);
+      assert.equal(s.version, 4);
+
+      const entries = readLedger(cwd, s);
+      const steps = entries.filter((e) => e.kind === "step" && e.phaseId === "plan");
+      assert.deepEqual(steps.map((e) => e.stepId), ["interrogate", "draft", "eng-review"], "one ledger step entry per step, verbatim");
+      assert.ok(entries.some((e) => e.kind === "phase" && e.phaseId === "plan"), "phase roll-up ledgered");
+      assert.ok(entries.some((e) => e.kind === "gate" && e.payload.decision === "human"), "human gate decision ledgered");
+      releasePhaseInFlight("develop", planIdx);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
     }
   });
 });
