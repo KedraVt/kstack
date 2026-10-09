@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { WorkflowState, WorkflowContext, GitContext, WorkflowPhase } from "./types.ts";
 import { getWorkflow } from "./workflows.ts";
 import { saveState, advancePhase, gateOptionalPhase, gateEntry, parkForUnreadableVerdict, loadActiveState, type AdvanceOptions } from "./state.ts";
-import { buildPhaseInstructions, buildDeterministicPlan, mainContractFor } from "./templates.ts";
+import { buildPhaseInstructions, buildDeterministicPlan, mainContractFor, buildStepInstructions, buildStepTask, interpolateStepTask, resolvePlanFilePath } from "./templates.ts";
 import { detectGitContext, type ExecFn } from "./git.ts";
 import { runSubagent, type SpawnRequest, type SpawnResult, resolveTimeoutMs } from "./spawn.ts";
 import { parseHandoffVerdicts, verifyArtifactVerdicts, mergeParseOutcomes } from "./verdicts.ts";
@@ -12,6 +12,10 @@ import { ensureRun, recordDelegatedStep, writeRunReport, recordLiveness, recordT
 import { extractHandoff } from "./handoff.ts";
 import { isRefutedStrategy, isValidatedStrategy } from "./skip.ts";
 import { replaceExact } from "./text.ts";
+import { appendLedger } from "./ledger.ts";
+import { newStepRun, feedStepEvent, detectStuck, checkStepBudgets, stepBudgetDefaults, beginStepWatch, endStepWatch } from "./stuck.ts";
+import { phaseArtifactPaths } from "./artifacts.ts";
+import { existsSync } from "node:fs";
 
 // --- Sequential-chain resilience (STEP 2f) -----------------------------------
 
@@ -159,6 +163,11 @@ export function annotateOrphanedDelegation(pi: ExtensionAPI, ctx: ExtensionConte
  * dialog took the Enter-default "Yes". A phase therefore must never have two
  * concurrent chains: the in-flight registry refuses any relaunch while one is
  * still running in this process.
+ *
+ * In-flight key is `wf:phaseIndex` (design §117-120 sketched
+ * `wf:phaseIndex:stepIndex` — equivalent here: a stepped phase's whole
+ * step lifecycle sits inside ONE launchPhase hold, so the phase-level key
+ * already blocks every mid-delegation duplicate).
  */
 const inFlightPhases = new Set<string>();
 
@@ -257,7 +266,7 @@ export async function executeCurrentPhase(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   state: WorkflowState,
-  opts?: { approvedOptional?: boolean; execGit?: ExecFn },
+  opts?: { approvedOptional?: boolean; execGit?: ExecFn; spawnFn?: typeof runSubagent },
 ): Promise<void> {
   const startEpoch = runtimeEpoch;
   const alive = (): boolean => runtimeEpoch === startEpoch && ctxAlive(ctx);
@@ -283,7 +292,11 @@ export async function executeCurrentPhase(
   annotateOrphanedDelegation(pi, ctx);
 
   const phase = workflow.phases[state.phaseIndex];
-  if (!phase) {
+  // state.status === "completed" with a phase still under phaseIndex happens
+  // when the LAST phase was skipped: advancePhase leaves the index parked on
+  // it, so without this check the skipWhen/optional recursion re-entered the
+  // same phase and skipped forever.
+  if (!phase || state.status === "completed") {
     // Workflow completed: flush the structured run report (STEP 0 telemetry).
     writeRunReport(ctx.cwd, state.workflowId);
     saveState(pi, { ...state, status: "completed" });
@@ -335,14 +348,24 @@ export async function executeCurrentPhase(
     return;
   }
 
-  if (phase.skipWhen?.(wfCtx)) {
+  // S3 step model: a stepped phase with stepIndex set is ALREADY inside —
+  // entry-time gates (skipWhen / optional / entry) fired on first entry and
+  // must never re-fire on step transitions or mid-step resumes.
+  const steps = phase.steps;
+  const stepped = !!(steps && steps.length > 0);
+  const insidePhase = stepped && state.stepIndex !== undefined;
+
+  if (!insidePhase && phase.skipWhen?.(wfCtx)) {
     const skipped = advancePhase(state, phase.id, { status: "skipped", summary: "Auto-skipped by condition" }, workflow.phases.length);
     saveState(pi, skipped);
     return executeCurrentPhase(pi, ctx, skipped);
   }
 
-  if (phase.optional) {
-    const mode = optionalPhases();
+  if (phase.optional && !insidePhase) {
+    // S3/D20: a selection-gate override takes precedence over the env mode —
+    // "human" behaves exactly like today's "ask" park.
+    const override = state.gateMode === "selection-gate" ? state.gateOverrides?.[phase.id] : undefined;
+    const mode = override === "human" ? "ask" : override ?? optionalPhases();
     if (mode === "ask" && !opts?.approvedOptional) {
       // STEP 2g v2 — optional-phase decision gate. The previous flow prompted
       // `ctx.ui.confirm` HERE, inside this fire-and-forget background chain:
@@ -354,6 +377,7 @@ export async function executeCurrentPhase(
       // Run/Skip/Abort decision (command.ts), like every other manual gate.
       const gated = gateOptionalPhase(state);
       saveState(pi, gated);
+      appendLedger(ctx.cwd, state, { kind: "gate", phaseId: phase.id, payload: { gateId: phase.id, decision: "human" } }, (m) => notify(m, "warning"));
       notify(
         `kstack: optional phase "${phase.name}" (${state.phaseIndex + 1}/${workflow.phases.length}) awaits your decision — run /kstack to Run it, Skip it, or Abort.`,
         "info",
@@ -370,10 +394,12 @@ export async function executeCurrentPhase(
         workflow.phases.length,
       );
       saveState(pi, skipped);
+      appendLedger(ctx.cwd, state, { kind: "gate", phaseId: phase.id, payload: { gateId: phase.id, decision: "skip" } }, (m) => notify(m, "warning"));
       return executeCurrentPhase(pi, ctx, skipped);
     }
     // mode === "auto", or the user explicitly approved this phase via the
     // /kstack decision panel (approvedOptional) — fall through and run it.
+    appendLedger(ctx.cwd, state, { kind: "gate", phaseId: phase.id, payload: { gateId: phase.id, decision: opts?.approvedOptional ? "run" : "auto" } }, (m) => notify(m, "warning"));
   }
 
   // Entry gate for side-effect phases (commit-archive): advance:"manual"
@@ -381,7 +407,13 @@ export async function executeCurrentPhase(
   // phase's own delegation commits and archives. Park BEFORE anything runs;
   // the /kstack approve path flips entryGate to "approved" (cleared by
   // advancePhase when the phase completes).
+  // S3/D20: "auto" on the phase's ⚠ entry row pre-approves the side effect —
+  // no entry park (and no post-completion park either — index.ts consults the
+  // same override for willManualGate).
+  const entryOverride = state.gateMode === "selection-gate" ? state.gateOverrides?.[phase.id] : undefined;
   if (
+    !insidePhase &&
+    entryOverride !== "auto" &&
     deterministicSubagents() &&
     phase.execution === "subagent" &&
     manualGates() &&
@@ -391,21 +423,72 @@ export async function executeCurrentPhase(
     const gated = gateEntry(state);
     saveState(pi, gated);
     setKstackStatus(ctx, gated, workflow);
+    appendLedger(ctx.cwd, state, { kind: "gate", phaseId: phase.id, payload: { gateId: phase.id, decision: "human" } }, (m) => notify(m, "warning"));
     notify(
       `kstack: "${phase.name}" is a human-gated side-effect phase — it has NOT run yet. Approve via /kstack (Run) before it executes.`,
       "info",
     );
     return;
   }
+  if (
+    !insidePhase &&
+    entryOverride === "auto" &&
+    deterministicSubagents() &&
+    phase.execution === "subagent" &&
+    manualGates() &&
+    phase.advance === "manual" &&
+    state.entryGate !== "approved"
+  ) {
+    appendLedger(ctx.cwd, state, { kind: "gate", phaseId: phase.id, payload: { gateId: phase.id, decision: "auto" } }, (m) => notify(m, "warning"));
+  }
+
+  // S3/INV-01: first entry into a stepped phase persists stepIndex. From here
+  // on, the step runner dispatches on phase.steps[stepIndex] — main steps get
+  // instructions; delegated steps spawn through the same chain machinery.
+  if (stepped && state.stepIndex === undefined) {
+    state = { ...state, stepIndex: 0 };
+    saveState(pi, state);
+    wfCtx.state = state;
+  }
+  const stepIndex = stepped ? Math.min(state.stepIndex ?? 0, steps!.length - 1) : undefined;
+  const step = stepped ? steps![stepIndex!] : undefined;
 
   setKstackStatus(ctx, state, workflow);
 
   // Deterministic mode: the executor spawns subagents itself for subagent
-  // phases. Delegation no longer depends on the model choosing to call the
+  // phases — and, in stepped phases, for delegated STEPS (step.execution).
+  // Delegation no longer depends on the model choosing to call the
   // `subagent` tool — it happens by construction.
   let delegationPrefix = "";
-  if (deterministicSubagents() && phase.execution === "subagent") {
-    const results = await runDeterministicDelegation(phase, wfCtx, ctx, alive, pi);
+  const delegatedStep = step !== undefined && deterministicSubagents() && step.execution === "subagent";
+  const delegatedPhase = !stepped && deterministicSubagents() && phase.execution === "subagent";
+  if (delegatedStep || delegatedPhase) {
+    // S3/D28: delegated steps carry a transient StepRun — the stuck detector
+    // and budget caps poll the raw child event stream via SpawnRequest.onEvent.
+    const stepGuard: { stepId: string; trip?: string } | undefined = delegatedStep
+      ? { stepId: step.id }
+      : undefined;
+    const results = await runDeterministicDelegation(
+      phase,
+      wfCtx,
+      ctx,
+      alive,
+      pi,
+      opts?.spawnFn ?? runSubagent,
+      delegatedStep
+        ? [{
+            agent: step.agent ?? "worker",
+            // {previous} interpolates on the step's OWN task BEFORE the skill
+            // digest is embedded — interpolating the assembled task would
+            // also rewrite a literal `{previous}` documented inside SKILL.md.
+            task: buildStepTask({ ...step, task: interpolateStepTask(step.task, phase, stepIndex!, wfCtx) }),
+            // Already interpolated — runSteps' own {previous} pass would
+            // rewrite the literal token inside the embedded skill digest.
+            interpolated: true,
+          }]
+        : undefined,
+      stepGuard,
+    );
     if (!alive()) return;
 
     // Abort-resurrect guard (audit fix, same class as the 2026-08-31
@@ -424,6 +507,17 @@ export async function executeCurrentPhase(
     state = live;
     wfCtx.state = live;
 
+    // S3/D28: a tripped detector parks the run at the CURRENT stepIndex —
+    // resume re-delivers the same step. Park, never a silent kill.
+    if (stepGuard?.trip) {
+      const parked = { ...state, status: "paused" as const, pausedReason: stepGuard.trip };
+      saveState(pi, parked);
+      setKstackStatus(ctx, parked, workflow);
+      appendLedger(ctx.cwd, state, { kind: "step", phaseId: phase.id, stepId: step!.id, payload: { summary: `detector trip: ${stepGuard.trip}` } }, (m) => notify(m, "warning"));
+      notify(`kstack: ${stepGuard.trip} — step paused for a human decision; resume via /kstack re-runs the step.`, "warning");
+      return;
+    }
+
     // Sprint verdict parsing at DELEGATION time (plan B4 / D1): the raw
     // subagent outputs are the source of truth — never the main model's
     // paraphrase. Each CHAIN STEP parses independently (review W1: joining
@@ -431,7 +525,10 @@ export async function executeCurrentPhase(
     // extractHandoff's whole-output threshold), then outcomes merge with
     // contradiction ⇒ null. Dual-channel check against on-disk artifacts;
     // any disagreement ⇒ parsed=null ⇒ D4 park (no attempt burned).
-    if (state.workflowId === "sprint" && phase.loopBackTo && verdictsEnabled()) {
+    // S3: the verdict is PHASE-LEVEL and comes from the FINAL step — mid-step
+    // delegations never parse.
+    const isLastStep = !step || stepIndex === steps!.length - 1;
+    if (state.workflowId === "sprint" && phase.loopBackTo && verdictsEnabled() && isLastStep) {
       const outcome = mergeParseOutcomes(
         // B1 fix: parse the UNCAPPED rawOutput. `output` is capOutput()'d at
         // 50KB — and the ## HANDOFF section (the only channel the parser
@@ -465,14 +562,18 @@ export async function executeCurrentPhase(
       const withVerdict = { ...state, pendingVerdict: { phaseId: phase.id, parsed, excerpt: outcome.lines.join("\n") } };
       saveState(pi, withVerdict);
       state = withVerdict;
+      // S3 ledger: verdict resolution lands verbatim (INV-L2).
+      appendLedger(ctx.cwd, state, { kind: "verdict", phaseId: phase.id, stepId: step?.id, attempt: (state.attempts?.[phase.id] ?? 0) + 1, payload: { verdicts: { ...parsed.verdicts } } }, (m) => notify(m, "warning"));
     }
 
     // STEP 0 telemetry: persist per-step measurements (persistence only —
-    // every number already exists on SpawnResult).
-    for (const [stepIndex, { agent, result }] of results.entries()) {
+    // every number already exists on SpawnResult). S3 delegated steps record
+    // the real phaseId + a separate stepId field (system-design §Report).
+    for (const [chainIndex, { agent, result }] of results.entries()) {
       recordDelegatedStep({
         phaseId: phase.id,
-        stepIndex,
+        stepId: step?.id,
+        stepIndex: step ? stepIndex! : chainIndex,
         agent,
         durationMs: result.durationMs,
         toolCalls: result.toolCalls,
@@ -483,9 +584,10 @@ export async function executeCurrentPhase(
         timeoutClass: timeoutClassFor(phase.id) ?? "default",
       });
     }
-    delegationPrefix = formatDelegationResults(phase.id, results);
+    delegationPrefix = formatDelegationResults(step ? `${phase.id}.${step.id}` : phase.id, results);
     // STEP 4d: make the skip outcome explicit in what the model reviews.
-    if (phase.id === "root-cause" && results.length > 0) {
+    // (Phase-level chains only — steps never route through buildDeterministicPlan.)
+    if (!stepped && phase.id === "root-cause" && results.length > 0) {
       const lastOutput = results[results.length - 1].result.output ?? "";
       if (isRefutedStrategy(lastOutput)) {
         delegationPrefix += "\n\n[root-cause outcome: refuted→full-reinvestigation]";
@@ -497,12 +599,36 @@ export async function executeCurrentPhase(
     setKstackStatus(ctx, state, workflow);
   }
 
-  const instructions = buildPhaseInstructions(phase, wfCtx);
+  let instructions = step
+    ? buildStepInstructions(phase, step, wfCtx)
+    : buildPhaseInstructions(phase, wfCtx);
+
+  // S3 resume-gate (D28): re-delivering a phase's LAST step whose declared
+  // artifact is missing keeps the step open — the note rides the volatile
+  // tail so the stable instruction prefix stays byte-identical.
+  if (step && insidePhase && stepIndex === steps!.length - 1) {
+    const missing = phaseArtifactPaths(phase.id, ctx.cwd, state.sprintNumber, resolvePlanFilePath({ state })).filter((p) => !existsSync(p));
+    if (missing.length > 0) {
+      instructions += `\n\n[resume-gate] Missing expected artifact(s): ${missing.join(", ")} — this step stays OPEN. Produce the artifact first, then call kstack_advance.`;
+    }
+  }
+
+  // S3/D28: the main-step watch begins at instruction delivery; any other
+  // delivery (implicit phase, delegated step) drops a stale watch so the
+  // detector is inert outside declared main steps.
+  if (step?.execution === "main") beginStepWatch(phase.id, step.id);
+  else endStepWatch();
 
   // Record that this run has now DELIVERED these skill digests in full, so
   // later phases of the same skill degrade to their compact DoD gate.
-  if (skillsEnabled() && phase.execution === "main" && phase.skills && phase.skills.length > 0) {
-    const delivered = new Set([...(state.skillsDelivered ?? []), ...phase.skills]);
+  // S3: for a stepped phase the delivered digest is the CURRENT step's single
+  // skill (D19) — and only when the step itself is main (a delegated step's
+  // digest went to the subagent, not this context).
+  const deliveredSkillIds = step
+    ? step.execution === "main" && step.skill ? [step.skill] : []
+    : phase.execution === "main" ? (phase.skills ?? []) : [];
+  if (skillsEnabled() && deliveredSkillIds.length > 0) {
+    const delivered = new Set([...(state.skillsDelivered ?? []), ...deliveredSkillIds]);
     const updated = { ...state, skillsDelivered: Array.from(delivered) };
     saveState(pi, updated);
   }
@@ -530,12 +656,19 @@ export async function runDeterministicDelegation(
   // end-to-end without real child processes. The production call site
   // (executeCurrentPhase) passes nothing and gets the real runSubagent.
   spawnFn: typeof runSubagent = runSubagent,
+  // S3 delegated step: a prebuilt one-entry plan built from buildStepTask
+  // (steps never route through buildDeterministicPlan).
+  planOverride?: Array<{ agent: string; task: string; interpolated?: boolean }>,
+  // S3/D28 out-param: when set (delegated-step runs only) a StepRun watches the
+  // child event stream; a detector trip lands in .trip and aborts the spawn.
+  stepGuard?: { stepId: string; trip?: string },
 ): Promise<Array<{ agent: string; result: SpawnResult }>> {
-  const plan = buildDeterministicPlan(phase as any, wfCtx);
+  const plan = planOverride ?? buildDeterministicPlan(phase as any, wfCtx);
   // STEP 4d: a collapsed validate-only root-cause step may be REFUTED — then
-  // the FULL original scout→planner chain is rebuilt and re-run.
+  // the FULL original scout→planner chain is rebuilt and re-run. (Native-plan
+  // concept only — a step override is never the collapsed validate step.)
   const wasCollapsed =
-    phase.id === "root-cause" && plan.length === 1 && plan[0].agent === "planner";
+    !planOverride && phase.id === "root-cause" && plan.length === 1 && plan[0].agent === "planner";
 
   // Wall-clock guard (STEP D3): one phase's whole delegation must never hang
   // forever — past the budget the chain stops orderly with a visible trail.
@@ -543,7 +676,7 @@ export async function runDeterministicDelegation(
   const delegationStart = Date.now();
 
   const runSteps = async (
-    steps: Array<{ agent: string; task: string }>,
+    steps: Array<{ agent: string; task: string; interpolated?: boolean }>,
   ): Promise<Array<{ agent: string; result: SpawnResult }>> => {
     const out: Array<{ agent: string; result: SpawnResult }> = [];
     let previous = "";
@@ -573,7 +706,12 @@ export async function runDeterministicDelegation(
       // payload inflated every downstream turn's prefill and encouraged
       // re-verification of already-settled facts.
       const handoff = extractHandoff(previous, { incomplete: prevIncomplete });
-      const task = replaceExact(step.task, /\{previous\}/g, handoff.text || "(no prior output)");
+      // `interpolated` tasks (S3 delegated steps) arrive fully resolved —
+      // a second pass would rewrite a literal `{previous}` documented inside
+      // the embedded skill digest.
+      const task = step.interpolated === true
+        ? step.task
+        : replaceExact(step.task, /\{previous\}/g, handoff.text || "(no prior output)");
       try {
         ctx.ui.notify(`kstack: running subagent "${step.agent}"…`, "info");
       } catch {
@@ -596,6 +734,11 @@ export async function runDeterministicDelegation(
       };
       setStatus("starting…");
 
+      // S3/D28: delegated STEP runs carry a transient detector — its counters
+      // die with the step, never persist.
+      const stepRun = stepGuard ? newStepRun() : null;
+      const stepLimits = stepRun ? stepBudgetDefaults() : null;
+
       const req: SpawnRequest = {
         agent: step.agent,
         task,
@@ -604,8 +747,28 @@ export async function runDeterministicDelegation(
         phaseId: phase.id,
         // E4/D10 model tiers: inert unless KSTACK_PI_MODEL_FAST/_STRONG are set.
         modelOverride: modelTierFor(phase.id),
-        shouldAbort: () => !alive(),
+        shouldAbort: () => !alive() || !!stepGuard?.trip,
         onActivity: setStatus,
+        onEvent: stepRun
+          ? (event: any) => {
+              if (!stepGuard || stepGuard.trip) return;
+              feedStepEvent(stepRun, event);
+              const rule = detectStuck(stepRun);
+              if (rule) {
+                stepGuard.trip = `stuck:${rule}:${phase.id}.${stepGuard.stepId}`;
+                return;
+              }
+              const budget = checkStepBudgets(stepRun, stepLimits!);
+              for (const dim of budget.warn) {
+                try {
+                  ctx.ui.notify(`kstack: step "${stepGuard.stepId}" at ~80% of its ${dim} budget`, "warning");
+                } catch {
+                  /* stale ctx */
+                }
+              }
+              if (budget.exceeded) stepGuard.trip = `budget-exceeded:${budget.exceeded}:${phase.id}.${stepGuard.stepId}`;
+            }
+          : undefined,
         // STEP 5b: observe-only liveness — dual sink (notify + run report).
         onLiveness: (obs) => {
           recordLiveness(obs);
@@ -624,7 +787,9 @@ export async function runDeterministicDelegation(
       // depends on the failure class (timeout → long, fast blip → short).
       let result = await spawnFn(req);
       const decision = retryDecision(result, 1);
-      if (decision.retry && alive()) {
+      // A detector trip is NOT a transient failure — retrying would re-run the
+      // same looping/budget-blown step, so the single-retry path is skipped.
+      if (decision.retry && alive() && !stepGuard?.trip) {
         delegationEvent(pi, {
           phaseId: phase.id,
           step: index,
@@ -880,10 +1045,21 @@ export function statusLineFor(state: WorkflowState, workflow: { name: string; ph
               ? "sprint numbering anomaly"
               : reason.startsWith("branch-violation:")
                 ? "branch violation"
-                : reason
-                  ? `paused: ${reason}`
-                  : "phase failed";
+                : reason.startsWith("step-failed:")
+                  ? `step failed (${reason.slice("step-failed:".length)})`
+                  : reason.startsWith("stuck:")
+                    ? `stuck detector tripped (${reason.slice("stuck:".length)})`
+                    : reason.startsWith("budget-exceeded:")
+                      ? `step budget exceeded (${reason.slice("budget-exceeded:".length).split(":").join(" · ")})`
+                      : reason
+                        ? `paused: ${reason}`
+                        : "phase failed";
     return `${workflow.name}: ${cause} ${progress} — /kstack`;
+  }
+  // S3: a stepped phase names its current step — `phase (n/m) · step <id> (i/k)`.
+  if (phase?.steps?.length && state.stepIndex !== undefined) {
+    const i = Math.min(state.stepIndex, phase.steps.length - 1);
+    return `${workflow.name}: ${phase.name} ${progress} · step ${phase.steps[i].id} (${i + 1}/${phase.steps.length})`;
   }
   return `${workflow.name}: ${phase?.name ?? "unknown"} ${progress}`;
 }
@@ -901,12 +1077,26 @@ export function buildResumeContext(state: WorkflowState): string {
   if (!workflow) return "";
 
   const phase = workflow.phases[state.phaseIndex];
+  // S3: when the phase is stepped, the resume anchor names the CURRENT step —
+  // "continue the current phase" alone would let the model drift back to a
+  // completed step's work.
+  const step = phase?.steps?.length
+    ? phase.steps[Math.min(state.stepIndex ?? 0, phase.steps.length - 1)]
+    : undefined;
   const parts: string[] = [];
   parts.push(`[kstack workflow active: ${workflow.name}]`);
   parts.push(`Current phase: ${phase?.name ?? "unknown"} (${state.phaseIndex + 1}/${workflow.phases.length})`);
+  if (step) {
+    // Clamp the displayed index like statusLineFor — a corrupt over-high
+    // stepIndex must not render "step draft (5/3)".
+    const stepPos = Math.min(state.stepIndex ?? 0, phase!.steps!.length - 1) + 1;
+    parts.push(`Current step: ${step.id} (${stepPos}/${phase!.steps!.length})`);
+  }
   parts.push(`Goal: ${state.goal}`);
 
-  const completed = Object.entries(state.results).filter(([, r]) => r.status === "completed");
+  // Phase keys only — dotted "phase.step" keys are step completions, not
+  // phase completions; the step posture is carried by "Current step:" above.
+  const completed = Object.entries(state.results).filter(([id, r]) => r.status === "completed" && !id.includes("."));
   if (completed.length > 0) {
     parts.push(`Completed: ${completed.map(([id]) => id).join(", ")}`);
   }
@@ -966,9 +1156,10 @@ export function buildResumeContext(state: WorkflowState): string {
   // the phase contract is context-only — re-anchor it every turn for main
   // phases. Subagent phases self-heal (delegation results arrive with fresh
   // instructions); parked states need constraints, not contracts.
-  if (state.status === "active" && phase?.execution === "main") {
+  // S3: a stepped phase re-anchors the CURRENT step's contract.
+  if (state.status === "active" && phase && (phase.execution === "main" || step)) {
     parts.push("");
-    parts.push(mainContractFor(phase, { state }));
+    parts.push(mainContractFor(phase, { state }, step));
   }
 
   parts.push("Continue working on the current phase. Call kstack_advance when done.");
