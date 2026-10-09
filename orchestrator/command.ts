@@ -4,8 +4,11 @@ import { loadActiveState, createState, saveState, abortState, resumeState, reiss
 import { detectGitContext } from "./git.ts";
 import { initAgentsMd } from "./init.ts";
 import { deterministicSubagents } from "./config.ts";
+import { gateInventory, configureGates } from "./gates.ts";
 import { launchPhase, executeCurrentPhase, releasePhaseInFlight, isPhaseInFlight, invalidateRuntime } from "./executor.ts";
 import { writeRunReport } from "./telemetry.ts";
+import { appendLedger } from "./ledger.ts";
+import { endStepWatch } from "./stuck.ts";
 import type { GitContext, WorkflowState } from "./types.ts";
 
 /**
@@ -46,6 +49,46 @@ export function decisionBlockedByInFlightChain(
  * first launch refused ("already running") — the exact racing class the guard
  * exists to prevent, turned against the user.
  */
+/**
+ * The phase whose park a human resolution releases: verdict parks name the
+ * phase directly; kill-switch/exhaustion reasons encode it after the first
+ * colon; entry gates park AT the gated phase; post-completion manual gates
+ * park one index past the completed phase; optional phases park at
+ * phaseIndex. Falls back to the workflow id when nothing resolves.
+ */
+function parkedGateId(state: WorkflowState): string {
+  if (state.verdictPark) return state.verdictPark;
+  const reason = state.pausedReason ?? "";
+  for (const p of ["verdicts-disabled:", "loopback-disabled:"]) {
+    if (reason.startsWith(p)) return reason.slice(p.length).split(":")[0] || state.workflowId;
+  }
+  const phases = getWorkflow(state.workflowId)?.phases ?? [];
+  const idx =
+    state.entryGate || state.pendingOptional ? state.phaseIndex
+    : state.status === "awaiting_approval" ? state.phaseIndex - 1
+    : state.phaseIndex;
+  return phases[idx]?.id ?? phases[state.phaseIndex]?.id ?? state.workflowId;
+}
+
+/**
+ * Audit one interactive gate resolution (D28/INV-L1): parks and
+ * env/override decisions are ledgered at their sites — the human's actual
+ * Run/Skip/Abort click must land too, or the trail cannot prove WHO released
+ * a gate. `gateId` = the phase whose park is being resolved.
+ */
+function auditGateDecision(
+  ctx: ExtensionCommandContext,
+  state: WorkflowState,
+  decision: "run" | "skip" | "abort" | "return",
+): void {
+  const phaseId = parkedGateId(state);
+  appendLedger(
+    ctx.cwd, state,
+    { kind: "gate", phaseId, payload: { gateId: phaseId, decision } },
+    (m) => { try { ctx.ui.notify(m, "warning"); } catch { /* stale ctx */ } },
+  );
+}
+
 function abortWorkflow(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: WorkflowState, message: string): void {
   // Invalidate first: any in-flight delegation's shouldAbort() flips false→
   // true and the spawn loop terminates the child (SIGKILL). Previously the
@@ -53,6 +96,8 @@ function abortWorkflow(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: Wo
   // and racing a same-id restart for the in-flight registry.
   invalidateRuntime();
   releasePhaseInFlight(state.workflowId, state.phaseIndex);
+  endStepWatch();
+  auditGateDecision(ctx, state, "abort");
   saveState(pi, abortState(state));
   try { ctx.ui.setStatus("kstack", undefined); } catch { /* stale */ }
   ctx.ui.notify(message, "info");
@@ -97,6 +142,7 @@ export async function handleKstackCommand(args: string, ctx: ExtensionCommandCon
   if (activeState?.pendingOptional && activeState.status === "awaiting_approval" && argId === "next") {
     if (decisionBlockedByInFlightChain(ctx, activeState)) return;
     const approved = approveOptionalPhase(activeState);
+    auditGateDecision(ctx, activeState, "run");
     saveState(pi, approved);
     ctx.ui.notify("Approved — running the optional phase.", "info");
     launchApprovedOptional(pi, ctx, approved);
@@ -125,6 +171,7 @@ export async function handleKstackCommand(args: string, ctx: ExtensionCommandCon
     // entryGate parks BEFORE the gated phase runs — a plain approveNext would
     // leave the marker at `true` and executeCurrentPhase would re-park.
     const approved = activeState.entryGate === true ? approveEntryGate(activeState) : approveNext(activeState);
+    auditGateDecision(ctx, activeState, "run");
     saveState(pi, approved);
     ctx.ui.notify("Approved — continuing workflow.", "info");
     launchPhase(pi, ctx, approved);
@@ -156,11 +203,13 @@ export async function handleKstackCommand(args: string, ctx: ExtensionCommandCon
       if (choice?.startsWith("Run")) {
         if (decisionBlockedByInFlightChain(ctx, activeState)) return;
         const approved = approveOptionalPhase(activeState);
+        auditGateDecision(ctx, activeState, "run");
         saveState(pi, approved);
         launchApprovedOptional(pi, ctx, approved);
       } else if (choice?.startsWith("Skip")) {
         if (decisionBlockedByInFlightChain(ctx, activeState)) return;
         const next = skipPendingOptional(activeState, wf?.phases ?? [], wf?.phases.length ?? 0);
+        auditGateDecision(ctx, activeState, "skip");
         saveState(pi, next);
         if (next.status === "completed") {
           writeRunReport(ctx.cwd, activeState.workflowId);
@@ -193,6 +242,7 @@ export async function handleKstackCommand(args: string, ctx: ExtensionCommandCon
       if (choice?.startsWith("Approve")) {
         if (decisionBlockedByInFlightChain(ctx, activeState)) return;
         const approved = entryGated ? approveEntryGate(activeState) : approveNext(activeState);
+        auditGateDecision(ctx, activeState, "run");
         saveState(pi, approved);
         launchPhase(pi, ctx, approved);
       } else if (choice === "Abort workflow") {
@@ -217,6 +267,9 @@ export async function handleKstackCommand(args: string, ctx: ExtensionCommandCon
       // is still in flight launches a second chain for the same phase.
       if (decisionBlockedByInFlightChain(ctx, activeState)) return;
       const resumed = resumeState(activeState);
+      // No ledger row: this branch resumes stuck:/step-failed:/budget parks —
+      // detector events, not gate releases. The resume is inferable from the
+      // step entries that follow (S3 review: audit-trail over-attribution).
       saveState(pi, resumed);
       launchPhase(pi, ctx, resumed);
       return;
@@ -278,7 +331,26 @@ async function startWorkflow(workflowId: string, ctx: ExtensionCommandContext, p
   const goal = await ctx.ui.input("Describe your goal", `e.g. "Add dark mode to the settings page"`);
   if (!goal) return;
 
-  const state = createState(workflowId, goal);
+  // S3/D20 pre-flight configure (TRANSIENT — never a persisted status):
+  // enumerate the gates this workflow can actually fire and, in interactive
+  // mode only, let the user choose per-gate handling BEFORE the state exists.
+  // Dismissed/headless ⇒ human-gate defaults; the kstack_start tool path never
+  // engages configure (env defaults apply there).
+  const gateRows = gateInventory(workflow);
+  let gateMode: WorkflowState["gateMode"] = "human-gate";
+  let gateOverrides: WorkflowState["gateOverrides"] = {};
+  // TUI-only by design: RPC mode also exposes dialog UI (ctx.hasUI) but a
+  // remote caller cannot see a dialog — the conservative default skips
+  // configure and applies env/human-gate defaults (S3 review note).
+  if (gateRows.length > 0 && ctx.mode === "tui") {
+    const config = await configureGates(gateRows, ctx, workflow.name);
+    if (config) {
+      gateMode = config.gateMode;
+      gateOverrides = config.gateOverrides;
+    }
+  }
+
+  const state: WorkflowState = { ...createState(workflowId, goal), gateMode, gateOverrides };
   saveState(pi, state);
 
   ctx.ui.notify(`Starting: ${workflow.name} (${workflow.phases.length} phases)`, "info");
@@ -358,7 +430,8 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
     );
     if (answer !== undefined && answer.trim().toLowerCase() === FREEZE_RESUME_PHRASE) {
       if (panelGuard(ctx, state)) return true;
-      const unfrozen = unfreeze(state);
+      const unfrozen = unfreeze(state, getWorkflow(state.workflowId)?.phases);
+      auditGateDecision(ctx, state, "run");
       saveState(pi, unfrozen);
       ctx.ui.notify("Freeze lifted — re-running the devsecops review gate.", "info");
       launchPhase(pi, ctx, unfrozen);
@@ -394,6 +467,7 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
     if (choice === "Continue as approved") {
       if (panelGuard(ctx, state)) return true;
       const next = forceApproveParked(state, phases);
+      auditGateDecision(ctx, state, "run");
       saveState(pi, next);
       launchPhase(pi, ctx, next);
     } else if (choice === "Return phase with context" || choice === "Other…") {
@@ -407,6 +481,7 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
         ctx.ui.notify("Cannot loop back: the parked phase has no loopBackTo target.", "error");
         return true;
       }
+      auditGateDecision(ctx, state, "return");
       saveState(pi, next);
       launchPhase(pi, ctx, next);
     } else if (choice === "View report excerpt") {
@@ -434,11 +509,13 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
     if (choice === "Accept result — continue past the gate") {
       if (panelGuard(ctx, state)) return true;
       const next = forceContinuePastGate(state, phases);
+      auditGateDecision(ctx, state, "run");
       saveState(pi, next);
       launchPhase(pi, ctx, next);
     } else if (choice === "Re-run the gated phase") {
       if (panelGuard(ctx, state)) return true;
       const resumed = resumeState(state);
+      auditGateDecision(ctx, state, "run");
       saveState(pi, resumed);
       launchPhase(pi, ctx, resumed);
     } else if (choice === "Abort workflow") {
@@ -459,6 +536,9 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
     if (choice?.startsWith("Resume")) {
       if (panelGuard(ctx, state)) return true;
       const resumed = resumeState(state);
+      // No ledger row: this branch only fires for anomaly:/branch-violation:
+      // parks (exhausted loops show Re-run/Accept instead) — ops parks, not
+      // gate releases.
       saveState(pi, resumed);
       launchPhase(pi, ctx, resumed);
     } else if (choice === "Re-run the gated phase (+1 verified attempt)") {
@@ -467,11 +547,13 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
       // verified run of the loop target before the loop re-exhausts.
       if (panelGuard(ctx, state)) return true;
       const reissued = reissueGate(state, phases);
+      auditGateDecision(ctx, state, "run");
       saveState(pi, reissued);
       launchPhase(pi, ctx, reissued);
     } else if (exhausted && choice === "Accept result — continue past the gate") {
       if (panelGuard(ctx, state)) return true;
       const next = forceContinuePastGate(state, phases);
+      auditGateDecision(ctx, state, "run");
       saveState(pi, next);
       launchPhase(pi, ctx, next);
     } else if (choice === "Abort workflow") {
