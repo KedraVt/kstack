@@ -71,6 +71,9 @@ const REGISTRY: Record<string, RegistryEntry> = {
   "kstack-grilling": {
     summary: "Interview protocol: design-tree rounds over the frontier, recommended answers, facts-vs-decisions split",
   },
+  "kstack-plan-draft": {
+    summary: "Plan drafting: converged plan file under .kstack/plans following the Plan file contract",
+  },
   "kstack-fix-strategy": {
     summary: "Minimal-fix strategy for a CONFIRMED root cause: validation-first, minimal diff, regression test per fix",
   },

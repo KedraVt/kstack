@@ -31,9 +31,64 @@ const develop: Workflow = {
       execution: "main",
       optional: false,
       // Decision phase: interview rounds with the user, then the written
-      // plan is reviewed before any code is written.
+      // plan is reviewed before any code is written. The manual gate fires
+      // ONCE — after the last step completes.
       advance: "manual",
-      skills: ["kstack-office-hours", "kstack-grilling", "kstack-plan-eng-review"],
+      // S3 pilot (D19): three main steps, each carrying exactly one skill.
+      steps: [
+        {
+          id: "interrogate",
+          execution: "main",
+          skill: "kstack-grilling",
+          task: `## DELIVERABLE
+A settled decision frontier: every open question answered by the user or explicitly folded into a design decision, summarized for the drafting step.
+
+## STOP CONDITION
+Stop when: the frontier is empty — nothing remains silently assumed. Do NOT write the plan file yet; drafting is the next step.
+
+## CONTEXT
+Goal: {goal} | Branch: {branch}
+{open_questions}
+
+Conduct the grilling interview: map decisions as a design tree, work in rounds over the frontier (max 5 questions per round, only questions that change architecture or scope), give YOUR recommended answer under each, then STOP and wait for the user's replies. Apply office-hours judgment: challenge vague premises and push for the narrowest shippable scope. Never ask for a fact you can look up yourself.`,
+        },
+        {
+          id: "draft",
+          execution: "main",
+          skill: "kstack-plan-draft",
+          task: `## DELIVERABLE
+A converged plan file written to disk following the Plan file contract.
+
+## STOP CONDITION
+Stop when: the plan file exists on disk and covers every settled decision. Do NOT start implementing.
+
+## CONTEXT
+Goal: {goal} | Branch: {branch}
+Interview outcome (the settled frontier):
+{previous}
+
+Write the plan to {plan_file} — the orchestrator-resolved path.
+
+End your kstack_advance summary with the line \`PLAN FILE: {plan_file}\` — the exact path you wrote.`,
+        },
+        {
+          id: "eng-review",
+          execution: "main",
+          skill: "kstack-plan-eng-review",
+          task: `## DELIVERABLE
+An engineering review of the drafted plan — correctness, scope discipline, blast radius, testability — with the converged result briefly summarized to the user.
+
+## STOP CONDITION
+Stop when: the plan at {plan_file} is reviewed and either confirmed or amended on disk. Do NOT implement.
+
+## CONTEXT
+Goal: {goal} | Branch: {branch}
+Draft under review:
+{previous}
+
+End your kstack_advance summary with the line \`PLAN FILE: {plan_file}\` — the exact path of the file under review.`,
+        },
+      ],
     },
     {
       id: "implement",
