@@ -111,7 +111,7 @@ export function softwareArchitectArtifactName(sprint: SprintRef, seq: number | s
  * kstack_phase tool to point at the record when the delegation results
  * (delivered via followUp message) are no longer in context.
  */
-export function phaseArtifactPaths(phaseId: string, cwd: string, sprint?: SprintRef): string[] {
+export function phaseArtifactPaths(phaseId: string, cwd: string, sprint?: SprintRef, planFile?: string): string[] {
   switch (phaseId) {
     case "architect-gate": {
       const newest = newestArchitectArtifact(cwd, typeof sprint === "number" ? sprint : undefined);
@@ -123,6 +123,12 @@ export function phaseArtifactPaths(phaseId: string, cwd: string, sprint?: Sprint
       return sprint !== undefined ? [qaArtifactPath(cwd, sprint)] : [];
     case "commit-archive":
       return typeof sprint === "number" ? [sprintArchiveDir(cwd, sprint)] : [];
+    case "plan":
+      // S3 resume-gate: the plan FILE is the phase's artifact — the caller
+      // resolves it (state.planFile captured from the PLAN FILE marker, else
+      // the legacy goal slug) so the last step's re-delivery verifies the
+      // file the draft actually wrote.
+      return planFile ? [path.join(cwd, planFile)] : [];
     default:
       return [];
   }

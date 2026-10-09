@@ -139,6 +139,11 @@ export interface SpawnRequest {
     lastTool?: string;
   }) => void;
   /**
+   * S3/D28: raw JSON stream event tap (pre-label), for per-step detectors.
+   * Optional and best-effort — exceptions are swallowed by the caller.
+   */
+  onEvent?: (event: any) => void;
+  /**
    * Inline agent definition bypassing discovery — used by tests and callers
    * that construct specialists programmatically.
    */
@@ -504,6 +509,13 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
           }
           if (event?.type === "message_end" && event?.message?.role === "assistant" && event?.message?.stopReason === "error") {
             lastProviderError = lastProviderError ?? "assistant message ended with stopReason=error";
+          }
+          if (req.onEvent) {
+            try {
+              req.onEvent(event);
+            } catch {
+              /* detector taps are best-effort — never break the stream */
+            }
           }
           const label = activityLabelFromEvent(event);
           if (label) req.onActivity?.(label);

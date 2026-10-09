@@ -1,4 +1,4 @@
-import type { WorkflowPhase, WorkflowContext, Workflow } from "./types.ts";
+import type { WorkflowPhase, WorkflowContext, Workflow, WorkflowStep } from "./types.ts";
 import { getWorkflow } from "./workflows.ts";
 import { loadSkillFull, loadSkillGate, getSkillInfo } from "./skills.ts";
 import { skillsEnabled, manualGates, deterministicSubagents } from "./config.ts";
@@ -363,7 +363,14 @@ const MAIN_CONTRACTS: Record<string, (ctx: Pick<WorkflowContext, "state">) => st
     '## DELIVERABLE\nThe requested single action (QA / review / ship / investigate) completed, with its standard report.\n\n## STOP CONDITION\nStop when: the action\'s own deliverable is produced.',
 };
 
-export function mainContractFor(phase: WorkflowPhase, ctx: Pick<WorkflowContext, "state">): string {
+export function mainContractFor(phase: WorkflowPhase, ctx: Pick<WorkflowContext, "state">, step?: WorkflowStep): string {
+  // S3 stepped phases: the step task carries its own DELIVERABLE/STOP lines —
+  // extract exactly that pair (up to the next unrelated heading or EOF).
+  if (step) {
+    const m = /## DELIVERABLE[\s\S]*?(?=\n## (?!DELIVERABLE|STOP CONDITION)|$)/.exec(step.task);
+    if (m) return m[0].trim();
+    return `## DELIVERABLE\nA clear, verifiable result for the "${step.id}" step of the "${phase.name}" phase.\n\n## STOP CONDITION\nStop when: the step task is complete and its deliverable exists.`;
+  }
   const builder = MAIN_CONTRACTS[phase.id];
   if (builder) return builder(ctx);
   return `## DELIVERABLE\nA clear, verifiable result for the "${phase.name}" phase, directly usable by the next phase.\n\n## STOP CONDITION\nStop when: the result can be checked against this description as done or not done. Further work is waste.`;
@@ -945,7 +952,185 @@ function interpolate(template: string, ctx: WorkflowContext): string {
   // [\w-] not \w: hyphenated phase ids (root-cause, regression-qa) carry
   // real summaries — with \w the {root-cause_summary} token never matched
   // and the fix phase ran without the diagnosis.
-  out = replaceExact(out, /\{([\w-]+)_summary\}/g, (_, phaseId: string) =>
+  // S3: [\w.-] not [\w-] — stepped phases record results under dotted keys
+  // ("plan.draft"), and {plan.draft_summary} must resolve like any phase id.
+  // Superset of the old class: no legacy template's output changes.
+  out = replaceExact(out, /\{([\w.-]+)_summary\}/g, (_, phaseId: string) =>
     ctx.state.results[phaseId]?.summary ?? "(not yet available)");
   return out;
+}
+
+// --- S3 step model (TASK_02) --------------------------------------------------
+//
+// Step instructions assemble in a FIXED order (D28 research constraint):
+// system header → step task → skill gate → contract → advancement rule.
+// Volatile deltas (prior-step results, retry context, resume notes) append at
+// the tail ONLY — two calls differing only in retry/resume state share a
+// byte-identical prefix, so cached prompt prefixes stay warm.
+
+/**
+ * Step-scoped interpolation: everything `interpolate` handles plus `{previous}`
+ * (the previous same-phase step's recorded summary — for a delegated step that
+ * summary carries its ## HANDOFF digest) and `{open_questions}` (carry-over
+ * from the understand phase; "(none carried over)" when absent).
+ */
+export function interpolateStepTask(task: string, phase: WorkflowPhase, stepIndex: number, ctx: WorkflowContext): string {
+  let out = interpolate(task, ctx);
+  const prev = stepIndex > 0 ? phase.steps?.[stepIndex - 1] : undefined;
+  const prevSummary = prev ? ctx.state.results[`${phase.id}.${prev.id}`]?.summary : undefined;
+  out = replaceExact(out, /\{previous\}/g, prevSummary || "(no prior output)");
+  out = replaceExact(out, /\{open_questions\}/g, carryOverOpenQuestions(ctx) || "(none carried over)");
+  return out;
+}
+
+/**
+ * Step-scoped skill gate (D19): at most ONE skill per step. Main steps get the
+ * full digest on first delivery per run (skillsDelivered), the parsed
+ * ## DoD gate on repeats. Delegated steps never need the gate here — their
+ * FULL digest rides inside buildStepTask; a bare gate is enough if the
+ * orchestrator ever surfaces them.
+ */
+function buildStepSkillBlock(step: WorkflowStep, ctx: WorkflowContext): string | null {
+  if (!skillsEnabled() || !step.skill) return null;
+  const id = step.skill;
+  const info = getSkillInfo(id);
+  if (!info) return null;
+  const parts = [`#### Skill gate: ${id}`];
+  const alreadyDelivered = (ctx.state.skillsDelivered ?? []).includes(id);
+  if (!alreadyDelivered && step.execution === "main") {
+    const digest = loadSkillFull(id);
+    if (digest) {
+      parts.push(digest);
+      parts.push(`(Full skill documentation for deep consultation: ${info.skillPath})`);
+      return parts.join("\n");
+    }
+  }
+  const gate = loadSkillGate(id);
+  if (gate) parts.push(gate);
+  if (alreadyDelivered) parts.push("(Full methodology delivered earlier in this run — follow the same rules.)");
+  return parts.join("\n");
+}
+
+/**
+ * Advancement contract for a step: same uniform rule as phases (the model
+ * always calls kstack_advance itself), worded at step granularity and naming
+ * the persisted result key so the model's summary lands under phase.step.
+ */
+function buildStepAdvancementRule(phase: WorkflowPhase, step: WorkflowStep, isLast: boolean): string {
+  const lines = [
+    "---",
+    `When this step ("${step.id}") is complete, YOU call the \`kstack_advance\` tool with a 2-3 sentence summary of what was accomplished and status "completed". The orchestrator records it under "${phase.id}.${step.id}" and delivers the next step (or closes the phase on the last step).`,
+  ];
+  if (isLast && manualGates() && phase.advance === "manual") {
+    lines.push(
+      "This is the LAST step of a DECISION PHASE: after you call kstack_advance, the workflow will pause so the user can review the phase output before the next phase starts. Present results clearly and completely.",
+    );
+  }
+  lines.push('If the step failed, use status "failed" and explain why.');
+  return lines.join("\n");
+}
+
+/**
+ * Orchestrator instructions for ONE step of a stepped phase. Deltas that
+ * change between deliveries of the SAME step (retry context after a verdict
+ * loop-back, prior-step results, resume notes) are appended at the tail so
+ * the stable prefix stays byte-identical (D28).
+ */
+export function buildStepInstructions(phase: WorkflowPhase, step: WorkflowStep, ctx: WorkflowContext): string {
+  const workflow = getWorkflow(ctx.state.workflowId);
+  const steps = phase.steps ?? [];
+  // Dev-time defect guard: duplicate step ids collide on results["phase.step"]
+  // keys and findIndex resolution — fail loudly at delivery, not silently
+  // mid-run.
+  if (new Set(steps.map((s) => s.id)).size !== steps.length) {
+    throw new Error(`phase "${phase.id}" declares duplicate steps[].id values — step ids must be unique`);
+  }
+  const stepIndex = steps.findIndex((s) => s.id === step.id);
+  const idx = stepIndex < 0 ? 0 : stepIndex;
+  const parts: string[] = [];
+
+  // System header.
+  parts.push(`## [kstack workflow: ${ctx.state.workflowId}] Phase: ${phase.name} — Step ${idx + 1}/${steps.length}: ${step.id}`);
+  parts.push(`**Goal:** ${ctx.state.goal}`);
+  parts.push(`**Progress:** Phase ${ctx.state.phaseIndex + 1} of ${workflow?.phases.length ?? 0} · step ${idx + 1}/${steps.length}`);
+  parts.push(`**Branch:** ${ctx.git.branch}`);
+  parts.push("");
+
+  // Phase-level results only — dotted "phase.step" keys belong to the tail.
+  const priorPhases = Object.entries(ctx.state.results)
+    .filter(([id, r]) => r.status === "completed" && !id.includes("."))
+    .map(([id, r]) => `- **${id}**: ${r.summary}`);
+  if (priorPhases.length > 0) {
+    parts.push("### Completed phases");
+    parts.push(priorPhases.join("\n"));
+    parts.push("");
+  }
+
+  // Step task. A delegated step under KSTACK_PI_DETERMINISTIC=off gets no
+  // chain spawn — the model must call the `subagent` tool itself, so the
+  // instructions become delegation guidance carrying the FULL digest inside
+  // the task (a bare DoD gate would starve a step executing out-of-context).
+  // {previous} interpolates on step.task BEFORE the digest is embedded —
+  // doing it after would mangle a literal `{previous}` inside SKILL.md docs.
+  if (step.execution === "subagent" && !deterministicSubagents()) {
+    const delegatedTask = buildStepTask({ ...step, task: interpolateStepTask(step.task, phase, idx, ctx) });
+    parts.push("### Action: Use the `subagent` tool");
+    parts.push("");
+    parts.push("Call the `subagent` tool with these parameters:");
+    parts.push("");
+    parts.push("```json");
+    parts.push(JSON.stringify({ agent: step.agent ?? "worker", task: delegatedTask }, null, 2));
+    parts.push("```");
+    parts.push("");
+    parts.push("After the subagent completes, review its output and call `kstack_advance` with a summary.");
+    parts.push('If the subagent fails, call `kstack_advance` with status "failed" and explain what went wrong.');
+  } else {
+    parts.push(`### Instructions — step "${step.id}"`);
+    parts.push(interpolateStepTask(step.task, phase, idx, ctx));
+  }
+
+  // Skill gate (0-or-1, D19).
+  const skillBlock = buildStepSkillBlock(step, ctx);
+  if (skillBlock) {
+    parts.push("");
+    parts.push(skillBlock);
+  }
+
+  // Contract = the step task's own DELIVERABLE/STOP lines.
+  parts.push("");
+  parts.push(mainContractFor(phase, ctx, step));
+
+  // Tool contract: the step ends by calling kstack_advance.
+  parts.push("");
+  parts.push(buildStepAdvancementRule(phase, step, idx === steps.length - 1));
+
+  // Volatile tail — everything that may change between two deliveries of the
+  // same step. Prior-step results first, then retry context, then resume.
+  const tail: string[] = [];
+  const priorSteps = Object.entries(ctx.state.results)
+    .filter(([id, r]) => id.startsWith(phase.id + ".") && r.status === "completed")
+    .map(([id, r]) => `- **${id.slice(phase.id.length + 1)}**: ${r.summary}`);
+  if (priorSteps.length > 0) {
+    tail.push("### Completed steps in this phase");
+    tail.push(priorSteps.join("\n"));
+  }
+  const retry = retryContextBlock(ctx, phase.id);
+  if (retry) tail.push(retry);
+  if (tail.length > 0) {
+    parts.push("");
+    parts.push(tail.join("\n\n"));
+  }
+
+  return parts.join("\n");
+}
+
+/**
+ * Deterministic-task text for a DELEGATED step: the step's own task plus its
+ * FULL skill methodology (delegation always delivers the full digest — the
+ * subagent's context is fresh) and the OUTPUT_CONTRACT. Never routes through
+ * buildDeterministicPlan — steps are not chains.
+ */
+export function buildStepTask(step: WorkflowStep): string {
+  const stub: WorkflowPhase = { id: step.id, name: step.id, execution: "subagent", optional: false };
+  return buildTaskSkills(stub, step.task, step.skill ? [step.skill] : undefined);
 }
