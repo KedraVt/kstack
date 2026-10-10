@@ -6,7 +6,7 @@ metadata:
   version: "0.1.2"
 ---
 
-<!-- provenance: user-stack mindrun verbatim · polished S1-ff (sibling repoint) 2026-02-11 -->
+<!-- provenance: user-stack mindrun verbatim · polished S1-ff (sibling repoint) 2026-02-11 · +DoD gate 2026-10-10 -->
 
 # Mindrun
 
@@ -208,4 +208,13 @@ Then:
 - A finding without a concrete Trigger.
 - Silently dropping a question because the step's cap was reached (overflow goes to the report).
 - Claiming a citation without having re-read it in the file.
+
+## DoD gate (verification)
+
+- Phase 0 briefing asked the user (or a genuine fallback: automated run / explicit decline) — DoD never self-inferred.
+- Every claim cites file:line, re-read in the real file during the quote-verification pass.
+- Every finding carries a falsifiable Trigger (specific input → chain → wrong output) in the five-field format; no Trigger, no finding.
+- Design-intent gate honored: explicitly handled boundaries are not bugs; only silent past-boundary operation is reported.
+- `mindrun-report.md` written incrementally; DoD matrix verdicts `verified / mismatch / unspecified → question`, each with evidence.
+- Final presentation delivered to the user: DoD matrix, ranked findings with triage, question queue (overflow in report, never silence), tasks, STATUS block with counters.
 

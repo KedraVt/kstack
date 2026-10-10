@@ -3,7 +3,7 @@ name: kstack-design-taste-frontend
 description: Anti-slop frontend skill for landing pages, portfolios, and redesigns. The agent reads the brief, infers the right design direction, and ships interfaces that do not look templated. Real design systems when applicable, audit-first on redesigns, strict pre-flight check. Use when building or redesigning a landing page, portfolio, marketing site, or any interface whose visual identity is the deliverable. Do NOT use for auditing/improving an existing UI's UX, accessibility, or polish (use kstack-impeccable) — this skill sets the direction, impeccable audits the result.
 ---
 
-<!-- provenance: user-stack design-taste verbatim · polished S1-ff (Use-when/NOT clauses, H1) 2026-02-11 -->
+<!-- provenance: user-stack design-taste verbatim · polished S1-ff (Use-when/NOT clauses, H1) 2026-02-11 · +DoD gate 2026-10-10 -->
 
 # design-taste-frontend: Anti-Slop Frontend Skill
 
@@ -982,7 +982,18 @@ If a single checkbox cannot be honestly ticked, the page is not done. Fix it bef
 
 ---
 
-# APPENDICES - Real Source-Backed Reference Material
+## DoD gate (verification)
+
+- One-line Design Read declared before generating (page kind + audience + vibe + system family); at most ONE clarifying question, only on genuine divergence.
+- Three dials set explicitly from the read (`DESIGN_VARIANCE` / `MOTION_INTENSITY` / `VISUAL_DENSITY`) — never silent baseline.
+- Section 2 honesty: official package for real design systems, aesthetics labeled as honest implementations; one design system per project.
+- Consistency locks held across the whole page: one theme, one accent color, one corner-radius system.
+- Zero em-dashes; no Section-9 AI tells (Inter default, AI-purple, three-equal cards, Jane Doe / Acme, beige+brass on premium-consumer, serif default / Fraunces / Instrument_Serif).
+- Real imagery only (gen-tool → Picsum-seed → labeled placeholder); no fake screenshots, hand-rolled SVG icons, or decorative overlays.
+- Motion claimed = motion shown (`MOTION_INTENSITY > 4` actually animates); reduced-motion wrapped above 3; Motion isolated in `'use client'` leaves; no `window.addEventListener('scroll')`.
+- Section 14 pre-flight matrix honestly ticked, every box — a single unfixable box means not done.
+
+## APPENDICES - Real Source-Backed Reference Material
 
 The sections below are vendored reference content. They give the agent real install commands, real canonical doc links, and real working starter snippets for each design system named in Section 2. Use them to ground decisions in production reality, not training-data fiction.
 

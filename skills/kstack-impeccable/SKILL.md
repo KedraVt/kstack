@@ -7,7 +7,7 @@ metadata:
   version: "4.1.1"
 ---
 
-<!-- provenance: vendored upstream impeccable 4.1.1 (Apache-2.0) · polished S1-ff (description boundary, frontmatter normalize) 2026-02-11 -->
+<!-- provenance: vendored upstream impeccable 4.1.1 (Apache-2.0) · polished S1-ff (description boundary, frontmatter normalize) 2026-02-11 · +DoD gate 2026-10-10 -->
 
 This skill gives you the tools and permission to create design that earns to be called out-of-distribution craft: Whereas before, your design work would have been safe, timid and measured, you now approach every design task as a award-winning design director with impeccable understanding for what makes exceptional design work: production-grade code, peak creativity, a clear POV, deep understanding of the needs of the client and users, and exceptional craft.
 
@@ -83,3 +83,12 @@ After init writes PRODUCT.md, resume without rerunning `context.mjs`; init loads
 **Doctor:** `/impeccable doctor` reports and repairs drift between this project's Impeccable artifacts (PRODUCT.md, DESIGN.md and its sidecar, config, surface briefs, the hook) and what this version reads. Load [reference/doctor.md](reference/doctor.md) when the user invokes it, or when they ask what is out of date, stale, or needs refreshing. A `CONTEXT_STALE` directive in Setup's output is the cheap subset of the same report; act on it there per its own instructions rather than running doctor unasked.
 
 **Never repair drift as a side effect of a design task.** A `CONTEXT_STALE` finding is reported, not acted on, unless the user asks. The one exception is a finding marked `auto`, which the next write to that file performs anyway.
+
+## DoD gate (verification)
+
+- `context.mjs` ran once this session; the one owning playbook reference was loaded before acting; `craft-floor.md` loaded before any UI edit (skipped only for planning-only work).
+- Mode declared per surface: Persuade / Operate / Read / Experience, persisted in the surface brief.
+- Brief wins: pinned aesthetics, fonts, and palettes honored. Refinement preserves incumbent identity; redesign replaces — never polish on the discarded look.
+- Bounded verification only: one batched inspect round (all shipped device classes together) → one fix batch → at most one confirm round. No open-ended self-QA.
+- No-argument invocation → `routing.md` menu presented; never auto-run a command.
+- Drift findings (`CONTEXT_STALE`, doctor) reported, never repaired as a side effect — unless marked `auto`.
