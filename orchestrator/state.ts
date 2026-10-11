@@ -1,8 +1,10 @@
+import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { WorkflowState, PhaseResult, WorkflowPhase, WorkflowStep, ParsedVerdict, VerdictParkCause } from "./types.ts";
 import { sprintMaxAttempts, sprintArchMaxAttempts, loopbacksEnabled, verdictsEnabled } from "./config.ts";
-import { buildRetryFeedback, PHASE_EXPECTATIONS, NEGATIVE_VALUES } from "./verdicts.ts";
-import { securityReviewArtifactRel, SPRINT_PLACEHOLDER } from "./artifacts.ts";
+import { buildRetryFeedback, EXPECTATIONS, NEGATIVE_VALUES, isVerdictBearing } from "./verdicts.ts";
+import { mergePhaseVerdicts } from "./records.ts";
+import { securityReviewArtifactRel, SPRINT_PLACEHOLDER, ephemeralArtifactsFor } from "./artifacts.ts";
 
 const ENTRY_TYPE = "kstack-wf-state";
 
@@ -38,6 +40,20 @@ export function loadActiveState(ctx: ExtensionContext): WorkflowState | null {
               : {};
         }
         if (typeof normalized.runId !== "string") delete normalized.runId;
+        // S4: routing vars ride the same untrusted entry channel — a
+        // hand-edited state must not smuggle non-string values into
+        // skipWhen/var resolution downstream.
+        {
+          const vv = normalized.vars;
+          normalized.vars =
+            vv && typeof vv === "object"
+              ? Object.fromEntries(
+                  Object.entries(vv).filter(
+                    ([k, v]) => typeof k === "string" && typeof v === "string",
+                  ),
+                )
+              : {};
+        }
         // stepIndex is routing state too: a negative/NaN forged value flips
         // insidePhase at the executor and skips skipWhen/optional/⚠ entry
         // gates on a stepped phase (S3 security review, EoP class). Over-high
@@ -46,6 +62,49 @@ export function loadActiveState(ctx: ExtensionContext): WorkflowState | null {
         if (!Number.isInteger(normalized.stepIndex) || (normalized.stepIndex as number) < 0) {
           delete normalized.stepIndex;
         }
+        // S4: lastVerdicts / lanes / capabilities / ephemeralArtifacts ride
+        // the same untrusted channel — normalize to string-keyed maps of the
+        // declared shape or drop (never smuggle junk into routing reads).
+        {
+          const lv = normalized.lastVerdicts;
+          const clean: Record<string, Record<string, string>> = {};
+          if (lv && typeof lv === "object") {
+            for (const [k, v] of Object.entries(lv)) {
+              if (!v || typeof v !== "object") continue;
+              const inner: Record<string, string> = {};
+              for (const [vk, vv] of Object.entries(v as Record<string, unknown>)) {
+                if (typeof vv === "string") inner[vk] = vv;
+              }
+              clean[k] = inner;
+            }
+          }
+          normalized.lastVerdicts = clean;
+        }
+        {
+          const lanes = normalized.lanes;
+          normalized.lanes =
+            lanes && typeof lanes === "object"
+              ? (Object.fromEntries(
+                  Object.entries(lanes)
+                    .map(([k, v]) => [k, (v as { stepIndex?: unknown })?.stepIndex])
+                    .filter(([, si]) => Number.isInteger(si) && (si as number) >= 0),
+                ) as WorkflowState["lanes"])
+              : {};
+        }
+        {
+          const caps = normalized.capabilities;
+          normalized.capabilities =
+            caps && typeof caps === "object"
+              ? (Object.fromEntries(Object.entries(caps).filter(([, v]) => typeof v === "boolean")) as WorkflowState["capabilities"])
+              : {};
+        }
+        {
+          const ea = normalized.ephemeralArtifacts;
+          normalized.ephemeralArtifacts = Array.isArray(ea)
+            ? ea.filter((p): p is string => typeof p === "string" && !p.includes("..") && !path.isAbsolute(p))
+            : [];
+        }
+        if (typeof normalized.resumeMode !== "boolean") delete normalized.resumeMode;
         return normalized;
       }
       return null;
@@ -61,12 +120,19 @@ export function createState(workflowId: string, goal: string): WorkflowState {
     status: "active",
     goal,
     results: {},
-    // v4 (S3): gate fields exist from creation (INV-06); stepIndex stays
-    // absent until a stepped phase is entered (INV-01).
-    version: 4,
+    // v5 (S4): gate fields + routing vars exist from creation (INV-06);
+    // stepIndex stays absent until a stepped phase is entered (INV-01).
+    version: 5,
     attempts: {},
     gateMode: "human-gate",
     gateOverrides: {},
+    vars: {},
+    lastVerdicts: {},
+    lanes: {},
+    capabilities: {},
+    // S4/§10.5: THINK docs consumed within the run — registered at creation,
+    // deleted at terminal status (TASK_07).
+    ephemeralArtifacts: ephemeralArtifactsFor(workflowId),
     // S3 ledger run id — a restart/resume appends to the same JSONL file.
     runId: `${new Date().toISOString()}-${Math.random().toString(36).slice(2, 6)}`,
   };
@@ -91,64 +157,110 @@ function ceilingFor(targetPhaseId: string, declared?: number): number {
   return targetPhaseId === "system-design" ? sprintArchMaxAttempts() : sprintMaxAttempts();
 }
 
-interface RouteAction {
+export interface RouteAction {
   kind: "advance" | "loop-back" | "freeze" | "park";
+  /** Resolved loop-back target phase id (loopBackOn map or loopBackTo). */
+  target?: string;
+  /** Park cause for the verdict-unreadable channel. */
+  cause?: VerdictParkCause;
+  /** Designed parks (parkOn, feedback-spec) carry a free-form pausedReason. */
+  parkReason?: string;
 }
 
 /**
- * Deterministic routing table (D1–D3, BUG-1 fix). FAIL-CLOSED by expectation
- * map: each known verdict variable must land on an explicitly expected positive
- * value or a routing negative. Whitelisted-but-off-map values (e.g.
- * `status == success` at the QA gate) PARK for human decision instead of
- * silently advancing. Missing expected variables also park.
+ * Deterministic routing table (D1–D3, S4 machinery). FAIL-CLOSED by
+ * expectation map keyed [workflowId][phaseId] (ADR-7): each emitted verdict
+ * variable must land on an explicitly expected positive value or a routing
+ * negative. A missing map entry parks with no-expectation — never defaults.
+ *
+ * Evaluation order (system-design_01 §4): parkOn values first (a declared
+ * freeze/park beats every edge), then feedback-type==spec park, then
+ * negatives through loopBackOn[値] → loopBackTo, then required-var
+ * completeness, then advance. Publish-only phases (no edges) advance on
+ * every VALIDATED value and write lastVerdicts downstream (ADR-24).
  */
-export function routeVerdict(phaseId: string, parsed: ParsedVerdict): RouteAction {
+export function routeVerdict(
+  workflowId: string,
+  phaseId: string,
+  parsed: ParsedVerdict,
+  opts?: { phase?: WorkflowPhase; vars?: Record<string, string> },
+): RouteAction {
   const v = parsed.verdicts;
-  const expectations = PHASE_EXPECTATIONS[phaseId];
-  // routeVerdict is only reached for phases declaring loopBackTo. One of
-  // those without an expectations entry is a misconfigured gate — fail closed
-  // (park) rather than silently advancing past it.
-  if (!expectations) return { kind: "park" };
+  const expectations = EXPECTATIONS[workflowId]?.[phaseId];
+  if (!expectations) return { kind: "park", cause: "no-expectation" };
 
-  let sawNegative = false;
-  for (const [variable, allowed] of Object.entries(expectations)) {
-    const value = v[variable];
-    if (value === undefined) continue; // optional variable for this phase
-    // NOTE: routing negatives (red/orange/rejected/failed) are checked BEFORE
-    // the allowed-list on purpose — e.g. `status == red` at the QA gate is
-    // not in allowed ["green"], but it is the designed fix-loop trigger, not
-    // ambiguity. Only whitelisted NON-negative values that are off-map here
-    // (e.g. `status == approved` at QA) are ambiguous ⇒ park.
-    if (NEGATIVE_VALUES.has(value)) {
-      sawNegative = true;
-      continue;
-    }
-    if (!allowed.includes(value)) {
-      return { kind: "park" };
-    }
+  const phase = opts?.phase;
+  const parkOn = phase?.parkOn ?? {};
+  const loopBackOn = phase?.loopBackOn ?? {};
+  const hasEdges = !!(phase?.loopBackTo || Object.keys(loopBackOn).length > 0);
+
+  // parkOn scan — severity-as-verdict (record channel) AND the legacy
+  // parsed.severity field (HANDOFF channel) are both covered.
+  const emittedValues = [...Object.entries(v).map(([k, val]) => `${k}==${val}`), ...(parsed.severity ? [`severity==${parsed.severity}`] : [])];
+  for (const emitted of emittedValues) {
+    const value = emitted.split("==")[1];
+    const mode = parkOn[value];
+    if (mode === "freeze") return { kind: "freeze" };
+    if (mode === "park") return { kind: "park", parkReason: `park-on:${phaseId}:${emitted}` };
   }
 
-  if (phaseId === "devsecops-review") {
-    const securityRejected = v["security-review"] === "rejected";
-    // Parser guarantees severity exists on security rejections (D3).
-    if (securityRejected && (parsed.severity === "critical" || parsed.severity === "high")) {
-      return { kind: "freeze" };
-    }
-    if (securityRejected) return { kind: "loop-back" };
-    // Docker verdicts are only meaningful when the reviewer emitted them.
-    if (v["docker-build"] === "failed" || v["docker-security"] === "rejected") {
-      return { kind: "loop-back" };
-    }
+  // spec feedback never auto-reruns — the human decides whether the backlog
+  // reopens (ADR-21).
+  if (opts?.vars?.["feedback-type"] === "spec") {
+    return { kind: "park", parkReason: `feedback-spec:${phaseId}` };
   }
 
-  if (sawNegative) return { kind: "loop-back" };
+  // Per-emitted-var validation: every emitted var must have an expectation
+  // entry and a legit value (allowed OR routing negative OR declared map key).
+  for (const [variable, value] of Object.entries(v)) {
+    const key = expectations[variable] !== undefined ? variable : expectations[`${variable}?`] !== undefined ? `${variable}?` : undefined;
+    if (key === undefined) return { kind: "park", cause: "foreign-verdict" };
+    const allowed = expectations[key];
+    const legit =
+      allowed.includes(value) ||
+      NEGATIVE_VALUES.has(value) ||
+      parkOn[value] !== undefined ||
+      loopBackOn[value] !== undefined;
+    if (!legit) return { kind: "park", cause: "unroutable" };
+  }
+
+  // D3 fail-closed (record channel): a security rejection emitted without a
+  // severity verdict is ambiguity, not a loop — same contract the HANDOFF
+  // parser enforces on the legacy channel.
+  if (
+    expectations["security-review"] !== undefined &&
+    v["security-review"] === "rejected" &&
+    v["severity"] === undefined &&
+    parsed.severity === undefined
+  ) {
+    return { kind: "park", cause: "no-verdict" };
+  }
+
+  // Negatives: first declared negative routes. Edgeless (publish-only)
+  // phases have no routing edge — a validated negative still advances.
+  if (hasEdges) {
+    for (const value of Object.values(v)) {
+      if (!NEGATIVE_VALUES.has(value)) continue;
+      const target = loopBackOn[value] ?? phase!.loopBackTo;
+      if (!target) return { kind: "park", cause: "unroutable" }; // unmapped negative
+      return { kind: "loop-back", target };
+    }
+  }
 
   // Advance ONLY when every REQUIRED variable for this phase is present and
-  // positive. A gate that skipped its main verdict (e.g. devsecops chain
-  // emitting docker-build but no code-review) parks instead of advancing.
-  for (const [variable, allowed] of Object.entries(expectations)) {
-    if (phaseId === "devsecops-review" && variable.startsWith("docker-")) continue; // conditional
-    if (!allowed.includes(v[variable] ?? "")) return { kind: "park" };
+  // positive. A gate that skipped its main verdict parks instead of
+  // advancing. `?`-marked vars are legitimately absent.
+  for (const [rawKey, allowed] of Object.entries(expectations)) {
+    const variable = rawKey.replace(/\?$/, "");
+    const optional = rawKey.endsWith("?");
+    const value = v[variable];
+    if (value === undefined) {
+      if (optional) continue;
+      return { kind: "park", cause: "no-verdict" };
+    }
+    if (!allowed.includes(value) && !NEGATIVE_VALUES.has(value)) {
+      return { kind: "park", cause: "unroutable" };
+    }
   }
   return { kind: "advance" };
 }
@@ -187,53 +299,85 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
     next.retryContext = undefined;
   }
 
+  const cwd = opts?.cwd ?? process.cwd();
+  // Verdict resolution only on a COMPLETED result: a skipped/auto-disabled
+  // verdict phase ran nothing, so requiring its records would park every
+  // legitimately-skipped gate (INV-16).
+  const verdictPhase = result.status === "completed" && isVerdictBearing(phase);
+
   // B6 fix: with deterministic verdict parsing disabled, verdict-bearing
   // phases must NOT auto-advance. The kill-switch's documented contract is
   // "gates rely on human reading; no auto-routing" — meaning no routing in
   // EITHER direction: the completed gate pauses for the human instead of
   // silently advancing past a possible rejection.
-  if (phase?.loopBackTo && !verdictsEnabled()) {
+  if (verdictPhase && !verdictsEnabled()) {
     next.status = "paused";
-    next.pausedReason = `verdicts-disabled:${phase.id}`;
+    next.pausedReason = `verdicts-disabled:${phase!.id}`;
     return next;
   }
-  // Fail closed on a gate whose verdict never arrived (or arrived under a
-  // different phaseId — a stale stash from an earlier gate): silently
-  // advancing past a rejection-shaped blank is exactly what the verdict
-  // channel exists to prevent.
-  const pending = state.pendingVerdict;
-  const parsed = pending && pending.phaseId === phase.id ? pending.parsed : null;
-  if (phase?.loopBackTo && !parsed) {
-    return parkForUnreadableVerdict({ ...state, pendingVerdict: state.pendingVerdict }, phase.id, "no-verdict");
-  }
-  if (phase?.loopBackTo && parsed) {
-    const action = routeVerdict(phase.id, parsed);
+
+  // Resolve the phase verdict (INV-9). Flagged-steps phases merge their
+  // kstack-report records from .kstack/runs/<runId>/ — the ONLY channel
+  // allowed to produce a phase verdict under the step model. Legacy phases
+  // (no flagged steps) consume the pendingVerdict stash set at delegation
+  // time by the executor's HANDOFF parse.
+  let parsed: ParsedVerdict | null = null;
+  let parkCause: VerdictParkCause = "no-verdict";
+  let pvStash = state.pendingVerdict;
+  if (verdictPhase) {
+    const flagged = phase!.steps?.some((s) => s.signal?.kind === "verdict") ?? false;
+    if (flagged) {
+      const merged = mergePhaseVerdicts(phase!, cwd, state.workflowId, state.runId, state.results);
+      parsed = merged.parsed;
+      parkCause = merged.cause ?? "no-verdict";
+      pvStash = { phaseId: phase!.id, parsed: merged.parsed, excerpt: merged.excerpt };
+      if (!parsed && state.pendingVerdict && state.pendingVerdict.phaseId === phase!.id) {
+        parsed = state.pendingVerdict.parsed;
+        pvStash = state.pendingVerdict;
+      }
+      // Record-carried routing vars land in state.vars BEFORE routing —
+      // feedback-type==spec parks are evaluated against them (ADR-21).
+      if (Object.keys(merged.vars).length > 0) {
+        next.vars = { ...(state.vars ?? {}), ...merged.vars };
+      }
+    } else {
+      const pending = state.pendingVerdict;
+      parsed = pending && pending.phaseId === phase!.id ? pending.parsed : null;
+    }
+    if (!parsed) {
+      return parkForUnreadableVerdict({ ...state, pendingVerdict: pvStash }, phase!.id, parkCause);
+    }
+    const action = routeVerdict(state.workflowId, phase!.id, parsed, { phase, vars: next.vars });
 
     if (action.kind === "park") {
+      // Designed parks (parkOn "park", feedback-spec) name their own reason;
+      // the D4 panel resolves both shapes — a verdictPark is ALWAYS a human
+      // decision point, never attempt-burning.
+      if (action.parkReason) {
+        return {
+          ...state,
+          status: "paused",
+          verdictPark: phase!.id,
+          pausedReason: action.parkReason,
+          pendingVerdict: pvStash,
+        };
+      }
       // BUG-1 fail-closed: whitelisted-but-unroutable verdict ⇒ D4 panel,
       // WITHOUT recording completion or burning an attempt.
-      return parkForUnreadableVerdict({ ...state, pendingVerdict: state.pendingVerdict }, phase.id, "unroutable");
+      return parkForUnreadableVerdict({ ...state, pendingVerdict: pvStash }, phase!.id, action.cause ?? "unroutable");
     }
 
-    const targetIndex = opts!.phases!.findIndex((p) => p.id === phase.loopBackTo);
-    // A loop-back target that names no real phase is a workflow-definition
-    // bug — without this check the loop-back fell through to the "Approved"
-    // branch and a REJECTED verdict advanced linearly.
-    if (action.kind === "loop-back" && targetIndex < 0) {
-      return parkForUnreadableVerdict({ ...state, pendingVerdict: state.pendingVerdict }, phase.id, "unroutable");
-    }
-    const cwd = opts?.cwd ?? process.cwd();
     const sprintNumber = next.sprintNumber;
 
     if (action.kind === "freeze") {
       // D3: park WITHOUT advancing or burning attempts; only an explicit
       // human re-issue (unfreeze panel) resumes.
       next.status = "paused";
-      next.pausedReason = `security-freeze:${phase.id}`;
+      next.pausedReason = `security-freeze:${phase!.id}`;
       next.frozenUntilHuman = true;
       next.freezeInfo = {
-        phaseId: phase.id,
-        severity: parsed.severity!,
+        phaseId: phase!.id,
+        severity: parsed.severity ?? parsed.verdicts["severity"] ?? "red",
         // Sprint number may be unknown if the freeze happens off the normal
         // path — surface the template placeholder instead of a bogus "00".
         artifactPath: securityReviewArtifactRel(next.sprintNumber ?? SPRINT_PLACEHOLDER),
@@ -241,43 +385,82 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
       return next; // phaseIndex held at the review phase
     }
 
-    if (action.kind === "loop-back" && targetIndex >= 0 && !loopbacksEnabled()) {
-      // KSTACK_PI_LOOPBACKS=off: negative verdicts pause instead of retrying
-      // (pre-loop behavior; the human decides what happens next).
-      next.status = "paused";
-      next.pausedReason = `loopback-disabled:${phase.id}`;
-      return next;
-    }
+    // The validated map publishes to lastVerdicts on every non-park outcome
+    // (INV-17): edged loop-backs AND publish-only advances alike.
+    next.lastVerdicts = { ...(state.lastVerdicts ?? {}), [phase!.id]: { ...parsed.verdicts } };
 
-    if (action.kind === "loop-back" && targetIndex >= 0) {
+    if (action.kind === "loop-back") {
+      const targetIndex = opts!.phases!.findIndex((p) => p.id === action.target);
+      // A loop-back target that names no real phase is a workflow-definition
+      // bug — without this check the loop-back fell through to the "Approved"
+      // branch and a REJECTED verdict advanced linearly.
+      if (targetIndex < 0) {
+        return parkForUnreadableVerdict({ ...state, pendingVerdict: pvStash }, phase!.id, "unroutable");
+      }
+      if (!loopbacksEnabled()) {
+        // KSTACK_PI_LOOPBACKS=off: negative verdicts pause instead of retrying
+        // (pre-loop behavior; the human decides what happens next).
+        next.status = "paused";
+        next.pausedReason = `loopback-disabled:${phase!.id}`;
+        return next;
+      }
       // The purge covers EVERY phase that re-executes: the loop target plus
       // all phases between it and this gate (phases[targetIndex..phaseIndex]).
       purgeStepResults(next.results, opts!.phases!, targetIndex, state.phaseIndex);
-      const ceiling = ceilingFor(phase.loopBackTo, phase.maxAttempts);
-      const runsDone = (next.attempts[phase.loopBackTo] ?? 0) + 1;
-      next.attempts[phase.loopBackTo] = runsDone;
+      const target = opts!.phases![targetIndex];
+      const ceiling = ceilingFor(action.target!, phase!.maxAttempts ?? target.maxAttempts);
+      const runsDone = (next.attempts[action.target!] ?? 0) + 1;
+      next.attempts[action.target!] = runsDone;
       if (runsDone >= ceiling) {
         // Exhaustion ⇒ paused + user notified; phaseIndex stays AT the gate
         // phase — forceContinuePastGate() performs the +1 when the human
         // accepts, or the panel re-runs the gate for another verified attempt.
         next.status = "paused";
-        next.pausedReason = `loop-exhausted:${phase.loopBackTo} after ${runsDone} runs`;
+        next.pausedReason = `loop-exhausted:${action.target} after ${runsDone} runs`;
         return next;
       }
       next.phaseIndex = targetIndex;
       next.status = "active";
       next.retryContext = {
-        targetPhaseId: phase.loopBackTo,
+        targetPhaseId: action.target!,
         attempt: runsDone + 1,
         maxAttempts: ceiling,
-        feedback: buildRetryFeedback(parsed, phase.feedbackFrom ?? phase.id, cwd, sprintNumber),
+        feedback: buildRetryFeedback(parsed, phase!.feedbackFrom ?? phase!.id, cwd, sprintNumber),
       };
       return next;
     }
 
-    // Approved: loop over — reset the shared counter and continue linearly.
-    delete next.attempts[phase.loopBackTo];
+    // Approved / publish-only advance: the loop edges are cleared — reset
+    // the attempt counters this phase's routing could have charged.
+    for (const edge of [phase!.loopBackTo, ...Object.keys(phase!.loopBackOn ?? {}).map((k) => phase!.loopBackOn![k])]) {
+      if (edge) delete next.attempts[edge];
+    }
     next.retryContext = undefined;
+  }
+
+  // S4 onComplete (INV-16): unconditional bounded back-edge on a NON-verdict
+  // phase — fires ONLY on "completed", never on skipped/auto-disabled, and
+  // never carries retryContext (the re-entered phase re-reads fresh state).
+  if (result.status === "completed" && phase?.onComplete) {
+    const targetIndex = opts?.phases?.findIndex((p) => p.id === phase.onComplete) ?? -1;
+    if (targetIndex < 0 || targetIndex >= state.phaseIndex) {
+      next.status = "paused";
+      next.pausedReason = `misconfig:onComplete:${phase.id}`;
+      return next;
+    }
+    purgeStepResults(next.results, opts!.phases!, targetIndex, state.phaseIndex);
+    const target = opts!.phases![targetIndex];
+    const ceiling = ceilingFor(phase.onComplete, target.maxAttempts);
+    const runsDone = (next.attempts[phase.onComplete] ?? 0) + 1;
+    next.attempts[phase.onComplete] = runsDone;
+    if (runsDone >= ceiling) {
+      next.status = "paused";
+      next.pausedReason = `loop-exhausted:${phase.onComplete} after ${runsDone} runs`;
+      return next;
+    }
+    next.phaseIndex = targetIndex;
+    next.status = "active";
+    return next;
   }
 
   const nextIndex = state.phaseIndex + 1;
@@ -525,7 +708,11 @@ export function recordStepResult(
     };
   }
   return {
-    state: { ...state, results: { ...state.results, [key]: result }, stepIndex: si + 1 },
+    // A completed step clears resumeMode — the re-issue marker only survives
+    // while the step stays open (failed/interrupted paths keep it). It also
+    // clears entryGate: the ⚠ approval is scoped to THIS step — a later
+    // sideEffect step must re-gate (TASK_07).
+    state: { ...state, results: { ...state.results, [key]: result }, stepIndex: si + 1, resumeMode: undefined, entryGate: undefined },
     step,
     isLast: si + 1 >= steps.length,
   };

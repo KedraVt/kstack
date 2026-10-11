@@ -40,7 +40,11 @@ export function ensureOperationalDirsIgnored(cwd: string): void {
 export interface LedgerEntry {
   /** ISO-8601 write timestamp. */
   at: string;
-  kind: "step" | "phase" | "verdict" | "gate";
+  /**
+   * S4: "report" = a kstack-report step record (the delegation completion
+   * protocol — canonical source for verdicts and routing vars).
+   */
+  kind: "step" | "phase" | "verdict" | "gate" | "report" | "run-interrupted" | "quota-parked";
   workflowId: string;
   phaseId: string;
   stepId?: string;
@@ -50,6 +54,10 @@ export interface LedgerEntry {
     summary?: string;
     /** Parsed verdict variables — verbatim. */
     verdicts?: Record<string, string>;
+    /** S4 routing vars emitted via `kstack-report --var`. */
+    vars?: Record<string, string>;
+    /** S4: relative path of the full step record under .kstack/runs/. */
+    record?: string;
     gateId?: string;
     decision?: "auto" | "human" | "skip" | "run" | "abort" | "return";
     /** Phase artifact paths relative to the repo cwd. */

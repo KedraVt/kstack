@@ -5,6 +5,9 @@ import { detectGitContext } from "./git.ts";
 import { initAgentsMd } from "./init.ts";
 import { deterministicSubagents } from "./config.ts";
 import { gateInventory, configureGates } from "./gates.ts";
+import { collectAskAnswers } from "./enabled.ts";
+import { probeCapabilities } from "./capabilities.ts";
+import { cleanupEphemeralArtifacts } from "./artifacts.ts";
 import { launchPhase, executeCurrentPhase, releasePhaseInFlight, isPhaseInFlight, invalidateRuntime } from "./executor.ts";
 import { writeRunReport } from "./telemetry.ts";
 import { appendLedger } from "./ledger.ts";
@@ -98,7 +101,19 @@ function abortWorkflow(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: Wo
   releasePhaseInFlight(state.workflowId, state.phaseIndex);
   endStepWatch();
   auditGateDecision(ctx, state, "abort");
-  saveState(pi, abortState(state));
+  // S4/§10.5: aborted is a terminal status too — ephemerals die with the run;
+  // every cleanup failure is ledger-noted, never crashes the abort.
+  if ((state.ephemeralArtifacts ?? []).length > 0) {
+    const { deleted, failed } = cleanupEphemeralArtifacts(ctx.cwd, state.ephemeralArtifacts!, (m) => {
+      try { ctx.ui.notify(m, "warning"); } catch { /* stale ctx */ }
+    });
+    appendLedger(
+      ctx.cwd, state,
+      { kind: "phase", phaseId: state.workflowId, payload: { summary: `ephemeral cleanup: ${deleted.length} deleted${failed.length ? `, ${failed.length} failed` : ""}`, artifacts: deleted } },
+      () => {},
+    );
+  }
+  saveState(pi, { ...abortState(state), ephemeralArtifacts: [] });
   try { ctx.ui.setStatus("kstack", undefined); } catch { /* stale */ }
   ctx.ui.notify(message, "info");
 }
@@ -331,12 +346,16 @@ async function startWorkflow(workflowId: string, ctx: ExtensionCommandContext, p
   const goal = await ctx.ui.input("Describe your goal", `e.g. "Add dark mode to the settings page"`);
   if (!goal) return;
 
+  // S4/TASK_05 asks[]: sequential questions ONCE at run start — answers land
+  // in state.vars and are visible to enabled:"auto" resolvers at panel time.
+  const askVars = await collectAskAnswers(workflow, ctx);
+
   // S3/D20 pre-flight configure (TRANSIENT — never a persisted status):
   // enumerate the gates this workflow can actually fire and, in interactive
   // mode only, let the user choose per-gate handling BEFORE the state exists.
   // Dismissed/headless ⇒ human-gate defaults; the kstack_start tool path never
   // engages configure (env defaults apply there).
-  const gateRows = gateInventory(workflow);
+  const gateRows = gateInventory(workflow, { state: { vars: askVars } as any, git, cwd: ctx.cwd });
   let gateMode: WorkflowState["gateMode"] = "human-gate";
   let gateOverrides: WorkflowState["gateOverrides"] = {};
   // TUI-only by design: RPC mode also exposes dialog UI (ctx.hasUI) but a
@@ -350,7 +369,10 @@ async function startWorkflow(workflowId: string, ctx: ExtensionCommandContext, p
     }
   }
 
-  const state: WorkflowState = { ...createState(workflowId, goal), gateMode, gateOverrides };
+  // S4/TASK_06: stamp probed capabilities at run start (kstack init is the
+  // primary writer — §10.8; this covers panel-started runs; the executor's
+  // lazy probe covers tool-started/legacy states where {} means unprobed).
+  const state: WorkflowState = { ...createState(workflowId, goal), gateMode, gateOverrides, vars: askVars, capabilities: probeCapabilities() };
   saveState(pi, state);
 
   ctx.ui.notify(`Starting: ${workflow.name} (${workflow.phases.length} phases)`, "info");
@@ -359,20 +381,16 @@ async function startWorkflow(workflowId: string, ctx: ExtensionCommandContext, p
 
 function menuScore(w: { id: string }, git: GitContext): number {
   switch (w.id) {
-    case "ship":
-      return git.hasStagedChanges || git.aheadOfRemote > 0 ? 10 : 2;
     case "investigate":
       return git.hasUncommittedChanges ? 7 : 3;
     case "review":
       return git.aheadOfRemote > 0 ? 8 : 3;
-    case "qa":
-      return 5;
-    case "qa-report":
-      return 4;
     case "develop":
       return git.isMainBranch ? 6 : 4;
-    case "quick":
-      return 1;
+    case "discover":
+      return 3;
+    case "audit":
+      return 2;
     default:
       return 0;
   }

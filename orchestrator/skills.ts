@@ -18,7 +18,7 @@
  * loaders degrade to null and callers fall back to generic instructions.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,90 +36,63 @@ export interface SkillInfo {
 
 interface RegistryEntry {
   summary: string;
-  /** Directory under skills/ holding the canonical SKILL.md. Defaults to
-   *  the registry id itself when omitted. */
-  dir?: string;
 }
 
-const REGISTRY: Record<string, RegistryEntry> = {
-  "kstack-investigate": {
-    summary: "Systematic debugging: Iron Law (no fixes without root cause), hypothesis testing, structured debug report",
-  },
-  "kstack-review": {
-    summary: "Pre-landing review: scope drift detection, severity-classified findings, completeness gaps",
-  },
-  "kstack-qa": {
-    summary: "Browser QA: test like a real user, severity-classified bug reports, evidence screenshots",
-  },
-  "kstack-ship": {
-    summary: "Release pipeline: pre-flight checks, test gates, TODOS.md management, atomic commits, PR discipline",
-  },
-  "kstack-office-hours": {
-    summary: "Product judgment for planning: premise-challenge, specificity, wedge thinking, scope ambition",
-  },
-  "kstack-plan-eng-review": {
-    summary: "Engineering rigor for plans: blast radius, hidden assumptions, edge cases, test strategy",
-  },
-  "kstack-document-release": {
-    dir: "kstack-document",
-    summary: "Post-ship docs: Diataxis coverage map, factual updates from the diff, stale-reference sweep",
-  },
-  "kstack-document-generate": {
-    dir: "kstack-document",
-    summary: "Author missing documentation: codebase archaeology first, Diataxis partitioning, reference-first writing",
-  },
-  "kstack-grilling": {
-    summary: "Interview protocol: design-tree rounds over the frontier, recommended answers, facts-vs-decisions split",
-  },
-  "kstack-plan-draft": {
-    summary: "Plan drafting: converged plan file under .kstack/plans following the Plan file contract",
-  },
-  "kstack-fix-strategy": {
-    summary: "Minimal-fix strategy for a CONFIRMED root cause: validation-first, minimal diff, regression test per fix",
-  },
+/**
+ * Compact one-liner from a SKILL.md's YAML frontmatter `description` —
+ * folded scalars (`>-`, `|`) flatten to one line, then cap at ~140 chars
+ * on a word boundary (buildSkillIndex renders it verbatim).
+ */
+function skillSummary(content: string): string {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
+  if (!fm) return "(no description)";
+  const lines = fm[1].split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^description:\s*(.*)$/.exec(lines[i]);
+    if (!m) continue;
+    const parts: string[] = [];
+    const inline = m[1].replace(/^(>-?|\|[-+]?)\s*$/, "").trim();
+    if (inline) parts.push(inline);
+    for (let j = i + 1; j < lines.length; j++) {
+      const l = lines[j];
+      if (/^\s+\S/.test(l)) parts.push(l.trim());
+      else break;
+    }
+    const desc = parts.join(" ").replace(/\s+/g, " ").trim();
+    return desc.length > 140 ? `${desc.slice(0, 137).replace(/\s\S*$/, "")}…` : desc || "(no description)";
+  }
+  return "(no description)";
+}
 
-  // --- sprint workflow digests (canonical kedra ports, S1) ---
-  "kstack-sprint-capability": {
-    dir: "kstack-product-capability",
-    summary: "User-story writing + story→engineering-constraints translation: boolean-checkable invariants, explicit trust boundaries, non-goals",
-  },
-  "kstack-sprint-system-design": {
-    dir: "kstack-system-design",
-    summary: "DDD system design: binding ubiquitous-language glossary, aggregates with boolean invariants, context mapping, contract immutability",
-  },
-  "kstack-sprint-adr": {
-    dir: "kstack-adr",
-    summary: "Architecture decision records: decision/context/consequences format, append-only sprint log",
-  },
-  "kstack-sprint-tasks": {
-    dir: "kstack-tasks",
-    summary: "Atomic task backlog: inputs/payloads/constraints/unhappy-paths/falsifiable success conditions, role-assigned with dependencies",
-  },
-  "kstack-sprint-tdd": {
-    dir: "kstack-test-driven-development",
-    summary: "Test-first discipline: red-green-refactor, AAA structure, prove-it bug reproduction, anti-pattern avoidance",
-  },
-  "kstack-sprint-verification": {
-    dir: "kstack-verification-before-completion",
-    summary: "Iron Law: completion claims require fresh verification evidence — run it now, read the output, cite it",
-  },
-  "kstack-sprint-appsec": {
-    dir: "kstack-cso",
-    summary: "AppSec review: STRIDE-lite threat model over new trust boundaries, secrets hygiene, injection prevention, actionable remediations",
-  },
-  "kstack-sprint-docker": {
-    dir: "kstack-docker-manager",
-    summary: "Conditional Docker audit: multi-stage builds, pinned bases, non-root runtime, resource limits, network isolation",
-  },
-  "kstack-sprint-qa": {
-    dir: "kstack-qa",
-    summary: "QA triage GREEN/RED/ORANGE, Testability Blockers, Save-Point git pattern, evidence-first reporting",
-  },
-  "kstack-sprint-pipeline": {
-    dir: "kstack-pipeline-sre",
-    summary: "Conditional CI/CD authoring audit: least privilege, pinned versions, vault secrets, reproducible builds, rollback story",
-  },
-};
+/**
+ * S4/TASK_08 derived registry (ADR: skills/ is the ONLY registry source):
+ * `skills/` scanned at load; every dir holding a SKILL.md is a registry id
+ * (id = dir name). No aliases — callers use the canonical dir name.
+ * A missing/unreadable skills dir degrades to an empty registry, never throws.
+ */
+function scanRegistry(): Record<string, RegistryEntry> {
+  const registry: Record<string, RegistryEntry> = {};
+  let dirs: string[] = [];
+  try {
+    dirs = readdirSync(SKILLS_DIR, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch {
+    return registry;
+  }
+  for (const dir of dirs) {
+    const skillPath = join(SKILLS_DIR, dir, "SKILL.md");
+    try {
+      if (!existsSync(skillPath)) continue;
+      registry[dir] = { summary: skillSummary(readFileSync(skillPath, "utf-8")) };
+    } catch {
+      registry[dir] = { summary: "(unreadable SKILL.md)" };
+    }
+  }
+  return registry;
+}
+
+const REGISTRY: Record<string, RegistryEntry> = scanRegistry();
 
 export function getSkillIds(): string[] {
   return Object.keys(REGISTRY);
@@ -128,8 +101,7 @@ export function getSkillIds(): string[] {
 export function getSkillInfo(id: string): SkillInfo | null {
   const entry = REGISTRY[id];
   if (!entry) return null;
-  const dir = entry.dir ?? id;
-  const skillPath = join(SKILLS_DIR, dir, "SKILL.md");
+  const skillPath = join(SKILLS_DIR, id, "SKILL.md");
   return { id, summary: entry.summary, skillPath };
 }
 

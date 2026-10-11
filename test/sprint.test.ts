@@ -18,8 +18,39 @@ import { buildPhaseInstructions, buildDeterministicPlan, retryContextBlock, cond
 import { modelTierFor, sprintMaxAttempts, sprintArchMaxAttempts, timeoutClassFor } from "../orchestrator/config.ts";
 import { retryTimeoutMs, shouldReopenFullChain, advanceBlockReason, buildResumeContext, activeConstraintLines } from "../orchestrator/executor.ts";
 import { createInputRouter } from "../orchestrator/router.ts";
+import { recordPathFor } from "../orchestrator/records.ts";
 
 const SPRINT = getWorkflow("sprint")!;
+
+// S4 record channel: verdict-flagged steps prove completion via a kstack-report
+// record at .kstack/runs/<runId>/<phase>.<step>.json — never pendingVerdict.
+// Tests write the record the delegated step would have produced.
+function writeRec(
+  cwd: string,
+  state: { workflowId: string; runId?: string },
+  phaseId: string,
+  stepId: string,
+  verdicts: Record<string, string>,
+  over: Record<string, unknown> = {},
+) {
+  const file = recordPathFor(cwd, state.runId!, phaseId, stepId);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const safe = (v: string) => v.replace(/[^\w.-]/g, "-");
+  writeFileSync(file, JSON.stringify({
+    v: 1,
+    workflow: safe(state.workflowId),
+    runId: safe(state.runId!),
+    phase: safe(phaseId),
+    step: safe(stepId),
+    summary: "x",
+    verdicts,
+    vars: {},
+    evidence: [],
+    deliverables: [],
+    markers: [],
+    ...over,
+  }));
+}
 
 function makeCtx(phaseIndex = 0): any {
   return {
@@ -51,7 +82,7 @@ describe("sprint workflow registration", () => {
   test("phase order matches the approved graph (D6)", () => {
     assert.deepEqual(
       SPRINT.phases.map((p) => p.id),
-      ["understand", "user-story", "capability", "system-design", "architect-gate", "backlog", "implement", "devsecops-review", "qa-verdict", "commit-archive"],
+      ["explore", "understand", "user-story", "capability", "system-design", "architect-gate", "backlog", "implement", "qa-browsing", "devsecops-review", "docker-review", "pipeline-review", "archive", "retro"],
     );
   });
 
@@ -59,19 +90,33 @@ describe("sprint workflow registration", () => {
     const gate = SPRINT.phases.find((p) => p.id === "architect-gate")!;
     assert.equal(gate.loopBackTo, "system-design");
     assert.equal(typeof gate.maxAttempts, "number");
-    const review = SPRINT.phases.find((p) => p.id === "devsecops-review")!;
-    assert.equal(review.loopBackTo, "implement");
-    const qa = SPRINT.phases.find((p) => p.id === "qa-verdict")!;
-    assert.equal(qa.loopBackTo, "implement");
-  });
-
-  test("implement is a strict BE→FE chain (D5)", () => {
+    for (const id of ["devsecops-review", "qa-browsing", "docker-review", "pipeline-review"]) {
+      assert.equal(SPRINT.phases.find((p) => p.id === id)!.loopBackTo, "implement", `${id} loops to implement`);
+    }
+    // implement's walkthrough/ui verdicts self-loop (purge + re-run from step 0).
     const impl = SPRINT.phases.find((p) => p.id === "implement")!;
-    assert.deepEqual(impl.chain!.map((s) => s.agent), ["backend-developer", "frontend-developer"]);
+    assert.equal(impl.loopBackTo, "implement");
   });
 
-  test("commit-archive is a hard manual gate (residual-risk control)", () => {
-    assert.equal(SPRINT.phases.find((p) => p.id === "commit-archive")!.advance, "manual");
+  test("implement is a strict BE→FE step sequence (D5)", () => {
+    const impl = SPRINT.phases.find((p) => p.id === "implement")!;
+    const steps = impl.steps!;
+    // BE steps first, then FE steps — every implementation step is delegated.
+    assert.deepEqual(steps.map((s) => s.id), ["backend", "be-walk", "frontend", "fe-walk", "ui-check"]);
+    assert.deepEqual(steps.slice(0, 2).map((s) => s.agent), ["backend-developer", "backend-developer"]);
+    assert.deepEqual(steps.slice(2).map((s) => s.agent), ["frontend-developer", "frontend-developer", "frontend-developer"]);
+    assert.ok(steps.every((s) => s.execution === "subagent"), "implementation steps are delegated");
+  });
+
+  test("archive is a mechanical main step — no verdict, no side effects", () => {
+    const archive = SPRINT.phases.find((p) => p.id === "archive")!;
+    assert.equal(archive.execution, "main");
+    assert.equal(archive.steps!.length, 1);
+    assert.equal(archive.steps![0].execution, "main");
+    assert.equal(archive.steps![0].signal?.kind, "marker");
+    assert.ok(!archive.loopBackTo, "archive is not verdict-bearing");
+    // No push side effects anywhere in sprint (this run forbids remote push).
+    assert.ok(!SPRINT.phases.some((p) => p.steps?.some((s) => s.sideEffect)), "sprint declares no sideEffect steps");
   });
 
   test("sprint intents match", () => {
@@ -372,40 +417,54 @@ describe("feedback extraction (loop fuel)", () => {
 // --- Deterministic routing table -----------------------------------------------
 
 describe("deterministic routing table (routeVerdict)", () => {
+  // S4: routeVerdict is keyed by (workflowId, phaseId) and resolves edges
+  // from the REAL workflow phase — the stub phases below are the live sprint
+  // definitions so the test validates the actual loopBackTo/parkOn config.
+  const rv = (phaseId: string, parsed: Parameters<typeof routeVerdict>[2]) =>
+    routeVerdict("sprint", phaseId, parsed, { phase: sprintPhases().find((p) => p.id === phaseId) });
+  const sprintPhases = () => getWorkflow("sprint")!.phases;
+
   test("approved/green advance linearly (D1)", () => {
-    assert.deepEqual(routeVerdict("architect-gate", { verdicts: { "software-architect-review": "approved" } }), { kind: "advance" });
-    assert.deepEqual(routeVerdict("qa-verdict", { verdicts: { status: "green" } }), { kind: "advance" });
-    assert.deepEqual(routeVerdict("devsecops-review", { verdicts: { "code-review": "approved", "security-review": "approved" } }), { kind: "advance" });
-    assert.deepEqual(routeVerdict("devsecops-review", { verdicts: { "docker-security": "approved" } }), { kind: "park" }, "BUG-1: gate missing its main verdicts parks, never default-advances");
+    assert.equal(rv("architect-gate", { verdicts: { "software-architect-review": "approved" } }).kind, "advance");
+    assert.equal(rv("qa-browsing", { verdicts: { status: "green" } }).kind, "advance");
+    assert.equal(rv("devsecops-review", { verdicts: { "code-review": "approved", "security-review": "approved" } }).kind, "advance");
+    assert.equal(rv("docker-review", { verdicts: { "docker-build": "success", "docker-security": "approved" } }).kind, "advance");
+    assert.equal(rv("pipeline-review", { verdicts: { pipeline: "approved" } }).kind, "advance");
+    assert.equal(rv("devsecops-review", { verdicts: { "docker-security": "approved" } }).kind, "park", "BUG-1: gate missing its main verdicts parks, never default-advances");
   });
 
   test("whitelisted-but-off-map values park instead of advancing (BUG-1)", () => {
     // `status == failed` at the QA gate used to default-advance (fail-open);
     // now it routes as the unambiguous negative it is.
-    assert.deepEqual(routeVerdict("qa-verdict", { verdicts: { status: "failed" } }), { kind: "loop-back" });
+    assert.equal(rv("qa-browsing", { verdicts: { status: "failed" } }).kind, "loop-back");
     // `software-architect-review == success` is neither expected-positive nor a
     // routing negative ⇒ ambiguous intent ⇒ human decides via panel.
-    assert.deepEqual(routeVerdict("architect-gate", { verdicts: { "software-architect-review": "success" } }), { kind: "park" });
+    assert.equal(rv("architect-gate", { verdicts: { "software-architect-review": "success" } }).kind, "park");
   });
 
   test("non-security rejections loop back (D2)", () => {
-    assert.deepEqual(routeVerdict("architect-gate", { verdicts: { "software-architect-review": "rejected" } }), { kind: "loop-back" });
-    assert.deepEqual(routeVerdict("qa-verdict", { verdicts: { status: "red" } }), { kind: "loop-back" });
-    assert.deepEqual(routeVerdict("qa-verdict", { verdicts: { status: "orange" } }), { kind: "loop-back" });
-    assert.deepEqual(routeVerdict("devsecops-review", { verdicts: { "code-review": "rejected", "security-review": "approved" } }), { kind: "loop-back" });
-    assert.deepEqual(
-      routeVerdict("devsecops-review", { verdicts: { "security-review": "rejected" }, severity: "medium" }),
-      { kind: "loop-back" },
+    assert.deepEqual(rv("architect-gate", { verdicts: { "software-architect-review": "rejected" } }), { kind: "loop-back", target: "system-design" });
+    assert.deepEqual(rv("qa-browsing", { verdicts: { status: "red" } }), { kind: "loop-back", target: "implement" });
+    assert.deepEqual(rv("qa-browsing", { verdicts: { status: "orange" } }), { kind: "loop-back", target: "implement" });
+    assert.deepEqual(rv("devsecops-review", { verdicts: { "code-review": "rejected", "security-review": "approved" } }), { kind: "loop-back", target: "implement" });
+    assert.equal(
+      rv("devsecops-review", { verdicts: { "security-review": "rejected" }, severity: "medium" }).kind,
+      "loop-back",
       "medium security rejection loops back",
     );
-    assert.deepEqual(routeVerdict("devsecops-review", { verdicts: { "security-review": "rejected" }, severity: "low" }), { kind: "loop-back" });
-    assert.deepEqual(routeVerdict("devsecops-review", { verdicts: { "docker-build": "failed" } }), { kind: "loop-back" });
-    assert.deepEqual(routeVerdict("devsecops-review", { verdicts: { "docker-security": "rejected" } }), { kind: "loop-back" });
+    assert.deepEqual(rv("devsecops-review", { verdicts: { "security-review": "rejected" }, severity: "low" }), { kind: "loop-back", target: "implement" });
+    // Docker/pipeline verdicts live on their OWN phases (S4) — devsecops no
+    // longer merges them.
+    assert.deepEqual(rv("docker-review", { verdicts: { "docker-build": "failed" } }), { kind: "loop-back", target: "implement" });
+    assert.deepEqual(rv("docker-review", { verdicts: { "docker-build": "success", "docker-security": "rejected" } }), { kind: "loop-back", target: "implement" });
+    assert.deepEqual(rv("pipeline-review", { verdicts: { pipeline: "rejected" } }), { kind: "loop-back", target: "implement" });
+    // implement's per-lane walker verdicts self-loop the phase.
+    assert.deepEqual(rv("implement", { verdicts: { "be-walk": "fail" } }), { kind: "loop-back", target: "implement" });
   });
 
   test("critical/high security rejection freezes (D3) — never unconditional", () => {
-    assert.deepEqual(routeVerdict("devsecops-review", { verdicts: { "security-review": "rejected" }, severity: "critical" }), { kind: "freeze" });
-    assert.deepEqual(routeVerdict("devsecops-review", { verdicts: { "security-review": "rejected" }, severity: "high" }), { kind: "freeze" });
+    assert.equal(rv("devsecops-review", { verdicts: { "security-review": "rejected" }, severity: "critical" }).kind, "freeze");
+    assert.equal(rv("devsecops-review", { verdicts: { "security-review": "rejected" }, severity: "high" }).kind, "freeze");
   });
 });
 
@@ -413,97 +472,116 @@ describe("deterministic routing table (routeVerdict)", () => {
 
 describe("loop engine in advancePhase (B3)", () => {
   const total = SPRINT.phases.length;
+  // S4: verdict-bearing phases read kstack-report records from .kstack/runs/
+  // — never pendingVerdict. Indices: implement=7, qa-browsing=8,
+  // devsecops-review=9, architect-gate=5, system-design=4.
+  function devsecopsRecords(cwd: string, state: { workflowId: string; runId?: string }, verdicts: Record<string, string>) {
+    writeRec(cwd, state, "devsecops-review", "code-review", { "code-review": verdicts["code-review"] ?? "approved" });
+    writeRec(cwd, state, "devsecops-review", "security", {
+      "security-review": verdicts["security-review"] ?? "approved",
+      ...(verdicts.severity ? { severity: verdicts.severity } : {}),
+    });
+  }
 
   test("approved architect verdict advances linearly and resets counters", () => {
-    const state = sprintState(4, {
-      attempts: { "system-design": 2 },
-      pendingVerdict: { phaseId: "architect-gate", parsed: { verdicts: { "software-architect-review": "approved" } }, excerpt: "" },
-    });
-    const next = advancePhase(state, "architect-gate", { status: "completed", summary: "ok" }, total, { phases: SPRINT.phases, cwd: process.cwd() });
-    assert.equal(next.phaseIndex, 5);
-    assert.equal(next.status, "active");
-    assert.equal(next.attempts["system-design"], undefined, "counter reset after approval");
+    const cwd = tmpDir("kstack-le-");
+    try {
+      const state = sprintState(5, { attempts: { "system-design": 2 } });
+      writeRec(cwd, state, "architect-gate", "review", { "software-architect-review": "approved" });
+      const next = advancePhase(state, "architect-gate", { status: "completed", summary: "ok" }, total, { phases: SPRINT.phases, cwd });
+      assert.equal(next.phaseIndex, 6);
+      assert.equal(next.status, "active");
+      assert.equal(next.attempts["system-design"], undefined, "counter reset after approval");
+    } finally { rmSync(cwd, { recursive: true, force: true }); }
   });
 
   test("rejected verdict loops back with attempt increment + retry context", () => {
-    const state = sprintState(4, {
-      pendingVerdict: { phaseId: "architect-gate", parsed: { verdicts: { "software-architect-review": "rejected" } }, excerpt: "" },
-    });
-    const next = advancePhase(state, "architect-gate", { status: "completed", summary: "found issues" }, total, { phases: SPRINT.phases, cwd: process.cwd() });
-    assert.equal(next.phaseIndex, 3, "back to system-design");
-    assert.equal(next.attempts["system-design"], 1);
-    assert.ok(next.retryContext);
-    assert.equal(next.retryContext.targetPhaseId, "system-design");
-    assert.equal(next.retryContext.attempt, 2, "upcoming run number");
-    assert.equal(next.retryContext.maxAttempts, sprintArchMaxAttempts());
+    const cwd = tmpDir("kstack-le-");
+    try {
+      const state = sprintState(5);
+      writeRec(cwd, state, "architect-gate", "review", { "software-architect-review": "rejected" });
+      const next = advancePhase(state, "architect-gate", { status: "completed", summary: "found issues" }, total, { phases: SPRINT.phases, cwd });
+      assert.equal(next.phaseIndex, 4, "back to system-design");
+      assert.equal(next.attempts["system-design"], 1);
+      assert.ok(next.retryContext);
+      assert.equal(next.retryContext.targetPhaseId, "system-design");
+      assert.equal(next.retryContext.attempt, 2, "upcoming run number");
+      assert.equal(next.retryContext.maxAttempts, sprintArchMaxAttempts());
+    } finally { rmSync(cwd, { recursive: true, force: true }); }
   });
 
   test("attempt ceiling parks the workflow with an exhaustion reason", () => {
-    const ceiling = sprintMaxAttempts();
-    const state = sprintState(7, {
-      attempts: { implement: ceiling - 1 },
-      pendingVerdict: { phaseId: "devsecops-review", parsed: { verdicts: { "code-review": "rejected" } }, excerpt: "" },
-    });
-    const next = advancePhase(state, "devsecops-review", { status: "completed", summary: "still failing" }, total, { phases: SPRINT.phases, cwd: process.cwd() });
-    assert.equal(next.status, "paused");
-    assert.match(next.pausedReason!, /^loop-exhausted:implement/);
-    assert.equal(next.attempts.implement, ceiling);
+    const cwd = tmpDir("kstack-le-");
+    try {
+      const ceiling = sprintMaxAttempts();
+      const state = sprintState(9, { attempts: { implement: ceiling - 1 } });
+      devsecopsRecords(cwd, state, { "code-review": "rejected" });
+      const next = advancePhase(state, "devsecops-review", { status: "completed", summary: "still failing" }, total, { phases: SPRINT.phases, cwd });
+      assert.equal(next.status, "paused");
+      assert.match(next.pausedReason!, /^loop-exhausted:implement/);
+      assert.equal(next.attempts.implement, ceiling);
+    } finally { rmSync(cwd, { recursive: true, force: true }); }
   });
 
   test("security critical/high freeze parks WITHOUT advancing or burning attempts (D3)", () => {
-    const state = sprintState(7, {
-      sprintNumber: 7,
-      attempts: { implement: 1 },
-      pendingVerdict: { phaseId: "devsecops-review", parsed: { verdicts: { "security-review": "rejected" }, severity: "critical" }, excerpt: "" },
-    });
-    const next = advancePhase(state, "devsecops-review", { status: "completed", summary: "severe finding" }, total, { phases: SPRINT.phases, cwd: process.cwd() });
-    assert.ok(isSecurityFrozen(next));
-    assert.equal(next.status, "paused");
-    assert.equal(next.phaseIndex, 7, "held at the review phase");
-    assert.equal(next.attempts.implement, 1, "no attempt burned");
-    assert.match(next.freezeInfo.artifactPath, /security-review-artifact_07\.md$/);
-    assert.equal(next.results["devsecops-review"].summary, "severe finding", "gate result still recorded");
+    const cwd = tmpDir("kstack-le-");
+    try {
+      const state = sprintState(9, { sprintNumber: 7, attempts: { implement: 1 } });
+      devsecopsRecords(cwd, state, { "security-review": "rejected", severity: "critical" });
+      const next = advancePhase(state, "devsecops-review", { status: "completed", summary: "severe finding" }, total, { phases: SPRINT.phases, cwd });
+      assert.ok(isSecurityFrozen(next));
+      assert.equal(next.status, "paused");
+      assert.equal(next.phaseIndex, 9, "held at the review phase");
+      assert.equal(next.attempts.implement, 1, "no attempt burned");
+      assert.match(next.freezeInfo.artifactPath, /security-review-artifact_07\.md$/);
+      assert.equal(next.results["devsecops-review"].summary, "severe finding", "gate result still recorded");
 
-    const resumed = unfreeze(next);
-    assert.equal(isSecurityFrozen(resumed), false);
-    assert.equal(resumed.status, "active");
-    assert.equal(resumed.phaseIndex, 7, "resume re-runs the review gate");
+      const resumed = unfreeze(next);
+      assert.equal(isSecurityFrozen(resumed), false);
+      assert.equal(resumed.status, "active");
+      assert.equal(resumed.phaseIndex, 9, "resume re-runs the review gate");
+    } finally { rmSync(cwd, { recursive: true, force: true }); }
   });
 
   test("medium severity security rejection loops back instead of freezing (D3)", () => {
-    const state = sprintState(7, {
-      pendingVerdict: { phaseId: "devsecops-review", parsed: { verdicts: { "security-review": "rejected" }, severity: "medium" }, excerpt: "" },
-    });
-    const next = advancePhase(state, "devsecops-review", { status: "completed", summary: "minor finding" }, total, { phases: SPRINT.phases, cwd: process.cwd() });
-    assert.equal(next.phaseIndex, 6, "back to implement");
-    assert.equal(isSecurityFrozen(next), false);
+    const cwd = tmpDir("kstack-le-");
+    try {
+      const state = sprintState(9);
+      devsecopsRecords(cwd, state, { "security-review": "rejected", severity: "medium" });
+      const next = advancePhase(state, "devsecops-review", { status: "completed", summary: "minor finding" }, total, { phases: SPRINT.phases, cwd });
+      assert.equal(next.phaseIndex, 7, "back to implement");
+      assert.equal(isSecurityFrozen(next), false);
+    } finally { rmSync(cwd, { recursive: true, force: true }); }
   });
 
   test("failed phase pauses without routing on the verdict", () => {
     const state = sprintState(8, {
-      pendingVerdict: { phaseId: "qa-verdict", parsed: { verdicts: { status: "red" } }, excerpt: "" },
+      pendingVerdict: { phaseId: "qa-browsing", parsed: { verdicts: { status: "red" } }, excerpt: "" },
     });
-    const next = advancePhase(state, "qa-verdict", { status: "failed", summary: "crashed" }, total, { phases: SPRINT.phases, cwd: process.cwd() });
+    const next = advancePhase(state, "qa-browsing", { status: "failed", summary: "crashed" }, total, { phases: SPRINT.phases, cwd: process.cwd() });
     assert.equal(next.status, "paused");
     assert.equal(next.phaseIndex, 8);
     assert.equal(next.pendingVerdict, undefined, "verdict consumed/cleared on failure");
   });
 
   test("retryContext clears when its target completes again", () => {
-    const state = sprintState(7, {
-      retryContext: { targetPhaseId: "implement", attempt: 2, maxAttempts: 4, feedback: "fix X" },
-      pendingVerdict: { phaseId: "devsecops-review", parsed: { verdicts: { "code-review": "approved", "security-review": "approved" } }, excerpt: "" },
-    });
-    const next = advancePhase(state, "devsecops-review", { status: "completed", summary: "clean" }, total, { phases: SPRINT.phases, cwd: process.cwd() });
-    assert.equal(next.phaseIndex, 8);
-    assert.equal(next.retryContext, undefined);
+    const cwd = tmpDir("kstack-le-");
+    try {
+      const state = sprintState(9, {
+        retryContext: { targetPhaseId: "implement", attempt: 2, maxAttempts: 4, feedback: "fix X" },
+      });
+      devsecopsRecords(cwd, state, {});
+      const next = advancePhase(state, "devsecops-review", { status: "completed", summary: "clean" }, total, { phases: SPRINT.phases, cwd });
+      assert.equal(next.phaseIndex, 10);
+      assert.equal(next.retryContext, undefined);
+    } finally { rmSync(cwd, { recursive: true, force: true }); }
   });
 
   test("phases without loopBackTo advance linearly even with a stale pendingVerdict", () => {
     const state = sprintState(0, {
-      pendingVerdict: { phaseId: "understand", parsed: { verdicts: { status: "red" } }, excerpt: "" },
+      pendingVerdict: { phaseId: "explore", parsed: { verdicts: { status: "red" } }, excerpt: "" },
     });
-    const next = advancePhase(state, "understand", { status: "completed", summary: "ok" }, total, { phases: SPRINT.phases, cwd: process.cwd() });
+    const next = advancePhase(state, "explore", { status: "completed", summary: "ok" }, total, { phases: SPRINT.phases, cwd: process.cwd() });
     assert.equal(next.phaseIndex, 1);
     assert.equal(next.status, "active");
   });
@@ -523,33 +601,35 @@ describe("D4 park helpers", () => {
   });
 
   test("forceApproveParked advances past the gate and records the decision", () => {
-    const parked = parkForUnreadableVerdict(sprintState(8), "qa-verdict", "no-verdict");
+    const parked = parkForUnreadableVerdict(sprintState(8), "qa-browsing", "no-verdict");
     const next = forceApproveParked(parked);
     assert.equal(next.phaseIndex, 9);
     assert.equal(next.status, "active");
-    assert.match(next.results["qa-verdict"].summary, /unreadable/i);
+    assert.match(next.results["qa-browsing"].summary, /unreadable/i);
     assert.equal(next.verdictPark, undefined);
     assert.equal(next.pendingVerdict, undefined);
   });
 
   test("returnParkedWithContext loops back without incrementing attempts", () => {
-    const parked = parkForUnreadableVerdict(sprintState(8, { attempts: { implement: 1 } }), "qa-verdict", "no-verdict");
+    const parked = parkForUnreadableVerdict(sprintState(8, { attempts: { implement: 1 } }), "qa-browsing", "no-verdict");
     const next = returnParkedWithContext(parked, SPRINT.phases, "custom guidance");
     assert.ok(next);
-    assert.equal(next!.phaseIndex, 6, "back to implement");
+    assert.equal(next!.phaseIndex, 7, "back to implement");
     assert.equal(next!.attempts.implement, 1, "no burn");
     assert.ok(next!.retryContext.feedback.includes("custom guidance"));
   });
 
   test("returnParkedWithContext refuses non-looping phases (null)", () => {
-    const parked = parkForUnreadableVerdict(sprintState(8), "qa-verdict", "no-verdict");
+    // Parked at a phase with no routing edge in the workflow definition —
+    // develop's `document` carries no loopBackTo.
+    const parked = parkForUnreadableVerdict(sprintState(8), "document", "no-verdict");
     assert.equal(returnParkedWithContext(parked, getWorkflow("develop")!.phases), null);
   });
 
   test("forceContinuePastGate skips one gate forward and clears pause markers", () => {
-    const state = sprintState(7, { pausedReason: "loop-exhausted:implement after 4 runs", pendingVerdict: { phaseId: "devsecops-review", parsed: null, excerpt: "" } });
+    const state = sprintState(9, { pausedReason: "loop-exhausted:implement after 4 runs", pendingVerdict: { phaseId: "devsecops-review", parsed: null, excerpt: "" } });
     const next = forceContinuePastGate(state);
-    assert.equal(next.phaseIndex, 8);
+    assert.equal(next.phaseIndex, 10);
     assert.equal(next.status, "active");
     assert.equal(next.pendingVerdict, undefined);
     assert.equal(next.pausedReason, undefined);
@@ -561,17 +641,17 @@ describe("D4 park helpers", () => {
     // (no stepped phase neighbors a gate) but the invariant must hold.
     const withCursor = { stepIndex: 2 };
 
-    const approved = forceApproveParked(parkForUnreadableVerdict(sprintState(8, withCursor), "qa-verdict", "no-verdict"));
+    const approved = forceApproveParked(parkForUnreadableVerdict(sprintState(8, withCursor), "qa-browsing", "no-verdict"));
     assert.equal(approved.stepIndex, undefined, "forceApproveParked");
 
-    const returned = returnParkedWithContext(parkForUnreadableVerdict(sprintState(8, withCursor), "qa-verdict", "no-verdict"), SPRINT.phases);
+    const returned = returnParkedWithContext(parkForUnreadableVerdict(sprintState(8, withCursor), "qa-browsing", "no-verdict"), SPRINT.phases);
     assert.ok(returned);
     assert.equal(returned!.stepIndex, undefined, "returnParkedWithContext");
 
-    const continued = forceContinuePastGate(sprintState(7, { ...withCursor, pausedReason: "loop-exhausted:implement", pendingVerdict: { phaseId: "devsecops-review", parsed: null, excerpt: "" } }));
+    const continued = forceContinuePastGate(sprintState(9, { ...withCursor, pausedReason: "loop-exhausted:implement", pendingVerdict: { phaseId: "devsecops-review", parsed: null, excerpt: "" } }));
     assert.equal(continued.stepIndex, undefined, "forceContinuePastGate");
 
-    const reissued = reissueGate(sprintState(7, { ...withCursor, pausedReason: "loop-exhausted:implement" }), SPRINT.phases);
+    const reissued = reissueGate(sprintState(9, { ...withCursor, pausedReason: "loop-exhausted:implement" }), SPRINT.phases);
     assert.equal(reissued.stepIndex, undefined, "reissueGate (non-resume path)");
 
     // And the resume paths still KEEP the cursor — same-phase mid-step resume
@@ -584,29 +664,27 @@ describe("D4 park helpers", () => {
 describe("D4 park cause distinction", () => {
   test("the three causes encode distinctly in pausedReason", () => {
     for (const cause of ["no-verdict", "artifact-mismatch", "unroutable"] as const) {
-      const parked = parkForUnreadableVerdict(sprintState(8), "qa-verdict", cause);
-      assert.equal(parked.pausedReason, `verdict-unreadable:qa-verdict:${cause}`);
+      const parked = parkForUnreadableVerdict(sprintState(8), "qa-browsing", cause);
+      assert.equal(parked.pausedReason, `verdict-unreadable:qa-browsing:${cause}`);
     }
   });
 
   test("a whitelisted-but-off-map verdict parks with the unroutable cause", () => {
     // `software-architect-review == success` is whitelisted but neither
     // expected-positive nor a routing negative at architect-gate (BUG-1).
-    const state = sprintState(4, {
-      pendingVerdict: {
-        phaseId: "architect-gate",
-        parsed: { verdicts: { "software-architect-review": "success" } },
-        excerpt: "software-architect-review == success",
-      },
-    });
-    const next = advancePhase(state, "architect-gate", { status: "completed", summary: "ambiguous" }, SPRINT.phases.length, {
-      phases: SPRINT.phases,
-      cwd: process.cwd(),
-    });
-    assert.equal(next.status, "paused");
-    assert.equal(next.phaseIndex, 4, "held at the gate — no completion recorded");
-    assert.equal(next.verdictPark, "architect-gate");
-    assert.equal(next.pausedReason, "verdict-unreadable:architect-gate:unroutable");
+    const cwd = tmpDir("kstack-cause-");
+    try {
+      const state = sprintState(5);
+      writeRec(cwd, state, "architect-gate", "review", { "software-architect-review": "success" });
+      const next = advancePhase(state, "architect-gate", { status: "completed", summary: "ambiguous" }, SPRINT.phases.length, {
+        phases: SPRINT.phases,
+        cwd,
+      });
+      assert.equal(next.status, "paused");
+      assert.equal(next.phaseIndex, 5, "held at the gate — no completion recorded");
+      assert.equal(next.verdictPark, "architect-gate");
+      assert.equal(next.pausedReason, "verdict-unreadable:architect-gate:unroutable");
+    } finally { rmSync(cwd, { recursive: true, force: true }); }
   });
 
   test("the D4 panel prompt names the cause for triage", async () => {
@@ -630,7 +708,7 @@ describe("D4 park cause distinction", () => {
       ["unroutable", /expectation map/i],
     ] as const) {
       prompts.length = 0;
-      const parked = parkForUnreadableVerdict(sprintState(8), "qa-verdict", cause);
+      const parked = parkForUnreadableVerdict(sprintState(8), "qa-browsing", cause);
       assert.equal(await handleSprintPanel(parked, cmdCtx, pi), true);
       assert.match(prompts[0] ?? "", pattern, `panel prompt must name the "${cause}" cause`);
     }
@@ -640,9 +718,9 @@ describe("D4 park cause distinction", () => {
 // --- State migration ---------------------------------------------------------------
 
 describe("state migration (v2 fields default on old states)", () => {
-  test("createState stamps version 4 + fresh attempt counters", () => {
+  test("createState stamps version 5 + fresh attempt counters", () => {
     const s = createState("sprint", "goal");
-    assert.equal(s.version, 4); // v4: stepIndex/gateMode/gateOverrides (S3 step model)
+    assert.equal(s.version, 5); // v5: S4 vars/capabilities/ephemeral/resumeMode
     assert.deepEqual(s.attempts, {});
   });
 
@@ -745,13 +823,13 @@ describe("conditional digests (D14) + glossary injection (E6)", () => {
   test("docker/pipeline digests dropped when their trigger is absent", () => {
     const tmp = tmpDir("kstack-cond-");
     try {
-      assert.deepEqual(conditionalSkillIds(["kstack-review", "kstack-sprint-docker", "kstack-sprint-pipeline"], tmp), ["kstack-review"]);
+      assert.deepEqual(conditionalSkillIds(["kstack-review", "kstack-docker-manager", "kstack-pipeline-sre"], tmp), ["kstack-review"]);
       writeFileSync(path.join(tmp, "Dockerfile"), "FROM node");
       fs.mkdirSync(path.join(tmp, ".github", "workflows"), { recursive: true });
       writeFileSync(path.join(tmp, ".github", "workflows", "ci.yml"), "on: push");
       assert.deepEqual(
-        conditionalSkillIds(["kstack-review", "kstack-sprint-docker", "kstack-sprint-pipeline"], tmp),
-        ["kstack-review", "kstack-sprint-docker", "kstack-sprint-pipeline"],
+        conditionalSkillIds(["kstack-review", "kstack-docker-manager", "kstack-pipeline-sre"], tmp),
+        ["kstack-review", "kstack-docker-manager", "kstack-pipeline-sre"],
       );
       assert.equal(conditionalSkillIds(undefined, tmp), undefined);
       assert.deepEqual(conditionalSkillIds(["kstack-review"], undefined), ["kstack-review"], "no cwd ⇒ passthrough");
@@ -783,7 +861,7 @@ describe("conditional digests (D14) + glossary injection (E6)", () => {
     ctx.state.retryContext = { targetPhaseId: "implement", attempt: 3, maxAttempts: 4, feedback: "- CRITICAL bug @ a.ts:1" };
     assert.match(retryContextBlock(ctx, "implement"), /RETRY CONTEXT \(attempt 3\/4\)/);
     assert.ok(retryContextBlock(ctx, "implement").includes("CRITICAL bug"));
-    assert.equal(retryContextBlock(ctx, "qa-verdict"), "", "non-target phase gets nothing");
+    assert.equal(retryContextBlock(ctx, "qa-browsing"), "", "non-target phase gets nothing");
     ctx.state.retryContext = { targetPhaseId: "implement", attempt: 2, maxAttempts: 4, feedback: "" };
     assert.match(retryContextBlock(ctx, "implement"), /re-read the prior review/);
   });
@@ -799,60 +877,56 @@ describe("sprint instruction assembly", () => {
   }
 
   test("{sprint} interpolates zero-padded into contracts", () => {
-    const instructions = buildPhaseInstructions(findPhaseSafe("user-story"), sprintCtx(1));
+    const instructions = buildPhaseInstructions(findPhaseSafe("user-story"), sprintCtx(2));
     assert.match(instructions, /user-story_07\.md/);
-    const plan = buildDeterministicPlan(findPhaseSafe("architect-gate"), sprintCtx(4));
+    const plan = buildDeterministicPlan(findPhaseSafe("architect-gate"), sprintCtx(5));
     assert.match(plan[0].task, /Sprint 07/);
     assert.ok(!plan[0].task.includes("{sprint}"), "token fully replaced");
   });
 
-  test("master DoD lands ONLY on the last step of execution chains (P07–P10)", () => {
-    const implPlan = buildDeterministicPlan(findPhaseSafe("implement"), sprintCtx(6));
-    assert.equal(implPlan[0].task.includes(MASTER_DOD), false, "BE step stays lean");
-    assert.ok(implPlan[implPlan.length - 1].task.includes(MASTER_DOD));
-
-    const revPlan = buildDeterministicPlan(findPhaseSafe("devsecops-review"), sprintCtx(7));
-    assert.equal(revPlan[revPlan.length - 1].task.includes(MASTER_DOD), true);
-
-    const qaPlan = buildDeterministicPlan(findPhaseSafe("qa-verdict"), sprintCtx(8));
-    assert.equal(qaPlan[0].task.includes(MASTER_DOD), true);
-
-    const storyInstructions = buildPhaseInstructions(findPhaseSafe("user-story"), sprintCtx(1));
+  test("master DoD lands ONLY on sprint execution phases (P07–P10)", () => {
+    // Step model (S4): the DoD contract attaches to the phase's last plan
+    // entry in the single-plan fallback AND per delegated step at dispatch.
+    for (const id of ["implement", "devsecops-review", "qa-browsing", "docker-review", "pipeline-review", "archive"]) {
+      const plan = buildDeterministicPlan(findPhaseSafe(id), sprintCtx(7));
+      assert.ok(plan[plan.length - 1].task.includes(MASTER_DOD), `${id} carries MASTER_DOD`);
+    }
+    const storyInstructions = buildPhaseInstructions(findPhaseSafe("user-story"), sprintCtx(2));
     assert.equal(storyInstructions.includes(MASTER_DOD), false, "planning phases carry no DoD");
+    const backlogPlan = buildDeterministicPlan(findPhaseSafe("backlog"), sprintCtx(6));
+    assert.equal(backlogPlan[backlogPlan.length - 1].task.includes(MASTER_DOD), false, "backlog is not an execution phase");
   });
 
-  test("verdict dual-channel duty is instructed in gate tasks", () => {
-    const qaPlan = buildDeterministicPlan(findPhaseSafe("qa-verdict"), sprintCtx(8));
-    assert.match(qaPlan[0].task, /status == green/);
-    assert.match(qaPlan[0].task, /status == red/);
-    assert.match(qaPlan[0].task, /status == orange/);
-    assert.match(qaPlan[0].task.toLowerCase(), /handoff/);
-    const archPlan = buildDeterministicPlan(findPhaseSafe("architect-gate"), sprintCtx(4));
-    assert.match(archPlan[0].task, /software-architect-review == approved/);
-    assert.match(archPlan[0].task, /software-architect-review == rejected/);
-    const revChain = buildDeterministicPlan(findPhaseSafe("devsecops-review"), sprintCtx(7));
-    assert.match(revChain[0].task, /code-review == approved/);
-    assert.match(revChain[0].task, /code-review == rejected/);
-    assert.match(revChain[1].task, /security-review == approved/);
-    assert.match(revChain[1].task, /security-review == rejected/);
+  test("verdict dual-channel duty is instructed in gate step tasks", () => {
+    // S4: verdict instructions live in the delegated step's task contract —
+    // `--verdict <var>==<value>` inside a kstack-report record, not HANDOFF
+    // lines in a chain tail.
+    const qaTask = findPhaseSafe("qa-browsing").steps![0].task;
+    assert.match(qaTask, /--verdict status==green/);
+    assert.match(qaTask, /==orange/);
+    assert.match(qaTask, /==red/);
+    const archTask = findPhaseSafe("architect-gate").steps![0].task;
+    assert.match(archTask, /--verdict software-architect-review==approved/);
+    assert.match(archTask, /==rejected/);
+    const revSteps = findPhaseSafe("devsecops-review").steps!;
+    assert.match(revSteps[0].task, /--verdict code-review==approved/);
+    assert.match(revSteps[0].task, /==rejected/);
+    assert.match(revSteps[1].task, /--verdict security-review==approved/);
+    assert.match(revSteps[1].task, /==rejected/);
+    assert.match(revSteps[1].task, /--verdict severity==/);
   });
 
-  test("B8: no copiable placeholder verdict line remains in any gate task", () => {
+  test("B8: no copiable placeholder verdict line remains in any gate step task", () => {
     // A literal-minded agent copying the instruction verbatim would write a
     // value that fails the closed whitelist and park the whole gate. Every
-    // instructed verdict line must be a concrete whitelist value.
-    const cases: Array<[string, number]> = [
-      ["architect-gate", 4],
-      ["devsecops-review", 7],
-      ["qa-verdict", 8],
-    ];
-    for (const [phaseId, phaseIndex] of cases) {
-      const plan = buildDeterministicPlan(findPhaseSafe(phaseId), sprintCtx(phaseIndex));
-      for (const step of plan) {
+    // instructed verdict line must be a concrete whitelist value (or an
+    // explicitly bracketed <choice> that cannot parse).
+    for (const phaseId of ["architect-gate", "devsecops-review", "qa-browsing", "docker-review", "pipeline-review", "implement"]) {
+      for (const step of findPhaseSafe(phaseId).steps ?? []) {
         assert.doesNotMatch(
           step.task,
           /==\s*(approved\|rejected|green\|red\|orange|success\|failed|critical\|high\|medium\|low)/,
-          `${phaseId} task still contains a copiable placeholder verdict line`,
+          `${phaseId}.${step.id} task still contains a copiable placeholder verdict line`,
         );
       }
     }
@@ -906,7 +980,7 @@ describe("model tiers (E4/D10, inert by default)", () => {
     try {
       process.env.KSTACK_PI_MODEL_STRONG = "strong/model";
       assert.equal(modelTierFor("implement"), "strong/model");
-      assert.equal(modelTierFor("qa-verdict"), "strong/model");
+      assert.equal(modelTierFor("qa-browsing"), "strong/model");
       assert.equal(modelTierFor("explore"), undefined, "FAST unset ⇒ keep agent default");
 
       process.env.KSTACK_PI_MODEL_FAST = "fast/model";
@@ -1157,20 +1231,20 @@ describe("forceContinuePastGate (F3): the next gate gets a fresh loop budget", (
     assert.equal(next.pausedReason, undefined);
   });
 
-  test("after acceptance, qa-verdict's FIRST rejection loops back instead of parking (F3 regression)", () => {
+  test("after acceptance, qa-browsing's FIRST rejection loops back instead of parking (F3 regression)", () => {
     const ceiling = sprintMaxAttempts();
     const next = forceContinuePastGate(
-      sprintState(7, { attempts: { implement: ceiling }, pausedReason: `loop-exhausted:implement after ${ceiling} runs` }),
+      sprintState(8, { attempts: { implement: ceiling }, pausedReason: `loop-exhausted:implement after ${ceiling} runs` }),
       SPRINT.phases,
     );
     const rejected = advancePhase(
-      { ...next, phaseIndex: 8, pendingVerdict: { phaseId: "qa-verdict", parsed: { verdicts: { status: "red" } }, excerpt: "" } },
-      "qa-verdict",
+      { ...next, phaseIndex: 8, pendingVerdict: { phaseId: "qa-browsing", parsed: { verdicts: { status: "red" } }, excerpt: "" } },
+      "qa-browsing",
       { status: "completed", summary: "red" },
       SPRINT.phases.length,
       { phases: SPRINT.phases, cwd: process.cwd() },
     );
-    assert.equal(rejected.phaseIndex, 6, "loops back to implement with zero prior reruns");
+    assert.equal(rejected.phaseIndex, 7, "loops back to implement with zero prior reruns");
     assert.equal(rejected.status, "active", "must NOT park on the first QA rejection");
     assert.equal(rejected.attempts.implement, 1, "budget starts fresh: this is rerun 1");
     assert.equal(rejected.retryContext?.targetPhaseId, "implement");
@@ -1190,7 +1264,7 @@ describe("buildResumeContext / activeConstraintLines (Q4)", () => {
   test("plain active state: no constraint lines, standard resume body", () => {
     const text = buildResumeContext(sprintState(7, { status: "active" }));
     assert.match(text, /\[kstack workflow active:/);
-    assert.match(text, /\(8\/10\)/);
+    assert.match(text, /\(8\/14\)/);
     assert.ok(!text.includes("CONSTRAINT:"), "a plain review phase carries no extra constraints");
   });
 
@@ -1202,7 +1276,7 @@ describe("buildResumeContext / activeConstraintLines (Q4)", () => {
   });
 
   test("unreadable-verdict park re-anchors the park constraint", () => {
-    const parked = parkForUnreadableVerdict(sprintState(8, { status: "paused" }), "qa-verdict", "no-verdict");
+    const parked = parkForUnreadableVerdict(sprintState(8, { status: "paused" }), "qa-browsing", "no-verdict");
     assert.match(buildResumeContext(parked), /CONSTRAINT: the phase's verdict was UNREADABLE/);
   });
 
@@ -1214,10 +1288,10 @@ describe("buildResumeContext / activeConstraintLines (Q4)", () => {
   });
 
   test("report-only and manual-decision phases re-anchor their posture", () => {
-    const qa = SPRINT.phases.find((p) => p.id === "qa-verdict")!;
-    assert.ok(activeConstraintLines(sprintState(8, { status: "active" }), qa).some((l) => l.includes("REPORT-ONLY")));
-    const commit = SPRINT.phases.find((p) => p.id === "commit-archive")!;
-    assert.ok(activeConstraintLines(sprintState(9, { status: "active" }), commit).some((l) => l.includes("DECISION phase")));
+    const reportPhase: any = { id: "report", name: "Report", execution: "subagent", variant: "report-only" };
+    assert.ok(activeConstraintLines(sprintState(8, { status: "active" }), reportPhase).some((l) => l.includes("REPORT-ONLY")));
+    const arch = SPRINT.phases.find((p) => p.id === "architect-gate")!;
+    assert.ok(activeConstraintLines(sprintState(5, { status: "active" }), arch).some((l) => l.includes("DECISION phase")));
     assert.deepEqual(activeConstraintLines(sprintState(7, { status: "active" }), SPRINT.phases[7]), []);
   });
 });
@@ -1431,7 +1505,7 @@ describe("in-flight decision guards (2026-09 fix 4)", () => {
       // Loop-exhaustion park: pausedReason encodes the LOOP TARGET
       // ("implement after 4 runs"), but the release must attribute the GATE
       // phase the workflow is parked at (devsecops-review) — pass-5 review.
-      const exhausted = sprintState(7, { status: "paused" as const, pausedReason: "loop-exhausted:implement after 4 runs" });
+      const exhausted = sprintState(9, { status: "paused" as const, pausedReason: "loop-exhausted:implement after 4 runs" });
       const p3 = mkPanel("Accept result — continue past the gate");
       // "Accept" launches a real delegation whose spawned child would hold the
       // tmp dir — flip ctx.ui stale right after the select resolves so the

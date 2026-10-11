@@ -24,6 +24,16 @@ import type { WorkflowContext, WorkflowPhase } from "../orchestrator/types.ts";
 const INVESTIGATE = getWorkflow("investigate")!;
 const DEVELOP = getWorkflow("develop")!;
 
+const ROOT_CAUSE_CHAIN_PHASE: WorkflowPhase = {
+  id: "root-cause",
+  name: "Root Cause Analysis",
+  execution: "subagent",
+  chain: [
+    { agent: "scout", task: "Investigate root cause" },
+    { agent: "planner", task: "Plan fix strategy: {previous}" },
+  ],
+};
+
 function findPhase(wf: { phases: WorkflowPhase[] }, phaseId: string): WorkflowPhase {
   const phase = wf.phases.find((p) => p.id === phaseId);
   assert.ok(phase, `phase ${phaseId} not found`);
@@ -92,7 +102,7 @@ async function delegate(
 
 describe("runDeterministicDelegation — fake-spawn integration", () => {
   test("chain ordering: the next step's {previous} receives the extracted HANDOFF, not the raw report", async () => {
-    const phase = findPhase(INVESTIGATE, "root-cause"); // chain: scout → planner
+    const phase = ROOT_CAUSE_CHAIN_PHASE; // chain: scout → planner
     const wfCtx = makeCtx("investigate", 1);
     const filler = `FILLER-LINE ${"x".repeat(8000)}`;
     const scoutOutput =
@@ -169,7 +179,7 @@ describe("runDeterministicDelegation — fake-spawn integration", () => {
     const original = process.env[NAME];
     process.env[NAME] = "0.05"; // 50ms: the first step runs, the second never starts
     try {
-      const phase = findPhase(INVESTIGATE, "root-cause");
+      const phase = ROOT_CAUSE_CHAIN_PHASE;
       const calls: SpawnRequest[] = [];
       const { results, events, notifications } = await delegate(phase, makeCtx("investigate", 1), async (req) => {
         calls.push(req);
@@ -197,7 +207,7 @@ describe("runDeterministicDelegation — fake-spawn integration", () => {
     const original = process.env[NAME];
     process.env[NAME] = "100";
     try {
-      const phase = findPhase(INVESTIGATE, "root-cause");
+      const phase = ROOT_CAUSE_CHAIN_PHASE;
       const calls: SpawnRequest[] = [];
       const { results, notifications } = await delegate(phase, makeCtx("investigate", 1), async (req) => {
         calls.push(req);
@@ -236,7 +246,7 @@ describe("runDeterministicDelegation — fake-spawn integration", () => {
 
       const calls: SpawnRequest[] = [];
       const { results, notifications } = await delegate(
-        findPhase(INVESTIGATE, "root-cause"),
+        ROOT_CAUSE_CHAIN_PHASE,
         wfCtx,
         async (req) => {
           calls.push(req);
@@ -278,7 +288,7 @@ describe("runDeterministicDelegation — fake-spawn integration", () => {
   });
 
   test("a REFUTED line in a NON-collapsed chain does NOT reopen (wasCollapsed guard)", async () => {
-    const phase = findPhase(INVESTIGATE, "root-cause");
+    const phase = ROOT_CAUSE_CHAIN_PHASE;
     const calls: SpawnRequest[] = [];
     const { results } = await delegate(phase, makeCtx("investigate", 1), async (req) => {
       calls.push(req);
@@ -293,7 +303,7 @@ describe("runDeterministicDelegation — fake-spawn integration", () => {
   });
 
   test("alive() gate: a dead context spawns nothing", async () => {
-    const phase = findPhase(INVESTIGATE, "root-cause");
+    const phase = ROOT_CAUSE_CHAIN_PHASE;
     const calls: SpawnRequest[] = [];
     const { results } = await delegate(
       phase,
@@ -310,7 +320,7 @@ describe("runDeterministicDelegation — fake-spawn integration", () => {
   });
 
   test("alive() gate: a context dying mid-chain stops spawning after the current step", async () => {
-    const phase = findPhase(INVESTIGATE, "root-cause");
+    const phase = ROOT_CAUSE_CHAIN_PHASE;
     let isAlive = true;
     const calls: SpawnRequest[] = [];
     const { results, events } = await delegate(
@@ -350,7 +360,7 @@ describe("branch enforcement at sprint verdict gates", () => {
     };
     const state = {
       workflowId: "sprint",
-      phaseIndex: 7, // devsecops-review — loopBackTo: "implement"
+      phaseIndex: 9, // devsecops-review — loopBackTo: "implement"
       status: "active" as const,
       goal: "ship the cart",
       results: {},

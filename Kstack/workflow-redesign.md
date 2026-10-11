@@ -18,8 +18,10 @@ the project. `document` BEFORE `ship` (docs land in the diff); ship is
 the last side effect; retro closes it. Speed comes from subtracting
 ceremony, not judgment.
 
-**Setup**: `asksScope: true` — at start (same UI as phase-selection)
-the user declares `scope: frontend|backend|mixed` (default `mixed`).
+**Setup**: `asks: [{var: scope, options: [frontend, backend, mixed],
+default: mixed}]` — at start (same UI as phase-selection) the user
+declares scope; the answer lands in `state.vars` (ADR-12: asksScope
+dissolved into the general asks[] mechanism).
 
 | Phase | Step | Exec | Skill | Note |
 |---|---|---|---|---|
@@ -58,8 +60,9 @@ remain as `UNRESOLVED DECISIONS` at the manual gate.
 - `step.ambientSkills?: string[]` — behavioral skills injected into the
   task (outside the task-skill slot). Restated rule: **0-1 task skill
   per step; ambient skills separate**. Entries conditionable on scope.
-- `workflow.asksScope` + `state.scope` + `step.skipWhen` (conditions
-  `scope:` and `requires:` capability) — see machinery constraints §5-6.
+- `workflow.asks[]` + `state.vars` + `step.skipWhen: {var, equals}`
+  (conditions `scope:`/`target:`; `requires:`/`prefers:` capability
+  gates) — see machinery constraints below.
 - `state.ephemeralArtifacts: string[]` + delete on terminal status.
 - Loops: phase self-loop (walkthrough→build) to verify at the router;
   dynamic `feedbackFrom` (implement receives from multiple phases).
@@ -83,7 +86,7 @@ must be fixed. Urgency with rigor: minimal blast radius, no opportunistic
 refactoring. Iron Law: no fix without a **confirmed** root cause.
 Boundary: "existing behavior broken vs intended" — if root-cause
 concludes not-a-bug/missing-feature → **park + handoff to develop**
-(never scope creep disguised as bugfix). **No `asksScope`**: scope is
+(never scope creep disguised as bugfix). **No `asks[]`**: scope is
 determined by the bug (from the fix's diff), not declared by the user.
 
 | # | Phase | Steps | Exec | Skill | Note |
@@ -134,10 +137,10 @@ fix); own → `fix` (patch + re-review)**.
 |---|---|---|---|---|---|
 | 0 | explore | scout | del | — | blast-radius-aware: `graft callers` on symbols touched by the diff |
 | 1 | diff | resolve | main | — | mechanical: PR#/branch/range/worktree → materializes the diff |
-| 2 | findings | review | del | kstack-review | verdict `code-review` |
-| 3 | qa-browsing | test | del | kstack-qa | `enabled: auto` — browse if UI in the diff; verdict `status` |
-| 4a | comment | post | main | kstack-review-comment | `skipWhen: target:own`; ⚠ sideEffect gate before `gh pr review` — never publish without confirmation |
-| 4b | fix | patch | del | kstack-tdd | `skipWhen: target:external`; bounded loop → `findings` |
+| 2 | findings | review | del | kstack-review | verdict `code-review` — **publish-only** (no loop edge): parsed verdict → `state.lastVerdicts["findings"]`, always advances (ADR-24) |
+| 3 | qa-browsing | test | del | kstack-qa | `enabled: auto` — browse if UI in the diff; `requires: [browse]`; verdict `status` — publish-only → `lastVerdicts`, consumed by `fix.autoWhen` |
+| 4a | comment | post | main | kstack-review-comment | `skipWhen: target:own`; `requires: [gh]`; ⚠ sideEffect gate before `gh pr review` — never publish without confirmation |
+| 4b | fix | patch | del | kstack-tdd | `skipWhen: target:external` + `enabled: auto` — `autoWhen: lastVerdicts.findings.code-review != "approved" \|\| lastVerdicts["qa-browsing"]?.status == "red"` (re-evaluates at phase arrival — red-UI findings on approved code still get fixed) + `onComplete → findings` (backward, bounded by findings' ceiling; fires only on completed). Approved re-review + clean re-browse ⇒ auto-skip ⇒ terminates at `retro` (ADR-24) |
 | 5 | retro | retro | main | kstack-retro | `enabled: auto` |
 
 `kstack-review-comment` ✅ written (new, 176 lines): re-classifies
@@ -222,8 +225,9 @@ remains a skill/phase inside develop·sprint.
 
 ## sprint — APPROVED (S4 design session, user)
 
-Same deterministic base as develop (`asksScope`, `ambientSkills`,
-verdicts via `kstack-report`, `loopBackOn`, ephemeralArtifacts). The
+Same deterministic base as develop (`asks[]`/`state.vars`,
+`ambientSkills`, verdicts via `kstack-report`, `loopBackOn`,
+ephemeralArtifacts). The
 difference: **durable** artifacts are the project's backbone — at run
 end only `system-design_XX.md` and `ADR-log_XX.md` survive (long-term
 decision memory).
@@ -235,8 +239,9 @@ docker, pipeline) **write no files**: findings go in `--evidence` of
 the record (or `--deliverable` → file inside `.kstack/runs/<run>/` if
 massive).
 
-**Setup**: `asksScope: true` (+ `parallel: yes/no`, default no, shown
-only when `scope: mixed`) → `state.scope` drives implement.
+**Setup**: `asks: [{var: scope, ...}, {var: parallel, options:
+[yes, no], default: no, when: {var: scope, equals: mixed}}]` →
+`state.vars.scope`/`vars.parallel` drive implement (INV-14 triple gate).
 
 | # | Phase | Steps | Exec | Skill | Note |
 |---|---|---|---|---|---|
@@ -319,7 +324,7 @@ only when `scope: mixed`) → `state.scope` drives implement.
 | kstack-triage | investigate.reproduce/triage | **NEW** — diagnostic intake interview (operator), one question at a time, → bug-report.md | ✅ written (156 lines, DoD verified) — wiring pending |
 | kstack-review-comment | review.comment/post | **NEW** — findings→batched review on external PR: blocking/suggestion/nit/question taxonomy, ⚠ sideEffect gate | ✅ written (176 lines, DoD verified) — wiring pending |
 | kstack-acceptance-criteria-{be,fe} | ambient on backlog/implement/qa-browsing (sprint) · build/qa-browsing (develop) | port agents-clean acceptance-criteria-* | to port (2 skills, ambient-marked) |
-| kstack-tasks | sprint.backlog/tasks | catalog — **to update**: emits `parallel-safe` var via kstack-report + dependency/file-set fields + respects state.scope | to update |
+| kstack-tasks | sprint.backlog/tasks | catalog — **to update**: emits `parallel-safe` var via kstack-report + dependency/file-set fields + respects `state.vars.scope` | to update |
 | kstack-qa | develop.qa-browsing · sprint.qa-browsing | catalog — **to update**: no more qa-artifact file → findings in `--evidence` | to update |
 | kstack-review · kstack-cso | develop.review · sprint.devsecops | catalog — **to update**: no artifact-file → `--evidence` | to update |
 | kstack-docker-manager · kstack-pipeline-sre | sprint.docker-review · pipeline-review | catalog — **to update**: no artifact-file → `--evidence` | to update |

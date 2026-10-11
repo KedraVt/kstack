@@ -379,6 +379,24 @@ of the verification. Acceptance: full run on a small real task.
 
 ## S4 — Review + workflow migration
 
+> **AMENDMENT (S4 design session, user-approved):** the plan below was
+> written for the 8-workflow gstack catalog. The approved catalog is now
+> **6 workflows** — `develop`, `sprint`, `investigate`, `review`,
+> `discover`, `audit` (ADR-11 in `ADR-log_01.md`). `qa`, `qa-report`,
+> standalone `ship` and `quick` are REMOVED (their cases live inside
+> `review`/develop/sprint phases); `discover`/`audit` are new. The D23
+> loop table and D26 order below are SUPERSEDED by the approved
+> per-workflow specs and verdict/loop maps in
+> `Kstack/workflow-redesign.md`. Tasks T1–T11 below are SUPERSEDED by
+> the sprint backlog `tasks.md` (types+records done; verdict engine,
+> panel machinery, executor, migration, skills, `kstack init`,
+> verification). New machinery decided after this section was written:
+> `asks[]`/`state.vars`, `enabled:"auto"`+derived skippability,
+> `ambientSkills`, `signal`-based completion, `parkOn`, capabilities,
+> `ephemeralArtifacts`/handoff dirs, resume-mode, `kstack init`,
+> parallel lanes, ephemeral-subagent model — all specced in
+> `system-design_01.md` §10 + ADR-11..23.
+
 **Goal**: every workflow **redesigned**, not just migrated — decomposition
 into steps, skill assigned per task (step-first: gap → new skill, D25),
 verdict loops where natural (D23). Sprint = reference with light review

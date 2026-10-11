@@ -1,4 +1,4 @@
-﻿import { test, describe } from "node:test";
+import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import * as fs from "node:fs";
@@ -7,7 +7,7 @@ import * as path from "node:path";
 import { createState, advancePhase, abortState, resumeState, pauseState, gateForApproval, approveNext, gateOptionalPhase, approveOptionalPhase, skipPendingOptional, loadActiveState, recordStepResult, returnParkedWithContext, unfreeze, reissueGate } from "../orchestrator/state.ts";
 import { getAllWorkflows, getWorkflow, getWorkflowIds } from "../orchestrator/workflows.ts";
 import { loadSkillFull, loadSkillGate, getSkillInfo, buildSkillIndex, getSkillIds } from "../orchestrator/skills.ts";
-import { buildPhaseInstructions, buildDeterministicPlan, planFilePath, parsePlanFileMarker, resolvePlanFilePath, carryOverOpenQuestions, buildStepInstructions, buildStepTask, mainContractFor } from "../orchestrator/templates.ts";
+import { buildPhaseInstructions, buildDeterministicPlan, planFilePath, parsePlanFileMarker, resolvePlanFilePath, carryOverOpenQuestions, buildStepInstructions, buildStepTask, mainContractFor, interpolateStepTask } from "../orchestrator/templates.ts";
 import type { WorkflowContext, WorkflowPhase } from "../orchestrator/types.ts";
 import { launchPhase, ctxAlive, isPhaseInFlight, advanceBlockReason, releasePhaseInFlight, buildResumeContext, activeConstraintLines, statusLineFor, executeCurrentPhase } from "../orchestrator/executor.ts";
 import { initOrchestrator } from "../orchestrator/index.ts";
@@ -24,6 +24,36 @@ import {
 } from "../orchestrator/telemetry.ts";
 import { initAgentsMd } from "../orchestrator/init.ts";
 import { gateInventory, configureGates } from "../orchestrator/gates.ts";
+import { recordPathFor } from "../orchestrator/records.ts";
+
+// Write a kstack-report record exactly where stepCompletionStatus reads it:
+// .kstack/runs/<runId>/<phase>.<step>.json — identity fields sanitized like
+// the writer (word chars + dot + hyphen).
+function writeStepRecord(
+  cwd: string,
+  state: { workflowId: string; runId?: string },
+  phaseId: string,
+  stepId: string,
+  over: Record<string, unknown> = {},
+) {
+  const file = recordPathFor(cwd, state.runId!, phaseId, stepId);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const safe = (v: string) => v.replace(/[^\w.-]/g, "-");
+  writeFileSync(file, JSON.stringify({
+    v: 1,
+    workflow: safe(state.workflowId),
+    runId: safe(state.runId!),
+    phase: safe(phaseId),
+    step: safe(stepId),
+    summary: "x",
+    verdicts: {},
+    vars: {},
+    evidence: [],
+    deliverables: [],
+    markers: [],
+    ...over,
+  }));
+}
 
 // --- Live subagent activity labels ----------------------------------------
 
@@ -164,16 +194,16 @@ test("advanceBlockReason blocks kstack_advance while a delegation chain is in fl
 test("releasePhaseInFlight lets a restarted workflow launch immediately after abort", () => {
   const pi = {} as any;
   const ctx = { ui: { notify() { /* ignored */ } } } as any;
-  const state = { workflowId: "qa", phaseIndex: 0 } as any;
+  const state = { workflowId: "discover", phaseIndex: 0 } as any;
 
   // Orphaned chain that never settles (simulates abort mid-delegation).
   launchPhase(pi, ctx, state, async () => { await new Promise(() => {}); });
-  assert.equal(isPhaseInFlight("qa", 0), true);
+  assert.equal(isPhaseInFlight("discover", 0), true);
 
   // abortWorkflow() releases the key even though the chain never settles —
   // otherwise restarting the same workflow would be refused by the guard.
   releasePhaseInFlight(state.workflowId, state.phaseIndex);
-  assert.equal(isPhaseInFlight("qa", 0), false);
+  assert.equal(isPhaseInFlight("discover", 0), false);
 
   let launched = false;
   launchPhase(pi, ctx, state, async () => { launched = true; });
@@ -227,19 +257,19 @@ describe("state machine", () => {
   });
 
   test("advancePhase pauses on failure", () => {
-    const state = createState("ship", "deploy");
+    const state = createState("develop", "deploy");
     const next = advancePhase(state, "pre-checks", { status: "failed", summary: "Tests failing" }, 5);
     assert.equal(next.status, "paused");
     assert.equal(next.phaseIndex, 0);
   });
 
   test("abortState sets aborted", () => {
-    const state = createState("qa", "test site");
+    const state = createState("discover", "test site");
     assert.equal(abortState(state).status, "aborted");
   });
 
   test("resumeState reactivates", () => {
-    const state = pauseState(createState("qa", "test site"));
+    const state = pauseState(createState("discover", "test site"));
     assert.equal(state.status, "paused");
     assert.equal(resumeState(state).status, "active");
   });
@@ -248,7 +278,7 @@ describe("state machine", () => {
     // The pre-S2 entry type is built without the literal old-brand string so
     // the tracked-tree rebrand audit stays clean.
     const LEGACY_ENTRY_TYPE = "g" + "stack-wf-state";
-    const legacy = { workflowId: "qa", phaseIndex: 1, status: "active", goal: "x", results: {}, version: 2, attempts: {} };
+    const legacy = { workflowId: "develop", phaseIndex: 1, status: "active", goal: "x", results: {}, version: 2, attempts: {} };
     const ctx: any = {
       sessionManager: {
         getEntries: () => [{ type: "custom", customType: LEGACY_ENTRY_TYPE, data: legacy }],
@@ -259,15 +289,15 @@ describe("state machine", () => {
 });
 
 describe("workflows registry", () => {
-  test("all 8 workflows registered", () => {
-    assert.equal(getAllWorkflows().length, 8);
+  test("all 6 workflows registered (S4 catalog: develop/sprint/investigate/review/discover/audit)", () => {
+    assert.equal(getAllWorkflows().length, 6);
   });
 
   test("getWorkflow returns correct workflow", () => {
     const wf = getWorkflow("investigate");
     assert.ok(wf);
     assert.equal(wf.name, "Bug Investigation");
-    assert.equal(wf.phases.length, 5);
+    assert.equal(wf.phases.length, 7);
   });
 
   test("getWorkflow returns undefined for unknown", () => {
@@ -276,7 +306,7 @@ describe("workflows registry", () => {
 
   test("getWorkflowIds returns all ids", () => {
     const ids = getWorkflowIds();
-    for (const id of ["develop", "investigate", "qa", "qa-report", "ship", "review", "quick"]) {
+    for (const id of ["develop", "investigate", "review", "discover", "audit", "sprint"]) {
       assert.ok(ids.includes(id), `missing ${id}`);
     }
   });
@@ -293,9 +323,14 @@ describe("workflows registry", () => {
     }
   });
 
-  test("subagent phases have agent or chain", () => {
+  test("delegated steps declare an agent (S4: delegation moved to step level)", () => {
     for (const wf of getAllWorkflows()) {
       for (const phase of wf.phases) {
+        for (const step of phase.steps ?? []) {
+          if (step.execution === "subagent") {
+            assert.ok(step.agent, `${wf.id}/${phase.id}.${step.id} is subagent but has no agent`);
+          }
+        }
         if (phase.execution === "subagent") {
           assert.ok(
             phase.agent || (phase.chain && phase.chain.length > 0),
@@ -325,7 +360,7 @@ describe("approval gates", () => {
   });
 
   test("approveNext is a no-op for non-awaiting states", () => {
-    const state = createState("qa", "test site");
+    const state = createState("discover", "test site");
     assert.equal(approveNext(state).status, "active");
     assert.equal(gateForApproval({ ...state, status: "completed" }).status, "completed");
   });
@@ -337,8 +372,8 @@ describe("approval gates", () => {
     assert.equal(rootCause.advance, "manual");
     // Non-decision phases stay auto. Sprint's planning + hard-gate phases are
     // deliberate exceptions (D6/D11): understand, system-design, architect-gate,
-    // backlog, commit-archive.
-    const sprintManual = new Set(["understand", "system-design", "architect-gate", "backlog", "commit-archive"]);
+    // backlog.
+    const sprintManual = new Set(["understand", "system-design", "architect-gate", "backlog"]);
     for (const wf of getAllWorkflows()) {
       for (const phase of wf.phases) {
         if (wf.id === "sprint" && sprintManual.has(phase.id)) continue;
@@ -364,6 +399,12 @@ describe("skill ingestion", () => {
           const info = getSkillInfo(id);
           assert.ok(info, `phase ${wf.id}/${phase.id} references unknown skill ${id}`);
         }
+        for (const step of phase.steps ?? []) {
+          if (step.skill) assert.ok(getSkillInfo(step.skill), `step ${wf.id}/${phase.id}.${step.id} references unknown skill ${step.skill}`);
+          for (const id of step.ambientSkills ?? []) {
+            assert.ok(getSkillInfo(id), `step ${wf.id}/${phase.id}.${step.id} references unknown ambient skill ${id}`);
+          }
+        }
       }
     }
   });
@@ -376,7 +417,7 @@ describe("skill ingestion", () => {
   });
 
   test("getSkillInfo resolves canonical SKILL.md paths that exist on disk", () => {
-    for (const id of ["kstack-review", "kstack-office-hours", "kstack-document-generate"]) {
+    for (const id of ["kstack-review", "kstack-office-hours", "kstack-document"]) {
       const info = getSkillInfo(id)!;
       assert.ok(info.skillPath, `${id} should have a canonical SKILL.md`);
       assert.ok(existsSync(info.skillPath), `${info.skillPath} not found`);
@@ -393,47 +434,55 @@ describe("skill ingestion", () => {
 });
 
 describe("skill tiering in orchestrator instructions", () => {
-  test("MAIN phases embed full methodology (canonical catalog source)", () => {
-    // develop.plan migrated to steps (S3) — its skills now ship per-step via
-    // buildStepInstructions. This test targets a still-implicit main phase to
-    // keep asserting the phase-level digest path byte-for-byte.
+  test("MAIN steps embed full methodology (canonical catalog source)", () => {
+    // S4: every phase is stepped — skills ship per-step via buildStepInstructions.
     const phase = findPhase("sprint", "system-design");
-    assert.equal(phase.execution, "main");
-    const instructions = buildPhaseInstructions(phase, makeCtx("sprint", 3));
+    const designStep = phase.steps!.find((s) => s.id === "design")!;
+    const adrStep = phase.steps!.find((s) => s.id === "adr")!;
+    assert.equal(designStep.execution, "main");
+    const ctx = makeCtx("sprint", 4);
+    const design = buildStepInstructions(phase, designStep, ctx);
     // Canonical catalog: the SKILL.md frontmatter (`name: <dir>`) is embedded.
     // The marker proves the FULL methodology shipped — not just the compact gate.
-    assert.ok(instructions.includes("name: kstack-system-design"), "system-design methodology missing");
-    assert.ok(instructions.includes("Ubiquitous Language"), "domain-modeling content missing");
-    assert.ok(
-      instructions.includes("name: kstack-adr"),
-      "adr methodology missing",
-    );
+    assert.ok(design.includes("name: kstack-system-design"), "system-design methodology missing");
+    assert.ok(design.includes("Ubiquitous Language"), "domain-modeling content missing");
+    const adr = buildStepInstructions(phase, adrStep, ctx);
+    assert.ok(adr.includes("name: kstack-adr"), "adr methodology missing");
   });
 
-  test("SUBAGENT phases carry DoD gates only â€” full digests stay out of orchestrator context", () => {
-    const review = findPhase("ship", "review");
-    assert.equal(review.execution, "subagent");
-    const instructions = buildPhaseInstructions(review, makeCtx("ship"));
+  test("SUBAGENT steps carry DoD gates only — full digests stay out of orchestrator context", () => {
+    const review = findPhase("develop", "review");
+    const step = review.steps![0];
+    assert.equal(step.execution, "subagent");
+    assert.equal(step.skill, "kstack-review");
+    const instructions = buildStepInstructions(review, step, makeCtx("develop", 4));
     assert.ok(instructions.includes("Skill gate: kstack-review"));
     assert.ok(instructions.includes("DoD gate: kstack-review"));
     assert.ok(instructions.includes("code-review =="), "review gate content missing");
     assert.ok(!instructions.includes("name: kstack-review"), "full skill leaked into orchestrator instructions");
   });
 
-  test("repeat delivery degrades to the DoD gate even on main phases", () => {
-    const ctx = makeCtx("investigate", 3, ["kstack-investigate"]);
-    const verify = findPhase("investigate", "verify");
-    const instructions = buildPhaseInstructions(verify, ctx);
+  test("repeat delivery degrades to the DoD gate on main steps", () => {
+    const rootCause = findPhase("investigate", "root-cause");
+    const trace = rootCause.steps!.find((s) => s.id === "trace")!;
+    assert.equal(trace.skill, "kstack-investigate");
+    const fresh = buildStepInstructions(rootCause, trace, makeCtx("investigate", 2));
+    assert.ok(fresh.includes("name: kstack-investigate"), "first delivery must embed the FULL skill");
+    const ctx = makeCtx("investigate", 2, ["kstack-investigate"]);
+    const instructions = buildStepInstructions(rootCause, trace, ctx);
     assert.ok(instructions.includes("Skill gate: kstack-investigate"));
     assert.ok(instructions.includes("DoD gate: kstack-investigate"));
     assert.ok(!instructions.includes("name: kstack-investigate"), "full skill re-delivered");
   });
 
-  test("phases without skills get no skill blocks; advancement rule intact", () => {
-    const action = findPhase("quick", "action");
-    const instructions = buildPhaseInstructions(action, makeCtx("quick"));
+  test("steps without skills get no skill blocks; advancement rule intact", () => {
+    // sprint.archive carries no skill (mechanical archive step).
+    const phase = findPhase("sprint", "archive");
+    const archive = phase.steps!.find((s) => s.id === "archive")!;
+    assert.ok(!archive.skill);
+    const instructions = buildStepInstructions(phase, archive, makeCtx("sprint", 12));
     assert.ok(!instructions.includes("Skill gate"));
-    assert.ok(instructions.includes("Never ask the user to run a command"));
+    assert.ok(instructions.includes("kstack_advance"));
   });
 
   test("manual-gate phases announce the approval pause", () => {
@@ -449,7 +498,7 @@ describe("plan cycle (interactive, hybrid)", () => {
     const ids = wf.phases.map((p) => p.id);
     const exploreIdx = ids.indexOf("explore");
     assert.ok(exploreIdx >= 0 && ids[exploreIdx + 1] === "plan", `order wrong: ${ids.join(",")}`);
-    assert.equal(findPhase("develop", "explore").agent, "scout");
+    assert.equal(findPhase("develop", "explore").steps![0].agent, "scout");
   });
 
   test("plan phase: rounds, recommended answers, question cap, plan-file write, no implement", () => {
@@ -492,9 +541,18 @@ test("root-cause phase tasks carry the validate-first directive", () => {
     for (const wfid of getWorkflowIds()) {
       const wf = getWorkflow(wfid)!;
       for (const phase of wf.phases) {
-        if (phase.execution !== "subagent") continue;
-        const plan = buildDeterministicPlan(phase, makeCtx(wfid, 0));
-        for (const step of plan) {
+        // S4: delegation lives on steps — delegated step tasks are checked via
+        // buildStepTask; the phase-level chain path (buildDeterministicPlan)
+        // only still applies to legacy execution:"subagent" phases.
+        const delegatedTasks: string[] = [];
+        for (const s of phase.steps ?? []) {
+          if (s.execution === "subagent") delegatedTasks.push(buildStepTask(s));
+        }
+        if (phase.execution === "subagent") {
+          for (const s of buildDeterministicPlan(phase, makeCtx(wfid, 0))) delegatedTasks.push(s.task);
+        }
+        for (const task of delegatedTasks) {
+          const step = { task };
           // Full-injected methodology may MENTION tool calls as advisory text
           // (prose fallback, "validate tool calls", …). Only an actual BUDGET
           // directive — a cap/limit/phrase that constrains the delegate — is
@@ -519,20 +577,27 @@ test("root-cause phase tasks carry the validate-first directive", () => {
   // fixed nothing. With every in-workflow phase pre-recorded below, the only
   // way "(not yet available)" can survive interpolation is a token pointing
   // at a phase that can never exist.
-  test("every subagent task's {x}_summary token maps to a phase in the same workflow", () => {
+  test("every step task's {x}_summary token maps to a phase in the same workflow", () => {
     for (const wfid of getWorkflowIds()) {
       const wf = getWorkflow(wfid)!;
       const results: Record<string, { status: "completed"; summary: string }> = {};
       for (const p of wf.phases) results[p.id] = { status: "completed", summary: `recorded summary of ${p.id}` };
       for (const phase of wf.phases) {
-        if (phase.execution !== "subagent") continue;
         const base = makeCtx(wfid, wf.phases.indexOf(phase));
         const ctx: WorkflowContext = { ...base, state: { ...base.state, results } };
-        const plan = buildDeterministicPlan(phase, ctx);
-        for (const step of plan) {
+        if (phase.execution === "subagent") {
+          for (const step of buildDeterministicPlan(phase, ctx)) {
+            assert.ok(
+              !step.task.includes("(not yet available)"),
+              `${wfid}/${phase.id}: task references a {x}_summary phase that does not exist in this workflow — worker runs without context. Task starts with: ${step.task.slice(0, 120)}`,
+            );
+          }
+        }
+        for (const [i, s] of (phase.steps ?? []).entries()) {
+          const task = interpolateStepTask(s.task ?? "", phase, i, ctx);
           assert.ok(
-            !step.task.includes("(not yet available)"),
-            `${wfid}/${phase.id}: task references a {x}_summary phase that does not exist in this workflow — worker runs without context. Task starts with: ${step.task.slice(0, 120)}`,
+            !task.includes("(not yet available)"),
+            `${wfid}/${phase.id}.${s.id}: step task references a {x}_summary phase that does not exist in this workflow — worker runs without context. Task starts with: ${task.slice(0, 120)}`,
           );
         }
       }
@@ -541,24 +606,19 @@ test("root-cause phase tasks carry the validate-first directive", () => {
 });
 
 describe("documentation phases", () => {
-  test("develop ends with an optional document phase carrying both doc skills", () => {
+  test("develop carries an enabled:auto document phase with the doc skill on its step", () => {
     const doc = findPhase("develop", "document");
-    assert.equal(doc.optional, true);
-    assert.deepEqual(doc.skills, ["kstack-document-release", "kstack-document-generate"]);
+    assert.equal(doc.enabled, "auto");
+    const step = doc.steps![0];
+    assert.equal(step.id, "document");
+    assert.equal(step.skill, "kstack-document");
   });
 
-  test("ship carries an update-docs phase with both doc skills", () => {
-    const doc = findPhase("ship", "update-docs");
-    assert.equal(doc.optional, true);
-    assert.deepEqual(doc.skills, ["kstack-document-release", "kstack-document-generate"]);
-  });
-
-  test("document task chains generate pass and requires DOC REPORT + atomic docs commit", () => {
+  test("document step task carries the coverage-map + factual-updates contract", () => {
     const doc = findPhase("develop", "document");
-    const plan = buildDeterministicPlan(doc, makeCtx("develop", 7));
-    assert.ok(plan[0].task.includes("Diataxis coverage map"));
-    assert.ok(plan[0].task.includes("DOC REPORT"));
-    assert.ok(plan[0].task.includes("docs: prefix"));
+    const task = doc.steps![0].task!;
+    assert.ok(task.includes("coverage map"), "coverage-map sweep missing");
+    assert.ok(task.includes("factual updates"), "factual-updates rule missing");
   });
 
   test("ship skill mandates TODOS.md reconciliation and git discipline", () => {
@@ -568,57 +628,46 @@ describe("documentation phases", () => {
   });
 });
 
-describe("qa report-only mode", () => {
-  test("qa-report workflow exists, all phases report-only", () => {
-    const wf = getWorkflow("qa-report")!;
-    assert.equal(wf.name, "QA Report (No Fixes)");
-    for (const phase of wf.phases) {
-      assert.equal(phase.variant, "report-only", `${wf.id}/${phase.id} not report-only`);
-    }
+describe("deterministic delegation", () => {
+  test("delegated step tasks embed the FULL skill methodology (isolated context)", () => {
+    const qa = findPhase("develop", "qa-browsing");
+    const step = qa.steps![0];
+    assert.equal(step.execution, "subagent");
+    const task = buildStepTask(step);
+    assert.ok(task.includes("Skill methodology: kstack-qa"), "skill digest not embedded in step task");
   });
 
-  test("report-only directives appear in instructions and subagent tasks", () => {
-    const setup = findPhase("qa-report", "setup");
-    assert.ok(buildPhaseInstructions(setup, makeCtx("qa-report")).includes("REPORT-ONLY MODE"));
-
-    const testPhase = findPhase("qa-report", "test");
-    const plan = buildDeterministicPlan(testPhase, makeCtx("qa-report", 1));
-    assert.ok(plan[0].task.includes("REPORT-ONLY MODE"));
-    assert.ok(plan[0].task.includes("do NOT fix anything"));
+  test("delegated step tasks interpolate {goal} via interpolateStepTask", () => {
+    const qa = findPhase("develop", "qa-browsing");
+    const task = interpolateStepTask(qa.steps![0].task!, qa, 0, makeCtx("develop", 3));
+    assert.ok(task.includes("add dark mode toggle"), "goal not interpolated");
+    assert.ok(!task.includes("{goal}"), "literal {goal} leaked");
   });
 
-  test("normal qa workflow is NOT report-only", () => {
-    for (const phase of getWorkflow("qa")!.phases) {
-      assert.notEqual(phase.variant, "report-only");
-    }
-  });
-});
-
-describe("deterministic delegation plan", () => {
-  test("single-agent phases resolve to one interpolated task with skill content", () => {
-    const qa = findPhase("develop", "qa");
-    const plan = buildDeterministicPlan(qa, makeCtx("develop", 4));
-    assert.equal(plan.length, 1);
-    assert.equal(plan[0].agent, "worker");
-    assert.ok(plan[0].task.includes("add dark mode toggle"), "goal not interpolated");
-    assert.ok(plan[0].task.includes("Skill methodology: kstack-qa"), "skill digest not embedded in task");
+  test("explore's scout step delegates to the scout agent", () => {
+    const explore = findPhase("develop", "explore");
+    const step = explore.steps![0];
+    assert.equal(step.execution, "subagent");
+    assert.equal(step.agent, "scout");
+    assert.ok(step.task!.includes("do NOT design or implement"), "exploration discipline missing");
   });
 
-  test("chain steps also receive embedded skill methodology", () => {
-    const rootCause = findPhase("investigate", "root-cause");
-    assert.equal(rootCause.advance, "manual");
-    const plan = buildDeterministicPlan(rootCause, makeCtx("investigate", 1));
+  test("legacy chain plans still embed per-step skill methodology (compat path)", () => {
+    // No current def uses phase-level chains — the machinery is retained for
+    // compatibility and exercised here against a synthetic fixture.
+    const chained: WorkflowPhase = {
+      id: "synthetic-chain", name: "Chained", execution: "subagent", optional: false,
+      skills: ["kstack-investigate"],
+      chain: [
+        { agent: "scout", task: "Trace {goal}", skills: ["kstack-investigate"] },
+        { agent: "planner", task: "Plan from {goal}", skills: ["kstack-fix-strategy"] },
+      ],
+    };
+    const plan = buildDeterministicPlan(chained, makeCtx("develop", 0));
     assert.deepEqual(plan.map((s) => s.agent), ["scout", "planner"]);
     assert.ok(plan[0].task.includes("Skill methodology: kstack-investigate"), "digest not embedded in chain step");
+    assert.ok(plan[1].task.includes("Skill methodology: kstack-fix-strategy"), "step-scoped skill overrides phase skills");
     assert.ok(plan[0].task.includes("add dark mode toggle"), "goal not interpolated in chain step");
-  });
-
-  test("explore phase delegates to the scout agent deterministically", () => {
-    const explore = findPhase("develop", "explore");
-    const plan = buildDeterministicPlan(explore, makeCtx("develop", 1));
-    assert.equal(plan.length, 1);
-    assert.equal(plan[0].agent, "scout");
-    assert.ok(plan[0].task.includes("Facts only"), "exploration discipline missing");
   });
 });
 
@@ -631,9 +680,9 @@ describe("intent matching", () => {
     assert.ok(matched);
   });
 
-  test("ship matches deploy keywords", () => {
-    const wf = getWorkflow("ship")!;
-    const text = "let's ship this and create a pr";
+  test("review matches diff-review keywords", () => {
+    const wf = getWorkflow("review")!;
+    const text = "check the diff before landing";
     const matched = wf.intents.some((i) => i.pattern.test(text));
     assert.ok(matched);
   });
@@ -645,9 +694,9 @@ describe("intent matching", () => {
     assert.ok(matched);
   });
 
-  test("qa matches test keywords", () => {
-    const wf = getWorkflow("qa")!;
-    const text = "does this work? test the site please";
+  test("sprint matches agile keywords", () => {
+    const wf = getWorkflow("sprint")!;
+    const text = "run a sprint on this backlog";
     const matched = wf.intents.some((i) => i.pattern.test(text));
     assert.ok(matched);
   });
@@ -750,6 +799,9 @@ describe("deliverable-first contracts (STEP 1)", () => {
         } else {
           out.push(buildPhaseInstructions(phase, ctx));
         }
+        for (const [i, s] of (phase.steps ?? []).entries()) {
+          out.push(buildStepTask({ ...s, task: interpolateStepTask(s.task ?? "", phase, i, ctx) }));
+        }
       }
     }
     for (const id of getSkillIds()) {
@@ -759,53 +811,30 @@ describe("deliverable-first contracts (STEP 1)", () => {
     return out;
   }
 
-  test("every phase on every path carries DELIVERABLE and STOP CONDITION", () => {
+  test("every step task carries DELIVERABLE and STOP CONDITION", () => {
     for (const wf of getAllWorkflows()) {
-      let idx = 0;
       for (const phase of wf.phases) {
-        const ctx = makeCtx(wf.id, idx++);
-        if (phase.execution === "subagent") {
-          const plan = buildDeterministicPlan(phase, ctx);
-          assert.ok(plan.length > 0, `${wf.id}/${phase.id} produced an empty plan`);
-          for (const step of plan) {
-            assert.ok(step.task.includes("## DELIVERABLE"), `${wf.id}/${phase.id} (${step.agent}) task missing DELIVERABLE`);
-            assert.ok(step.task.includes("## STOP CONDITION"), `${wf.id}/${phase.id} (${step.agent}) task missing STOP CONDITION`);
-          }
-        } else {
-          const instructions = buildPhaseInstructions(phase, ctx);
-          assert.ok(instructions.includes("## DELIVERABLE"), `${wf.id}/${phase.id} main instructions missing DELIVERABLE`);
-          assert.ok(instructions.includes("## STOP CONDITION"), `${wf.id}/${phase.id} main instructions missing STOP CONDITION`);
+        for (const step of phase.steps ?? []) {
+          assert.ok(step.task?.includes("## DELIVERABLE"), `${wf.id}/${phase.id}.${step.id} task missing DELIVERABLE`);
+          assert.ok(step.task.includes("## STOP CONDITION"), `${wf.id}/${phase.id}.${step.id} task missing STOP CONDITION`);
         }
       }
     }
   });
 
   test("methodology blocks carry the correct class prefix and follow the deliverable", () => {
-    const qa = findPhase("develop", "qa");
-    const qaPlan = buildDeterministicPlan(qa, makeCtx("develop", 4));
-    assert.ok(qaPlan[0].task.includes("Skill methodology: kstack-qa (format-critical)"), "qa should be format-critical");
+    const qa = findPhase("develop", "qa-browsing");
+    const qaTask = buildStepTask(qa.steps![0]);
+    assert.ok(qaTask.includes("Skill methodology: kstack-qa (format-critical)"), "qa should be format-critical");
     assert.ok(
-      qaPlan[0].task.includes("output format IS part of the deliverable"),
+      qaTask.includes("output format IS part of the deliverable"),
       "format-critical prefix missing",
     );
-    assert.ok(
-      qaPlan[0].task.indexOf("## DELIVERABLE") < qaPlan[0].task.indexOf("## METHODOLOGY"),
-      "methodology must come after the deliverable",
-    );
 
-    const pushPr = findPhase("ship", "push-pr");
-    const shipPlan = buildDeterministicPlan(pushPr, makeCtx("ship", 4));
-    assert.ok(shipPlan[0].task.includes("Skill methodology: kstack-ship (support)"), "ship should be support-class");
-    assert.ok(shipPlan[0].task.includes("Apply the parts useful to the deliverable"), "support prefix missing");
-  });
-
-  test("update-docs resolves to the real doc contract instead of the generic fallback", () => {
-    const updateDocs = findPhase("ship", "update-docs");
-    const plan = buildDeterministicPlan(updateDocs, makeCtx("ship", 4));
-    assert.equal(plan.length, 1);
-    assert.ok(plan[0].task.includes("Diataxis coverage map"), "generic fallback leaked through for update-docs");
-    assert.ok(plan[0].task.includes("DOC REPORT"));
-    assert.ok(plan[0].task.includes("docs: prefix"));
+    const ship = findPhase("develop", "ship");
+    const shipTask = buildStepTask(ship.steps![0]);
+    assert.ok(shipTask.includes("Skill methodology: kstack-ship (support)"), "ship should be support-class");
+    assert.ok(shipTask.includes("Apply the parts useful to the deliverable"), "support prefix missing");
   });
 
   test("language audit: zero non-English content in injectable strings", () => {
@@ -916,8 +945,8 @@ describe("$-safe interpolation (STEP 2c)", () => {
   test("interpolate() survives $&, $', $1 payloads in the user goal", () => {
     const evilGoal = "add $& dark $' mode $1 toggle $$";
     const explore = findPhase("develop", "explore");
-    const plan = buildDeterministicPlan(explore, ctxWithGoal(evilGoal));
-    assert.ok(plan[0].task.includes(evilGoal), "goal corrupted by $ pattern interpolation");
+    const task = interpolateStepTask(explore.steps![0].task!, explore, 0, ctxWithGoal(evilGoal));
+    assert.ok(task.includes(evilGoal), "goal corrupted by $ pattern interpolation");
   });
 });
 
@@ -989,12 +1018,12 @@ describe("optional-phase decision gate (STEP 2g v2)", () => {
   const investigate = getWorkflow("investigate")!;
   const qaIndex = investigate.phases.findIndex((p) => p.id === "regression-qa");
 
-  test("investigate's regression-qa is the last phase and optional", () => {
-    assert.equal(investigate.phases.length, 5);
-    assert.equal(qaIndex, 4);
+  test("investigate's regression-qa is an enabled:auto phase late in the pipeline", () => {
+    assert.equal(investigate.phases.length, 7);
+    assert.equal(qaIndex, 5);
     const qa = investigate.phases[qaIndex];
-    assert.equal(qa.optional, true);
-    assert.ok(qa.skipWhen, "conditional auto-skip (clean tree) must be preserved");
+    assert.equal(qa.enabled, "auto", "S4: optional-by-detection phases are enabled:auto");
+    assert.equal(typeof qa.autoWhen, "function", "autoWhen resolver must be present (fail-closed otherwise)");
   });
 
   test("gateOptionalPhase parks the workflow AT the optional phase with the marker set", () => {
@@ -1014,12 +1043,15 @@ describe("optional-phase decision gate (STEP 2g v2)", () => {
   });
 
   test("skipPendingOptional records 'skipped' and COMPLETES the workflow when the phase is last", () => {
-    const state = { ...createState("investigate", "fix login bug"), phaseIndex: qaIndex, status: "awaiting_approval" as const, pendingOptional: true };
+    // investigate.retro (idx 6) is the last phase — pendingOptional machinery
+    // is phase-agnostic, so the last-phase completion rule is exercised here.
+    const lastIndex = investigate.phases.length - 1;
+    const state = { ...createState("investigate", "fix login bug"), phaseIndex: lastIndex, status: "awaiting_approval" as const, pendingOptional: true };
     const next = skipPendingOptional(state, investigate.phases, investigate.phases.length);
     assert.equal(next.status, "completed", "refusing the last phase must finish the workflow, not hang it");
     assert.equal(next.pendingOptional, undefined);
-    assert.equal(next.results["regression-qa"]?.status, "skipped");
-    assert.match(next.results["regression-qa"]?.summary ?? "", /Skipped by user/);
+    assert.equal(next.results["retro"]?.status, "skipped");
+    assert.match(next.results["retro"]?.summary ?? "", /Skipped by user/);
   });
 
   test("skipPendingOptional advances linearly when the optional phase is NOT last", () => {
@@ -1028,12 +1060,13 @@ describe("optional-phase decision gate (STEP 2g v2)", () => {
     const state = { ...createState("develop", "add dark mode"), phaseIndex: shipIndex, status: "awaiting_approval" as const, pendingOptional: true };
     const next = skipPendingOptional(state, develop.phases, develop.phases.length);
     assert.equal(next.status, "active");
-    assert.equal(next.phaseIndex, shipIndex + 1, "moves past ship to document");
+    assert.equal(next.phaseIndex, shipIndex + 1, "moves past ship to retro");
     assert.equal(next.results["ship"]?.status, "skipped");
   });
 
   test("gate round-trip: park then skip completes and clears the marker", () => {
-    const state = { ...createState("investigate", "fix login bug"), phaseIndex: qaIndex };
+    const lastIndex = investigate.phases.length - 1;
+    const state = { ...createState("investigate", "fix login bug"), phaseIndex: lastIndex };
     const gated = gateOptionalPhase(state);
     const skipped = skipPendingOptional(gated, investigate.phases, investigate.phases.length);
     assert.equal(skipped.status, "completed");
@@ -1044,9 +1077,20 @@ describe("optional-phase decision gate (STEP 2g v2)", () => {
 // --- STEP 3: role-scoped skill injection -------------------------------------
 
 describe("role-scoped skill injection (STEP 3)", () => {
-  test("root-cause chain: scout gets the investigation digest, planner gets fix-strategy only", () => {
-    const rootCause = findPhase("investigate", "root-cause");
-    const plan = buildDeterministicPlan(rootCause, makeCtx("investigate", 1));
+  // S4: no current def uses phase-level chains — the compat machinery is
+  // exercised against a synthetic scout→planner fixture (the shape the old
+  // investigate.root-cause carried).
+  const CHAINED_ROOT_CAUSE: WorkflowPhase = {
+    id: "root-cause", name: "Root Cause", execution: "subagent", optional: false,
+    skills: ["kstack-investigate"],
+    chain: [
+      { agent: "scout", task: "Trace the bug", skills: ["kstack-investigate"] },
+      { agent: "planner", task: "Plan the fix", skills: ["kstack-fix-strategy"] },
+    ],
+  };
+
+  test("chained root-cause: scout gets the investigation digest, planner gets fix-strategy only", () => {
+    const plan = buildDeterministicPlan(CHAINED_ROOT_CAUSE, makeCtx("investigate", 1));
     assert.deepEqual(plan.map((s) => s.agent), ["scout", "planner"]);
     assert.ok(plan[0].task.includes("Skill methodology: kstack-investigate"), "scout lost the full methodology");
     assert.ok(plan[1].task.includes("Skill methodology: kstack-fix-strategy"), "planner missing the fix-strategy digest");
@@ -1064,14 +1108,14 @@ describe("role-scoped skill injection (STEP 3)", () => {
   });
 
   test("chain steps without an override inherit the phase skills", () => {
-    // The document phase has no per-step override: its steps keep kstack-document-*.
-    const doc = findPhase("develop", "document");
-    const plan = buildDeterministicPlan(doc, makeCtx("develop", 7));
+    const chained: WorkflowPhase = {
+      id: "synthetic-inherit", name: "Inherit", execution: "subagent", optional: false,
+      skills: ["kstack-document"],
+      chain: [{ agent: "worker", task: "Write the docs" }],
+    };
+    const plan = buildDeterministicPlan(chained, makeCtx("develop", 7));
     for (const step of plan) {
-      assert.ok(
-        step.task.includes("Skill methodology: kstack-document-release") || step.task.includes("Skill methodology: kstack-document-generate"),
-        "inherited phase skills lost",
-      );
+      assert.ok(step.task.includes("Skill methodology: kstack-document"), "inherited phase skills lost");
     }
   });
 });
@@ -1156,6 +1200,17 @@ describe("root-cause marker parsing (STEP 4b)", () => {
 });
 
 describe("conditional collapse (STEP 4c)", () => {
+  // Compat machinery: the collapse branch fires on a chain-bearing phase id'd
+  // "root-cause" — current defs keep their own step pipeline instead.
+  const COLLAPSIBLE: WorkflowPhase = {
+    id: "root-cause", name: "Root Cause", execution: "subagent", optional: false,
+    skills: ["kstack-investigate"],
+    chain: [
+      { agent: "scout", task: "Trace", skills: ["kstack-investigate"] },
+      { agent: "planner", task: "Plan", skills: ["kstack-fix-strategy"] },
+    ],
+  };
+
   test("valid reproduce summary collapses the chain to ONE planner step", () => {
     const tmp = mkdtempSync(path.join(os.tmpdir(), "kstack-collapse-"));
     try {
@@ -1165,8 +1220,7 @@ describe("conditional collapse (STEP 4c)", () => {
       const ctx = makeCtx("investigate", 1);
       ctx.cwd = tmp;
       ctx.state.results["reproduce"] = { status: "completed", summary: "Reproduced reliably. " + HANDOFF_PAYLOAD };
-      const rootCause = findPhase("investigate", "root-cause");
-      const plan = buildDeterministicPlan(rootCause, ctx);
+      const plan = buildDeterministicPlan(COLLAPSIBLE, ctx);
       assert.equal(plan.length, 1);
       assert.equal(plan[0].agent, "planner");
       assert.ok(plan[0].task.includes("CONFIRMED this cause"));
@@ -1177,8 +1231,7 @@ describe("conditional collapse (STEP 4c)", () => {
   });
 
   test("without a valid marker the full scout-planner plan stays intact", () => {
-    const rootCause = findPhase("investigate", "root-cause");
-    const plan = buildDeterministicPlan(rootCause, makeCtx("investigate", 1));
+    const plan = buildDeterministicPlan(COLLAPSIBLE, makeCtx("investigate", 1));
     assert.deepEqual(plan.map((s) => s.agent), ["scout", "planner"]);
   });
 });
@@ -1199,13 +1252,17 @@ describe("refutation + QA skip helpers (STEP 4d)", () => {
     assert.equal(allTestsPassed("garbage summary"), false);
   });
 
-  test("qa fix phase gains a test-based structural skipWhen", () => {
-    const qaFix = findPhase("qa", "fix");
-    assert.ok(qaFix.skipWhen, "qa/fix must declare skipWhen");
-    const passedCtx = makeCtx("qa", 3);
+  test("allTestsPassed drives a structural skipWhen the old qa.fix phase carried", () => {
+    // The qa workflow was removed in S4; the function-form skipWhen predicate
+    // survives as compat machinery — exercise it on a synthetic fixture.
+    const qaFix: WorkflowPhase = {
+      id: "fix", name: "Fix", execution: "main", optional: false,
+      skipWhen: (ctx) => allTestsPassed(ctx.state.results["test"]?.summary),
+    };
+    const passedCtx = makeCtx("develop", 3);
     passedCtx.state.results["test"] = { status: "completed", summary: "suite run: 50 passed, 0 failures" };
     assert.equal(qaFix.skipWhen!(passedCtx), true);
-    const failedCtx = makeCtx("qa", 3);
+    const failedCtx = makeCtx("develop", 3);
     failedCtx.state.results["test"] = { status: "completed", summary: "3 failures found" };
     assert.equal(qaFix.skipWhen!(failedCtx), false);
   });
@@ -1526,7 +1583,8 @@ describe("plan file naming (2026-09 fix 2)", () => {
 
 describe("open-questions carry-over (2026-09 fix 1)", () => {
   test("understand contract demands the OPEN QUESTIONS section", () => {
-    const instructions = buildPhaseInstructions(findPhase("develop", "understand"), makeCtx("develop", 0));
+    // S4: develop folded understand into plan.evolve; sprint still carries the phase.
+    const instructions = buildPhaseInstructions(findPhase("sprint", "understand"), makeCtx("sprint", 1));
     assert.ok(instructions.includes("OPEN QUESTIONS:"));
   });
 
@@ -1564,16 +1622,18 @@ describe("open-questions carry-over (2026-09 fix 1)", () => {
 // --- Compaction guard + truthful status lines (NEXT UP, 2026-09-15) ---------
 
 describe("compaction guard — resume prefix contract", () => {
-  test("active main phase: prefix carries the DELIVERABLE/STOP CONDITION contract", () => {
-    const prefix = buildResumeContext(makeCtx("investigate", 0).state); // reproduce = main
-    assert.ok(prefix.includes("## DELIVERABLE"), "main-phase contract missing from resume prefix");
-    assert.ok(prefix.includes("## STOP CONDITION"), "main-phase stop condition missing");
+  test("active stepped phase: prefix carries the current step's DELIVERABLE/STOP CONDITION contract", () => {
+    const prefix = buildResumeContext(makeCtx("investigate", 0).state); // explore → delegated scout step
+    assert.ok(prefix.includes("## DELIVERABLE"), "step contract missing from resume prefix");
+    assert.ok(prefix.includes("## STOP CONDITION"), "step stop condition missing");
     assert.ok(prefix.includes("kstack_phase"), "tier-2 pointer missing");
   });
 
-  test("active subagent phase: no contract (delegation results self-heal), pointer still present", () => {
-    const prefix = buildResumeContext(makeCtx("investigate", 1).state); // root-cause = subagent
-    assert.ok(!prefix.includes("## DELIVERABLE"), "subagent phases must not carry the main contract");
+  test("active delegated step: the step contract re-anchors (§10.7 resume semantics)", () => {
+    // investigate.verify.verify is a delegated step — its own DELIVERABLE is
+    // the resume oracle, so the contract re-anchors on it.
+    const prefix = buildResumeContext({ ...makeCtx("investigate", 4).state, stepIndex: 0 });
+    assert.ok(prefix.includes("## DELIVERABLE"), "delegated step contract missing");
     assert.ok(prefix.includes("kstack_phase"));
   });
 
@@ -1586,7 +1646,7 @@ describe("compaction guard — resume prefix contract", () => {
   });
 
   test("paused state: PAUSED, never the contradictory continue-working tail (mindrun F1)", () => {
-    const state = { ...makeCtx("sprint", 7).state, status: "paused" as const, pausedReason: "branch-violation:devsecops-review on main" };
+    const state = { ...makeCtx("sprint", 9).state, status: "paused" as const, pausedReason: "branch-violation:devsecops-review on main" };
     const prefix = buildResumeContext(state);
     assert.ok(prefix.includes("PAUSED (branch-violation:devsecops-review on main)"));
     assert.ok(prefix.includes("PAUSED"), "paused posture must be stated");
@@ -1596,7 +1656,9 @@ describe("compaction guard — resume prefix contract", () => {
   });
 
   test("sprint contracts interpolate the assigned sprint number", () => {
-    const state = { ...makeCtx("sprint", 3).state, sprintNumber: 7 }; // system-design = main
+    // system-design is stepped — stepIndex anchors the CURRENT step contract
+    // (design step: `system-design_{sprint}.md` → pad2 → _07).
+    const state = { ...makeCtx("sprint", 4).state, sprintNumber: 7, stepIndex: 0 };
     const prefix = buildResumeContext(state);
     assert.ok(prefix.includes("system-design_07.md"), "sprint contract must carry the real sprint number");
   });
@@ -1606,8 +1668,8 @@ describe("statusLineFor", () => {
   const sprint = getWorkflow("sprint")!;
 
   test("active returns the running label", () => {
-    const state = makeCtx("sprint", 7).state; // devsecops-review
-    assert.equal(statusLineFor(state, sprint), "Sprint (Agile Pipeline): DevSecOps Review (8/10)");
+    const state = makeCtx("sprint", 9).state; // devsecops-review
+    assert.equal(statusLineFor(state, sprint), "Sprint (Agile Pipeline): DevSecOps Review (10/14)");
   });
 
   test("awaiting_approval: parked for approval vs optional-phase decision", () => {
@@ -1646,18 +1708,18 @@ describe("statusLineFor", () => {
   test("stepped phase names the current step: `phase (n/m) · step <id> (i/k)`", () => {
     const develop = getWorkflow("develop")!;
     const planIdx = develop.phases.findIndex((p) => p.id === "plan");
-    assert.ok(planIdx >= 0 && develop.phases[planIdx].steps?.length === 3);
+    assert.ok(planIdx >= 0 && develop.phases[planIdx].steps?.length === 5);
     const state = { ...createState("develop", "g"), phaseIndex: planIdx, stepIndex: 1 };
     assert.equal(
       statusLineFor(state, develop),
-      "Full Development Cycle: Interactive Planning (3/8) · step draft (2/3)",
+      "Full Development Cycle: Interactive Planning (2/8) · step interrogate (2/5)",
     );
   });
 
-  test("implicit phases carry no step suffix — unchanged pre-S3 shape", () => {
+  test("a stepped phase without stepIndex shows the phase line only", () => {
     const develop = getWorkflow("develop")!;
     const state = { ...createState("develop", "g"), phaseIndex: 0 };
-    assert.equal(statusLineFor(state, develop), "Full Development Cycle: Understand Requirements (1/8)");
+    assert.equal(statusLineFor(state, develop), "Full Development Cycle: Codebase Exploration (1/8)");
   });
 });
 
@@ -1681,8 +1743,10 @@ describe("kstack_phase tool", () => {
     return { pi, tools, ctx };
   }
 
-  test("delegated phase: instructions + posture header + on-disk record", async () => {
-    const state = { ...makeCtx("sprint", 7).state, status: "paused" as const, pausedReason: "branch-violation:devsecops-review on main", sprintNumber: 7 };
+  test("delegated step: instructions + posture header + on-disk record", async () => {
+    // sprint.devsecops-review (idx 9) — its current step is delegated, so the
+    // record section must surface even though the phase itself is main.
+    const state = { ...makeCtx("sprint", 9).state, status: "paused" as const, pausedReason: "branch-violation:devsecops-review on main", sprintNumber: 7, runId: "r1" };
     const { pi, tools, ctx } = fakePiWithState(state);
     initOrchestrator(pi);
     const res = await tools.get("kstack_phase").execute("t", {}, undefined, undefined, ctx);
@@ -1690,17 +1754,18 @@ describe("kstack_phase tool", () => {
     assert.ok(text.startsWith("[workflow paused: branch-violation:devsecops-review on main"), "posture header missing");
     assert.ok(text.includes("### On-disk record"), "artifact section missing");
     assert.ok(text.includes("code-review-artifact_07.md"), "expected artifact path not listed");
+    assert.ok(text.includes("devsecops-review.code-review.json"), "step record path not listed");
     assert.ok(text.includes("(not written yet)"), "missing-file marker absent");
   });
 
-  test("active main phase: instructions, no posture header, no record section", async () => {
-    const { pi, tools, ctx } = fakePiWithState(makeCtx("sprint", 3).state); // system-design = main
+  test("active main step: instructions, no posture header, no record section", async () => {
+    const { pi, tools, ctx } = fakePiWithState(makeCtx("sprint", 4).state); // system-design — step design is main
     initOrchestrator(pi);
     const res = await tools.get("kstack_phase").execute("t", {}, undefined, undefined, ctx);
     const text = res.content[0].text;
     assert.ok(text.includes("Phase: System Design"));
     assert.ok(!text.startsWith("[workflow"), "active phase must not carry the reference-only header");
-    assert.ok(!text.includes("### On-disk record"), "main phases have no delegation results to lose");
+    assert.ok(!text.includes("### On-disk record"), "main steps have no delegation results to lose");
   });
 
   test("unknown workflowId gets its own message (not 'no current phase')", async () => {
@@ -1837,7 +1902,7 @@ describe("/kstack init", () => {
 describe("S3 step model — types & state v4 (TASK_01)", () => {
   test("createState produces a v4 state with gate fields", () => {
     const state = createState("develop", "build a thing");
-    assert.equal(state.version, 4);
+    assert.equal(state.version, 5);
     assert.equal(state.gateMode, "human-gate");
     assert.deepEqual(state.gateOverrides, {});
     // stepIndex is defined only while a stepped phase is current (INV-01)
@@ -2107,17 +2172,19 @@ describe("S3 step builders — templates (TASK_02)", () => {
 
 // --- TASK_03 + TASK_06: step state machine, executor dispatch, develop.plan pilot ---
 
-describe("S3 pilot — develop.plan is a 3-step phase (TASK_06)", () => {
-  test("plan declares interrogate → draft → eng-review, each main + one skill (D19)", () => {
+describe("S4 pilot — develop.plan is a 5-step phase (TASK_06)", () => {
+  test("plan declares evolve → interrogate → draft → eng-review → design-review, each main + one skill (D19)", () => {
     const plan = findPhase("develop", "plan");
-    assert.ok(plan.steps && plan.steps.length === 3, "plan must declare exactly 3 steps");
-    assert.deepEqual(plan.steps!.map((s) => s.id), ["interrogate", "draft", "eng-review"]);
-    assert.deepEqual(plan.steps!.map((s) => s.skill), ["kstack-grilling", "kstack-plan-draft", "kstack-plan-eng-review"]);
+    assert.ok(plan.steps && plan.steps.length === 5, "plan must declare exactly 5 steps");
+    assert.deepEqual(plan.steps!.map((s) => s.id), ["evolve", "interrogate", "draft", "eng-review", "design-review"]);
+    assert.deepEqual(plan.steps!.map((s) => s.skill), [
+      "kstack-idea-refine", "kstack-grilling", "kstack-plan-draft", "kstack-plan-eng-review", "kstack-plan-design-review",
+    ]);
     assert.ok(plan.steps!.every((s) => s.execution === "main"), "pilot steps are all main");
-    assert.equal(plan.advance, "manual", "the human gate still fires once — after step 3");
-    // Non-plan develop phases stay implicit (mixed interop is the point).
-    assert.ok(getWorkflow("develop")!.phases.filter((p) => p.id !== "plan").every((p) => !p.steps?.length),
-      "every other develop phase must remain implicit");
+    assert.equal(plan.advance, "manual", "the human gate still fires once — after step 5");
+    // S4: EVERY phase is stepped (INV-01) — implicit phases no longer exist.
+    assert.ok(getWorkflow("develop")!.phases.every((p) => (p.steps?.length ?? 0) > 0),
+      "every develop phase must be stepped");
   });
 });
 
@@ -2132,7 +2199,7 @@ describe("S3 step state machine — recordStepResult (TASK_03)", () => {
   };
 
   test("records results['phase.step'], bumps stepIndex, reports isLast", () => {
-    const s = { ...createState("develop", "g"), phaseIndex: 2, stepIndex: 0 };
+    const s = { ...createState("develop", "g"), phaseIndex: 1, stepIndex: 0 };
     const r = recordStepResult(s, STEP_PHASE, { status: "completed", summary: "did A" });
     assert.ok(r, "stepped phase must produce a record");
     assert.equal(r!.state.results["plan.a"]?.summary, "did A");
@@ -2148,7 +2215,7 @@ describe("S3 step state machine — recordStepResult (TASK_03)", () => {
     const phases = getWorkflow("develop")!.phases;
     const s: import("../orchestrator/types.ts").WorkflowState = {
       ...createState("develop", "g"),
-      phaseIndex: 2,
+      phaseIndex: 1,
       stepIndex: 2,
       results: {
         "plan.a": { status: "completed", summary: "a" },
@@ -2160,13 +2227,13 @@ describe("S3 step state machine — recordStepResult (TASK_03)", () => {
     const fin = advancePhase(r!.state, "plan", { status: "completed", summary: "did C" }, phases.length, { phases });
     assert.equal(fin.results["plan"]?.summary, "did C", "phase-level result = final step's summary");
     assert.equal(fin.stepIndex, undefined, "stepIndex is defined iff the CURRENT phase is stepped (INV-01)");
-    assert.equal(fin.phaseIndex, 3);
+    assert.equal(fin.phaseIndex, 2);
     // Per-step results persist for audit + {x.y_summary} interpolation.
     assert.equal(fin.results["plan.c"]?.summary, "did C");
   });
 
   test("a failed step pauses at the SAME stepIndex — resume re-delivers it", () => {
-    const s = { ...createState("develop", "g"), phaseIndex: 2, stepIndex: 1 };
+    const s = { ...createState("develop", "g"), phaseIndex: 1, stepIndex: 1 };
     const r = recordStepResult(s, STEP_PHASE, { status: "failed", summary: "b blew up" });
     assert.equal(r!.state.status, "paused");
     assert.equal(r!.state.stepIndex, 1, "failed step index must not move — the retry re-runs it");
@@ -2174,29 +2241,34 @@ describe("S3 step state machine — recordStepResult (TASK_03)", () => {
   });
 
   test("returns null for an implicit phase", () => {
-    const implicit = findPhase("develop", "understand");
+    // No implicit phases remain in current defs — exercise the guard on a fixture.
+    const implicit: WorkflowPhase = { id: "x", name: "X", execution: "main", optional: false };
     assert.equal(recordStepResult({ ...createState("develop", "g"), phaseIndex: 0 }, implicit, { status: "completed", summary: "x" }), null);
   });
 
   test("loop-back clears the target phase's stale step results", () => {
-    const phases = getWorkflow("sprint")!.phases.map((p) =>
-      p.id === "implement"
-        ? { ...p, steps: [{ id: "be", execution: "subagent" as const, agent: "backend-developer", task: "x" }] }
-        : p,
-    );
+    // The gate must be named "qa-browsing" — the id carries an EXPECTATIONS
+    // entry under "sprint" (status:[green]); a `red` verdict is negative and
+    // routes the loopBackTo edge. pendingVerdict stash is the legacy channel.
+    const phases: WorkflowPhase[] = [
+      { id: "implement", name: "Impl", execution: "main", optional: false, steps: [{ id: "be", execution: "subagent" as const, agent: "backend-developer", task: "x" }] },
+      { id: "pad", name: "Pad", execution: "main", optional: false, steps: [{ id: "s1", execution: "main" as const, task: "x" }] },
+      { id: "qa-browsing", name: "QA Gate", execution: "subagent", optional: false, loopBackTo: "implement", maxAttempts: 5 },
+    ];
     const state: import("../orchestrator/types.ts").WorkflowState = {
       ...createState("sprint", "g"),
-      phaseIndex: 8, // qa-verdict
+      phaseIndex: 2,
       sprintNumber: 1,
       results: {
         "implement.be": { status: "completed", summary: "attempt-1 code" },
         implement: { status: "completed", summary: "phase summary" },
+        "pad.s1": { status: "completed", summary: "pad attempt-1" },
       },
-      pendingVerdict: { phaseId: "qa-verdict", parsed: { verdicts: { status: "red" }, vars: {} } as any, excerpt: "" },
+      pendingVerdict: { phaseId: "qa-browsing", parsed: { verdicts: { status: "red" }, vars: {} } as any, excerpt: "" },
       stepIndex: 0,
     };
-    const next = advancePhase(state, "qa-verdict", { status: "completed", summary: "qa red" }, phases.length, { phases });
-    assert.equal(next.phaseIndex, 6, "red verdict loops back to implement");
+    const next = advancePhase(state, "qa-browsing", { status: "completed", summary: "qa red" }, phases.length, { phases });
+    assert.equal(next.phaseIndex, 0, "red verdict loops back to implement");
     assert.equal(next.results["implement.be"], undefined, "stale step results of the loop target must not leak into the retry");
     assert.equal(next.stepIndex, undefined);
   });
@@ -2205,7 +2277,7 @@ describe("S3 step state machine — recordStepResult (TASK_03)", () => {
     const phases: WorkflowPhase[] = [
       { id: "p-a", name: "A", execution: "main", optional: false, steps: [{ id: "s1", execution: "main", task: "x" }] },
       { id: "p-b", name: "B", execution: "main", optional: false, steps: [{ id: "s1", execution: "main", task: "x" }] },
-      { id: "qa-verdict", name: "Gate", execution: "subagent", optional: false, loopBackTo: "p-a", maxAttempts: 5 },
+      { id: "qa-browsing", name: "Gate", execution: "subagent", optional: false, loopBackTo: "p-a", maxAttempts: 5 },
     ];
     const state: import("../orchestrator/types.ts").WorkflowState = {
       ...createState("sprint", "g"),
@@ -2216,9 +2288,9 @@ describe("S3 step state machine — recordStepResult (TASK_03)", () => {
         "p-b.s1": { status: "completed", summary: "b attempt-1" },
         "p-a": { status: "completed", summary: "phase a" },
       },
-      pendingVerdict: { phaseId: "qa-verdict", parsed: { verdicts: { status: "red" }, vars: {} } as any, excerpt: "" },
+      pendingVerdict: { phaseId: "qa-browsing", parsed: { verdicts: { status: "red" }, vars: {} } as any, excerpt: "" },
     };
-    const next = advancePhase(state, "qa-verdict", { status: "completed", summary: "qa red" }, phases.length, { phases });
+    const next = advancePhase(state, "qa-browsing", { status: "completed", summary: "qa red" }, phases.length, { phases });
     assert.equal(next.phaseIndex, 0, "red verdict loops back to p-a");
     assert.equal(next.results["p-a.s1"], undefined, "the loop target's step keys must clear");
     assert.equal(next.results["p-b.s1"], undefined, "p-b re-runs too — its stale step keys must clear as well");
@@ -2330,92 +2402,100 @@ const lastState = (h: ReturnType<typeof fakeHarness>) => h.entries.filter((e: an
 describe("S3 executor — stepped dispatch (TASK_03)", () => {
 
   test("kstack_advance on a stepped phase records results['phase.step'] and hands the next step", async () => {
-    const state = { ...createState("develop", "g"), phaseIndex: 2, stepIndex: 0 };
+    const state = { ...createState("develop", "g"), phaseIndex: 1, stepIndex: 0 };
     const h = fakeHarness(state);
     initOrchestrator(h.pi);
+    // plan.evolve declares signal {artifact: "understand.md"} — the completion
+    // signal must be OBSERVED before the step may advance (TASK_02).
+    writeFileSync(path.join(h.ctx.cwd, "understand.md"), "# direction\n");
     const res = await h.tools.get("kstack_advance").execute("t", { summary: "frontier settled", status: "completed" }, undefined, undefined, h.ctx);
-    assert.ok(res.content[0].text.includes("draft"), "the tool result must name the next step");
+    assert.ok(res.content[0].text.includes("interrogate"), "the tool result must name the next step");
     const s = lastState(h);
     assert.equal(s.stepIndex, 1);
-    assert.equal(s.results["plan.interrogate"]?.summary, "frontier settled");
+    assert.equal(s.results["plan.evolve"]?.summary, "frontier settled");
     assert.equal(s.results["plan"], undefined, "phase result only at the LAST step");
     assert.equal(s.status, "active");
     // The next step's chain is fire-and-forget — wait for it to deliver step 2
     // exactly once and release the in-flight marker (also unblocks later tests:
-    // the in-flight registry is module-level and keyed on develop:2).
-    for (let i = 0; i < 200 && isPhaseInFlight("develop", 2); i++) await new Promise((r) => setTimeout(r, 10));
-    assert.ok(h.sent.some((m) => m.includes("Step 2/3") && m.includes("draft")), "step-2 instructions must be delivered exactly once");
+    // the in-flight registry is module-level and keyed on develop:1).
+    for (let i = 0; i < 200 && isPhaseInFlight("develop", 1); i++) await new Promise((r) => setTimeout(r, 10));
+    assert.ok(h.sent.some((m) => m.includes("Step 2/5") && m.includes("interrogate")), "step-2 instructions must be delivered exactly once");
   });
 
   test("final step advance records the phase result and parks at the manual gate ONCE", async () => {
     const state = {
       ...createState("develop", "g"),
-      phaseIndex: 2,
-      stepIndex: 2,
+      phaseIndex: 1,
+      stepIndex: 4,
       results: {
+        "plan.evolve": { status: "completed", summary: "evolved" },
         "plan.interrogate": { status: "completed", summary: "q&a" },
         "plan.draft": { status: "completed", summary: "drafted" },
+        "plan.eng-review": { status: "completed", summary: "eng ok" },
       },
     };
     const h = fakeHarness(state);
     initOrchestrator(h.pi);
-    releasePhaseInFlight("develop", 2); // in-flight registry is module-level — drop any stale marker
-    const res = await h.tools.get("kstack_advance").execute("t", { summary: "reviewed — PLAN FILE: .kstack/plans/x.md", status: "completed" }, undefined, undefined, h.ctx);
+    releasePhaseInFlight("develop", 1); // in-flight registry is module-level — drop any stale marker
+    // design-review declares signal {marker: "DESIGN-REVIEW-DONE"} — carried
+    // by the step's kstack-report record.
+    writeStepRecord(h.ctx.cwd, state, "plan", "design-review", { markers: ["DESIGN-REVIEW-DONE"] });
+    const res = await h.tools.get("kstack_advance").execute("t", { summary: "design reviewed — PLAN FILE: .kstack/plans/x.md", status: "completed" }, undefined, undefined, h.ctx);
     assert.ok(res.content[0].text.includes("decision phase") || res.content[0].text.includes("PAUSED"), "manual gate must park after the last step");
     const s = lastState(h);
-    assert.equal(s.status, "awaiting_approval", "one human gate after step 3");
-    assert.equal(s.results["plan.eng-review"]?.status, "completed");
+    assert.equal(s.status, "awaiting_approval", "one human gate after step 5");
+    assert.equal(s.results["plan.design-review"]?.status, "completed");
     assert.equal(s.results["plan"]?.status, "completed", "phase-level result recorded for {plan_summary} consumers");
     assert.equal(s.stepIndex, undefined);
-    assert.equal(s.phaseIndex, 3);
+    assert.equal(s.phaseIndex, 2);
   });
 
   test("kstack_phase re-fetches the CURRENT step's instructions (compaction guard)", async () => {
-    const state = { ...createState("develop", "g"), phaseIndex: 2, stepIndex: 1 };
+    const state = { ...createState("develop", "g"), phaseIndex: 1, stepIndex: 1 };
     const h = fakeHarness(state);
     initOrchestrator(h.pi);
     const res = await h.tools.get("kstack_phase").execute("t", {}, undefined, undefined, h.ctx);
-    assert.ok(res.content[0].text.includes("Step 2/3"), "step position must be named");
-    assert.ok(res.content[0].text.includes("draft"), "current step id must be named");
+    assert.ok(res.content[0].text.includes("Step 2/5"), "step position must be named");
+    assert.ok(res.content[0].text.includes("interrogate"), "current step id must be named");
   });
 
   test("executeCurrentPhase delivers step-0 instructions on entry and persists stepIndex=0", async () => {
     const h = fakeHarness(undefined);
-    const state = { ...createState("develop", "g"), phaseIndex: 2 };
+    const state = { ...createState("develop", "g"), phaseIndex: 1 };
     await executeCurrentPhase(h.pi, h.ctx, state as any);
     const persisted = h.entries.find((e) => e.data.stepIndex === 0);
     assert.ok(persisted, "INV-01: entering a stepped phase must persist stepIndex");
-    assert.ok(h.sent.some((m) => m.includes("Step 1/3") && m.includes("interrogate")), "step-1 instructions must be delivered");
+    assert.ok(h.sent.some((m) => m.includes("Step 1/5") && m.includes("evolve")), "step-1 instructions must be delivered");
   });
 
   test("mid-step resume re-delivers the CURRENT step (no result → re-deliver)", async () => {
     const h = fakeHarness(undefined);
     const state = {
       ...createState("develop", "g"),
-      phaseIndex: 2,
+      phaseIndex: 1,
       stepIndex: 1,
-      results: { "plan.interrogate": { status: "completed", summary: "done" } },
+      results: { "plan.evolve": { status: "completed", summary: "done" } },
     };
     await executeCurrentPhase(h.pi, h.ctx, state as any);
-    assert.ok(h.sent.some((m) => m.includes("Step 2/3") && m.includes("draft")), "restart must re-deliver step 2");
+    assert.ok(h.sent.some((m) => m.includes("Step 2/5") && m.includes("interrogate")), "restart must re-deliver step 2");
   });
 
   test("resume banner 'Completed:' lists phase keys only — a finished step is not a finished phase", () => {
     const state = {
       ...createState("develop", "g"),
-      phaseIndex: 2,
+      phaseIndex: 1,
       stepIndex: 1,
       results: {
-        understand: { status: "completed", summary: "scoped" },
-        "plan.interrogate": { status: "completed", summary: "q&a" },
+        explore: { status: "completed", summary: "scoped" },
+        "plan.evolve": { status: "completed", summary: "evolved" },
       },
     };
     const text = buildResumeContext(state as any);
-    assert.match(text, /Current step: draft \(2\/3\)/, "the step posture line names the current step");
+    assert.match(text, /Current step: interrogate \(2\/5\)/, "the step posture line names the current step");
     const completedLine = text.split("\n").find((l) => l.startsWith("Completed:"));
-    assert.ok(completedLine?.includes("understand"), "completed phases still listed");
+    assert.ok(completedLine?.includes("explore"), "completed phases still listed");
     assert.ok(
-      !completedLine!.includes("plan.interrogate"),
+      !completedLine!.includes("plan.evolve"),
       "dotted step keys must not render as completed phases (design: phase keys only — mirroring the prior-results filter in buildStepInstructions)",
     );
   });
@@ -2538,33 +2618,44 @@ describe("S3 executor — stepped dispatch (TASK_03)", () => {
 
 // --- S3: pre-flight gate configuration (TASK_05 / D20) ----------------------
 
-describe("S3 pre-flight gate inventory (TASK_05)", () => {
-  test("sprint yields one row per gated phase; subagent+manual dedupes to a single ⚠ entry row", () => {
+describe("S4 pre-flight gate inventory (TASK_05)", () => {
+  test("sprint: post-completion manual gates + enabled:auto optional rows", () => {
     const rows = gateInventory(getWorkflow("sprint")!);
     const byId = new Map(rows.map((r) => [r.phaseId, r]));
-    assert.deepEqual(rows.map((r) => r.phaseId), ["understand", "system-design", "architect-gate", "backlog", "commit-archive"]);
-    assert.equal(byId.get("architect-gate")!.kind, "entry");
-    assert.equal(byId.get("architect-gate")!.warning, true, "entry gates are marked ⚠");
-    assert.equal(byId.get("commit-archive")!.kind, "entry");
-    assert.equal(byId.get("understand")!.kind, "manual");
-    assert.equal(byId.get("system-design")!.kind, "manual");
-    assert.equal(byId.get("backlog")!.kind, "manual");
+    assert.deepEqual(
+      rows.map((r) => [r.phaseId, r.kind]),
+      [
+        ["understand", "manual"],
+        ["system-design", "manual"],
+        ["architect-gate", "manual"],
+        ["backlog", "manual"],
+        ["docker-review", "optional"],
+        ["pipeline-review", "optional"],
+      ],
+    );
     // Verdict gates are routing gates, not human gates — never rows.
-    assert.ok(!byId.has("implement") && !byId.has("devsecops-review") && !byId.has("qa-verdict"));
+    assert.ok(!byId.has("implement") && !byId.has("devsecops-review") && !byId.has("qa-browsing"));
+    // S4: side effects moved to step level — no phase-level entry rows in sprint.
+    assert.ok(!rows.some((r) => r.kind === "entry"), "sprint declares no sideEffect steps → no ⚠ entry rows");
   });
 
-  test("ship: push-pr excluded explicitly; optional phases produce optional rows", () => {
-    const rows = gateInventory(getWorkflow("ship")!);
-    assert.ok(!rows.some((r) => r.phaseId === "push-pr"), "push-pr must never be a pre-flight row");
-    assert.deepEqual(rows.map((r) => [r.phaseId, r.kind]), [["update-docs", "optional"]]);
+  test("review: enabled:auto optional + sideEffect-step ⚠ entry row (comment.post)", () => {
+    const rows = gateInventory(getWorkflow("review")!);
+    const byId = new Map(rows.map((r) => [r.phaseId, r]));
+    assert.deepEqual(
+      rows.map((r) => [r.phaseId, r.kind]),
+      [["qa-browsing", "optional"], ["comment", "entry"], ["fix", "optional"], ["retro", "optional"]],
+    );
+    assert.equal(byId.get("comment")!.warning, true, "sideEffect steps mark the row ⚠");
   });
 
-  test("develop: plan manual gate + three optional phases; quick is gate-free", () => {
+  test("develop: plan manual gate + four enabled:auto rows; discover/audit are gate-free", () => {
     assert.deepEqual(
       gateInventory(getWorkflow("develop")!).map((r) => [r.phaseId, r.kind]),
-      [["plan", "manual"], ["qa", "optional"], ["ship", "optional"], ["document", "optional"]],
+      [["plan", "manual"], ["qa-browsing", "optional"], ["document", "optional"], ["ship", "optional"], ["retro", "optional"]],
     );
-    assert.deepEqual(gateInventory(getWorkflow("quick")!), [], "gate-free workflow ⇒ no dialog");
+    assert.deepEqual(gateInventory(getWorkflow("discover")!), [], "gate-free workflow ⇒ no dialog");
+    assert.deepEqual(gateInventory(getWorkflow("audit")!), [], "gate-free workflow ⇒ no dialog");
   });
 
   test("env predicates mirror the gate sites — disabled machinery means no rows", () => {
@@ -2572,7 +2663,11 @@ describe("S3 pre-flight gate inventory (TASK_05)", () => {
     const saved = keys.map((k) => [k, process.env[k]] as const);
     try {
       process.env.KSTACK_PI_MANUAL_GATES = "off";
-      assert.deepEqual(gateInventory(getWorkflow("sprint")!), [], "manual gates off ⇒ no human gates can fire");
+      assert.deepEqual(
+        gateInventory(getWorkflow("sprint")!).map((r) => [r.phaseId, r.kind]),
+        [["docker-review", "optional"], ["pipeline-review", "optional"]],
+        "manual gates off ⇒ manual + entry rows suppressed; enabled:auto rows always surface",
+      );
       delete process.env.KSTACK_PI_MANUAL_GATES;
       process.env.KSTACK_PI_DETERMINISTIC = "off";
       assert.deepEqual(
@@ -2582,13 +2677,20 @@ describe("S3 pre-flight gate inventory (TASK_05)", () => {
           ["system-design", "manual"],
           ["architect-gate", "manual"],
           ["backlog", "manual"],
-          ["commit-archive", "manual"],
+          ["docker-review", "optional"],
+          ["pipeline-review", "optional"],
         ],
-        "entry gates can't fire without deterministic delegation, but the post-completion manual gate still does — degrade to a manual row, don't vanish",
+        "no subagent+manual phases remain — deterministic-off changes nothing",
       );
       delete process.env.KSTACK_PI_DETERMINISTIC;
+      // OPTIONAL_PHASES=skip decides LEGACY `optional` phases only — current
+      // defs use enabled:"auto" (engine-resolved), unaffected by that env.
       process.env.KSTACK_PI_OPTIONAL_PHASES = "skip";
-      assert.deepEqual(gateInventory(getWorkflow("ship")!), [], "env-skip already decided optional phases");
+      const legacyWf: import("../orchestrator/types.ts").Workflow = {
+        id: "s3-legacy-opt", name: "Legacy", description: "t", intents: [],
+        phases: [{ id: "maybe", name: "Maybe", execution: "main", optional: true }],
+      };
+      assert.deepEqual(gateInventory(legacyWf), [], "env-skip already decided legacy optional phases");
     } finally {
       for (const [k, v] of saved) {
         if (v === undefined) delete process.env[k]; else process.env[k] = v;
@@ -2598,43 +2700,60 @@ describe("S3 pre-flight gate inventory (TASK_05)", () => {
 });
 
 describe("S3 selection-gate consultation (TASK_05)", () => {
-  test("optional row override 'skip' auto-skips the phase; 'human' parks like ask mode", async () => {
-    const shipWf = getWorkflow("ship")!;
-    const lastIdx = shipWf.phases.length - 1; // update-docs — last phase, so skipping completes
-    assert.equal(shipWf.phases[lastIdx].id, "update-docs");
-    assert.ok(shipWf.phases[lastIdx].optional);
+  test("auto-row override 'skip' auto-skips the phase; 'auto' force-runs it", async () => {
+    // develop.retro is the last phase and enabled:"auto" — override resolution
+    // is deterministic (no human park): skip → skipped+completed, auto → runs.
+    const wf = getWorkflow("develop")!;
+    const lastIdx = wf.phases.length - 1;
+    assert.equal(wf.phases[lastIdx].id, "retro");
+    assert.equal(wf.phases[lastIdx].enabled, "auto");
 
-    const skipped = { ...createState("ship", "g"), phaseIndex: lastIdx, gateMode: "selection-gate" as const, gateOverrides: { "update-docs": "skip" as const } };
+    const skipped = { ...createState("develop", "g"), phaseIndex: lastIdx, gateMode: "selection-gate" as const, gateOverrides: { retro: "skip" as const } };
     const h1 = fakeHarness(skipped);
     await executeCurrentPhase(h1.pi, h1.ctx, skipped as any);
     const s1 = lastState(h1);
-    assert.equal(s1.results["update-docs"]?.status, "skipped", "override skip must auto-skip");
+    assert.equal(s1.results["retro"]?.status, "skipped", "override skip must auto-skip");
     assert.equal(s1.status, "completed", "skipping the last phase completes the workflow");
+  });
 
-    const human = { ...createState("ship", "g"), phaseIndex: lastIdx, gateMode: "selection-gate" as const, gateOverrides: { "update-docs": "human" as const } };
-    const h2 = fakeHarness(human);
-    await executeCurrentPhase(h2.pi, h2.ctx, human as any);
-    const s2 = lastState(h2);
-    assert.equal(s2.status, "awaiting_approval", "override human parks exactly like ask mode");
-    assert.equal(s2.pendingOptional, true);
+  test("auto-row 'human'/absent lets the engine decide — autoWhen resolves at arrival", async () => {
+    // investigate.regression-qa's autoWhen reads ctx.git.hasUncommittedChanges.
+    // fakeHarness git defaults are absent → the ctx in the executor resolves
+    // through detectGitContext against the real cwd; an enabled:auto phase
+    // with autoWhen→false skips deterministically, no park.
+    const wf = getWorkflow("investigate")!;
+    const idx = wf.phases.findIndex((p) => p.id === "regression-qa");
+    const state = { ...createState("investigate", "g"), phaseIndex: idx, gateMode: "selection-gate" as const, gateOverrides: { "regression-qa": "auto" as const } };
+    const h = fakeHarness(state);
+    await executeCurrentPhase(h.pi, h.ctx, state as any, { spawnFn: async () => ({ ok: true, output: "done", durationMs: 1 }) as any });
+    const s = lastState(h);
+    assert.notEqual(s.results["regression-qa"]?.status, "skipped", "override auto must force-run the auto phase");
   });
 
   test("human-gate mode ignores gateOverrides entirely (status quo)", async () => {
-    const shipWf = getWorkflow("ship")!;
-    const lastIdx = shipWf.phases.length - 1;
-    const state = { ...createState("ship", "g"), phaseIndex: lastIdx, gateMode: "human-gate" as const, gateOverrides: { "update-docs": "skip" as const } };
+    const wf = getWorkflow("develop")!;
+    const lastIdx = wf.phases.length - 1;
+    const state = { ...createState("develop", "g"), phaseIndex: lastIdx, gateMode: "human-gate" as const, gateOverrides: { retro: "skip" as const } };
     const h = fakeHarness(state);
     await executeCurrentPhase(h.pi, h.ctx, state as any);
     const s = lastState(h);
-    assert.equal(s.status, "awaiting_approval", "human-gate mode never consults overrides");
+    assert.notEqual(s.results["retro"]?.status, "skipped", "human-gate mode never consults overrides — the phase runs");
   });
 
   test("manual row override 'auto' skips the post-completion park; 'human' parks", async () => {
-    // sprint.understand is main+manual; the next phase (user-story) is main — no spawn needed.
+    // sprint.understand is main+manual + STEPPED — sit on its last step with
+    // the earlier step result seeded and the completion record written.
     for (const [override, parked] of [["auto", false], ["human", true]] as const) {
-      const state = { ...createState("sprint", "g"), phaseIndex: 0, sprintNumber: 7, gateMode: "selection-gate" as const, gateOverrides: { understand: override } };
+      const state = {
+        ...createState("sprint", "g"),
+        phaseIndex: 1, stepIndex: 1, sprintNumber: 7,
+        gateMode: "selection-gate" as const,
+        gateOverrides: { understand: override },
+        results: { "understand.evolve": { status: "completed" as const, summary: "evolved" } },
+      };
       const h = fakeHarness(state);
       initOrchestrator(h.pi);
+      writeStepRecord(h.ctx.cwd, state, "understand", "interrogate", { markers: ["INTERROGATE-DONE"] });
       const res = await h.tools.get("kstack_advance").execute("t", { summary: "understood", status: "completed" }, undefined, undefined, h.ctx);
       const s = lastState(h);
       if (parked) {
@@ -2642,18 +2761,25 @@ describe("S3 selection-gate consultation (TASK_05)", () => {
         assert.ok(res.content[0].text.includes("decision phase") || res.content[0].text.includes("PAUSED"));
       } else {
         assert.equal(s.status, "active", "override auto must skip the manual park");
-        assert.equal(s.phaseIndex, 1);
+        assert.equal(s.phaseIndex, 2);
         assert.ok(res.content[0].text.includes("Advancing to"));
       }
-      for (let i = 0; i < 200 && isPhaseInFlight("sprint", 1); i++) await new Promise((r) => setTimeout(r, 10));
-      releasePhaseInFlight("sprint", 1);
+      for (let i = 0; i < 200 && isPhaseInFlight("sprint", 2); i++) await new Promise((r) => setTimeout(r, 10));
+      releasePhaseInFlight("sprint", 2);
     }
   });
 
   test("selection-gate 'auto' on a manual gate is audited — kind:'gate' decision:'auto' lands in the ledger", async () => {
-    const state = { ...createState("sprint", "g"), phaseIndex: 0, sprintNumber: 7, gateMode: "selection-gate" as const, gateOverrides: { understand: "auto" as const } };
+    const state = {
+      ...createState("sprint", "g"),
+      phaseIndex: 1, stepIndex: 1, sprintNumber: 7,
+      gateMode: "selection-gate" as const,
+      gateOverrides: { understand: "auto" as const },
+      results: { "understand.evolve": { status: "completed" as const, summary: "evolved" } },
+    };
     const h = fakeHarness(state);
     initOrchestrator(h.pi);
+    writeStepRecord(h.ctx.cwd, state, "understand", "interrogate", { markers: ["INTERROGATE-DONE"] });
     await h.tools.get("kstack_advance").execute("t", { summary: "understood", status: "completed" }, undefined, undefined, h.ctx);
     const s = lastState(h);
     assert.equal(s.status, "active", "auto still skips the park");
@@ -2662,34 +2788,36 @@ describe("S3 selection-gate consultation (TASK_05)", () => {
       entries.some((e) => e.kind === "gate" && e.payload.gateId === "understand" && e.payload.decision === "auto"),
       "an auto-suppressed manual gate must be audited under the phase id (gateId↔phaseId join)",
     );
-    for (let i = 0; i < 200 && isPhaseInFlight("sprint", 1); i++) await new Promise((r) => setTimeout(r, 10));
-    releasePhaseInFlight("sprint", 1);
+    for (let i = 0; i < 200 && isPhaseInFlight("sprint", 2); i++) await new Promise((r) => setTimeout(r, 10));
+    releasePhaseInFlight("sprint", 2);
   });
 
-  test("entry row override 'auto' runs the side-effect phase without the entry park", async () => {
-    // sprint.commit-archive is subagent+manual — its entry gate parks BEFORE the delegation.
-    const wf = getWorkflow("sprint")!;
-    const idx = wf.phases.findIndex((p) => p.id === "commit-archive");
+  test("sideEffect-step override 'auto' runs the delegated step without the entry park", async () => {
+    // develop.ship: enabled:"auto" + delegated sideEffect step. "auto" on the
+    // phase row force-runs the phase AND pre-approves the step's side effect.
+    const wf = getWorkflow("develop")!;
+    const idx = wf.phases.findIndex((p) => p.id === "ship");
     assert.ok(idx >= 0);
     let spawned = 0;
-    const state = { ...createState("sprint", "g"), phaseIndex: idx, sprintNumber: 7, gateMode: "selection-gate" as const, gateOverrides: { "commit-archive": "auto" as const } };
+    const state = { ...createState("develop", "g"), phaseIndex: idx, gateMode: "selection-gate" as const, gateOverrides: { ship: "auto" as const } };
     const h = fakeHarness(state);
     await executeCurrentPhase(h.pi, h.ctx, state as any, {
-      spawnFn: async () => { spawned++; return { ok: true, output: "archived", exitCode: 0, durationMs: 1 } as any; },
+      spawnFn: async () => { spawned++; return { ok: true, output: "shipped", exitCode: 0, durationMs: 1 } as any; },
     } as any);
-    assert.equal(spawned, 1, "override auto must run the entry-gated phase directly");
+    assert.equal(spawned, 1, "override auto must run the side-effect step directly");
     assert.equal(lastState(h).entryGate, undefined, "no entry park recorded");
 
-    const human = { ...createState("sprint", "g"), phaseIndex: idx, sprintNumber: 7, gateMode: "selection-gate" as const, gateOverrides: { "commit-archive": "human" as const } };
+    // "human" runs the phase but parks AT the side-effect step (entry gate).
+    const human = { ...createState("develop", "g"), phaseIndex: idx, gateMode: "selection-gate" as const, gateOverrides: { ship: "human" as const } };
     const h2 = fakeHarness(human);
     await executeCurrentPhase(h2.pi, h2.ctx, human as any);
-    assert.equal(lastState(h2).entryGate, true, "override human parks at entry exactly as today");
+    assert.equal(lastState(h2).entryGate, true, "no-auto override ⇒ the side-effect step parks at entry");
   });
 });
 
-describe("S3 gate-configure dialog (TASK_05)", () => {
+describe("S4 gate-configure dialog (TASK_05)", () => {
   test("component maps rows to overrides; entry/manual rows never offer skip (INV-05)", async () => {
-    const rows = gateInventory(getWorkflow("develop")!); // plan manual + qa/ship/document optional
+    const rows = gateInventory(getWorkflow("develop")!); // plan manual + qa-browsing/document/ship/retro auto
     let captured: any;
     const resultPromise = configureGates(rows, {
       ui: {
@@ -2705,7 +2833,7 @@ describe("S3 gate-configure dialog (TASK_05)", () => {
     const items = (captured as any).items as Array<{ id: string; values?: string[] }>;
     const planRow = items.find((i) => i.id === "plan")!;
     assert.ok(!planRow.values!.includes("skip"), "manual rows must not offer skip");
-    const qaRow = items.find((i) => i.id === "qa")!;
+    const qaRow = items.find((i) => i.id === "qa-browsing")!;
     assert.ok(qaRow.values!.includes("skip"), "optional rows offer skip");
     const modeRow = items.find((i) => i.id === "__mode__")!;
     assert.ok(modeRow.values!.includes("selection-gate") && modeRow.values!.includes("human-gate"));
@@ -2725,7 +2853,7 @@ describe("S3 gate-configure dialog (TASK_05)", () => {
     return { captured, resultPromise };
   }
 
-  // develop rows: [__mode__, plan, qa, ship, document, __done__]
+  // develop rows: [__mode__, plan, qa-browsing, document, ship, retro, __done__]
   const DOWN = "\x1b[B";
   const ENTER = "\r";
 
@@ -2744,25 +2872,27 @@ describe("S3 gate-configure dialog (TASK_05)", () => {
     const { captured, resultPromise } = captureDialog(gateInventory(getWorkflow("develop")!));
     captured.handleInput(ENTER); // __mode__ cycles human-gate → selection-gate
     captured.handleInput(DOWN); // plan
-    captured.handleInput(DOWN); // qa
-    captured.handleInput(ENTER); // qa cycles human → auto
-    captured.handleInput(DOWN); // ship
+    captured.handleInput(DOWN); // qa-browsing
+    captured.handleInput(ENTER); // qa-browsing cycles human → auto
     captured.handleInput(DOWN); // document
+    captured.handleInput(DOWN); // ship
+    captured.handleInput(DOWN); // retro
     captured.handleInput(DOWN); // __done__
     captured.handleInput(ENTER); // submit
     assert.deepEqual(await resultPromise, {
       gateMode: "selection-gate",
-      gateOverrides: { qa: "auto" },
+      gateOverrides: { "qa-browsing": "auto" },
     });
   });
 
   test("entry rows render the ⚠ marker and default to 'human' (D20)", async () => {
-    const { captured, resultPromise } = captureDialog(gateInventory(getWorkflow("sprint")!));
+    // review.comment carries the sideEffect step → the only ⚠ entry row in defs.
+    const { captured, resultPromise } = captureDialog(gateInventory(getWorkflow("review")!));
     const items = (captured as any).items as Array<{ id: string; label: string; currentValue: string }>;
-    const entry = items.find((i) => i.id === "architect-gate")!;
+    const entry = items.find((i) => i.id === "comment")!;
     assert.ok(entry.label.includes("⚠"), "side-effect entry gates must render the ⚠ marker, not just carry a data flag");
     assert.equal(entry.currentValue, "human", "entry gates default to human");
-    assert.ok(!items.find((i) => i.id === "understand")!.label.includes("⚠"), "non-entry rows carry no ⚠");
+    assert.ok(!items.find((i) => i.id === "qa-browsing")!.label.includes("⚠"), "non-entry rows carry no ⚠");
     captured.handleInput("\x1b");
     await resultPromise;
   });
@@ -2770,10 +2900,11 @@ describe("S3 gate-configure dialog (TASK_05)", () => {
   test("human-gate submit drops per-gate choices — they are inert state under human-gate semantics", async () => {
     const { captured, resultPromise } = captureDialog(gateInventory(getWorkflow("develop")!));
     captured.handleInput(DOWN); // plan
-    captured.handleInput(DOWN); // qa
-    captured.handleInput(ENTER); // qa → auto (but mode stays human-gate)
-    captured.handleInput(DOWN); // ship
+    captured.handleInput(DOWN); // qa-browsing
+    captured.handleInput(ENTER); // qa-browsing → auto (but mode stays human-gate)
     captured.handleInput(DOWN); // document
+    captured.handleInput(DOWN); // ship
+    captured.handleInput(DOWN); // retro
     captured.handleInput(DOWN); // __done__
     captured.handleInput(ENTER); // submit
     assert.deepEqual(await resultPromise, { gateMode: "human-gate", gateOverrides: {} });
@@ -2788,10 +2919,11 @@ describe("S3 append-only ledger (TASK_07)", () => {
   test("a step completion writes one verbatim kind:'step' entry under .kstack/ledger", async () => {
     const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-ledger-"));
     try {
-      const state = { ...createState("develop", "g"), phaseIndex: 2, stepIndex: 0 };
+      const state = { ...createState("develop", "g"), phaseIndex: 1, stepIndex: 0 };
       const h = fakeHarness(state);
       h.ctx.cwd = cwd;
       initOrchestrator(h.pi);
+      writeFileSync(path.join(cwd, "understand.md"), "# direction\n"); // plan.evolve artifact signal
       const res = await h.tools.get("kstack_advance").execute("t", { summary: "frontier settled", status: "completed" }, undefined, undefined, h.ctx);
       assert.ok(!res.isError);
       const dir = path.join(cwd, ".kstack", "ledger");
@@ -2803,13 +2935,13 @@ describe("S3 append-only ledger (TASK_07)", () => {
       assert.ok(step, "a step completion must be ledgered");
       assert.equal(step.workflowId, "develop");
       assert.equal(step.phaseId, "plan");
-      assert.equal(step.stepId, "interrogate");
+      assert.equal(step.stepId, "evolve");
       assert.equal(step.payload.summary, "frontier settled", "INV-L2: summary verbatim");
       assert.ok(typeof step.at === "string" && step.at.includes("T"), "ISO-8601 timestamp");
-      for (let i = 0; i < 200 && isPhaseInFlight("develop", 2); i++) await new Promise((r) => setTimeout(r, 10));
-      releasePhaseInFlight("develop", 2);
+      for (let i = 0; i < 200 && isPhaseInFlight("develop", 1); i++) await new Promise((r) => setTimeout(r, 10));
+      releasePhaseInFlight("develop", 1);
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     }
   });
 
@@ -2828,7 +2960,7 @@ describe("S3 append-only ledger (TASK_07)", () => {
       appendLedger(cwd, state, { kind: "phase", phaseId: "plan", payload: { summary: "done" } });
       assert.equal(readFileSync(file, "utf-8").trim().split("\n").length, 3);
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     }
   });
 
@@ -2843,43 +2975,55 @@ describe("S3 append-only ledger (TASK_07)", () => {
       assert.equal(ok, false);
       assert.ok(errors.length === 1 && /ledger/i.test(errors[0]), "failure surfaced once, as a warning");
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     }
   });
 
   test("gate decisions land as kind:'gate' entries with their decision", async () => {
     const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-ledger-"));
     try {
-      // develop.qa is optional + NOT last: the ask-mode park writes a human gate entry.
-      const wf = getWorkflow("develop")!;
-      const idx = wf.phases.findIndex((p) => p.id === "qa");
-      assert.ok(idx >= 0 && wf.phases[idx].optional && idx < wf.phases.length - 1);
-      const state = { ...createState("develop", "g"), phaseIndex: idx };
-      const h = fakeHarness(state);
-      h.ctx.cwd = cwd;
-      await executeCurrentPhase(h.pi, h.ctx, state as any);
-      const s = lastState(h);
-      assert.equal(s.status, "awaiting_approval");
-      const entries = readLedger(cwd, state);
-      const gate = entries.find((e) => e.kind === "gate" && e.phaseId === "qa");
-      assert.ok(gate, "the optional-phase park is a recorded gate decision");
-      assert.equal(gate.payload.gateId, "qa");
-      assert.equal(gate.payload.decision, "human");
+      // Current defs use enabled:"auto" (engine-resolved, no park) — the
+      // ask-mode optional park survives as LEGACY machinery on `optional:true`.
+      // Fixture: optional + NOT last so skipping doesn't end the workflow.
+      const wf: import("../orchestrator/types.ts").Workflow = {
+        id: "s3-opt-ledger-test", name: "OptTest", description: "t", intents: [],
+        phases: [
+          { id: "maybe", name: "Maybe", execution: "main", optional: true },
+          { id: "tail", name: "Tail", execution: "main", optional: false },
+        ],
+      };
+      getAllWorkflows().push(wf);
+      try {
+        const state = { ...createState("s3-opt-ledger-test", "g"), phaseIndex: 0 };
+        const h = fakeHarness(state);
+        h.ctx.cwd = cwd;
+        await executeCurrentPhase(h.pi, h.ctx, state as any);
+        const s = lastState(h);
+        assert.equal(s.status, "awaiting_approval");
+        const entries = readLedger(cwd, state);
+        const gate = entries.find((e) => e.kind === "gate" && e.phaseId === "maybe");
+        assert.ok(gate, "the optional-phase park is a recorded gate decision");
+        assert.equal(gate.payload.gateId, "maybe");
+        assert.equal(gate.payload.decision, "human");
+      } finally {
+        const i = getAllWorkflows().indexOf(wf);
+        if (i >= 0) getAllWorkflows().splice(i, 1);
+      }
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     }
   });
 
   test("resume-gate: re-delivering the LAST step with a missing artifact adds a note", async () => {
     const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-ledger-"));
     try {
-      // qa-verdict is a sprint phase with a real artifact contract
+      // qa-browsing is a sprint phase with a real artifact contract
       // (qaArtifactPath); give a synthetic workflow a stepped phase reusing
       // that id so phaseArtifactPaths resolves.
       const wf: import("../orchestrator/types.ts").Workflow = {
         id: "s3-resumegate-test", name: "ResumeGate", description: "t", intents: [],
         phases: [{
-          id: "qa-verdict", name: "QA Verdict", execution: "main", optional: false,
+          id: "qa-browsing", name: "QA Browsing", execution: "main", optional: false,
           steps: [
             { id: "run", execution: "main", task: "## DELIVERABLE\nRun." },
             { id: "report", execution: "main", task: "## DELIVERABLE\nReport." },
@@ -2893,7 +3037,7 @@ describe("S3 append-only ledger (TASK_07)", () => {
           phaseIndex: 0,
           sprintNumber: 3,
           stepIndex: 1, // LAST step — the resume-gate applies here only
-          results: { "qa-verdict.run": { status: "completed" as const, summary: "ran" } },
+          results: { "qa-browsing.run": { status: "completed" as const, summary: "ran" } },
         };
         const h = fakeHarness(state);
         h.ctx.cwd = cwd;
@@ -2905,7 +3049,7 @@ describe("S3 append-only ledger (TASK_07)", () => {
         if (i >= 0) getAllWorkflows().splice(i, 1);
       }
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     }
   });
 
@@ -2944,7 +3088,7 @@ describe("S3 append-only ledger (TASK_07)", () => {
       assert.ok(errors.length === 1 && /symlink/i.test(errors[0]), "the refusal names the cause");
       assert.equal(existsSync(outside), false, "nothing may be written through the link");
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     }
   });
 
@@ -2962,7 +3106,7 @@ describe("S3 append-only ledger (TASK_07)", () => {
       const gi2 = readFileSync(path.join(cwd, ".gitignore"), "utf-8");
       assert.equal(gi2.split("\n").filter((l) => l.trim() === ".kstack/ledger/").length, 1);
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     }
   });
 });
@@ -3191,7 +3335,7 @@ describe("S3 stuck/budget wiring (TASK_08)", () => {
   });
 
   test("main-step events feed the detector while a stepped phase is active", async () => {
-    const state = { ...createState("develop", "g"), phaseIndex: 2, stepIndex: 0 };
+    const state = { ...createState("develop", "g"), phaseIndex: 1, stepIndex: 0 };
     const h = fakeHarness(state);
     initOrchestrator(h.pi);
     // Deliver step 1 (main) — the watch begins at instruction delivery.
@@ -3205,29 +3349,41 @@ describe("S3 stuck/budget wiring (TASK_08)", () => {
     }
     const s = lastState(h);
     assert.equal(s.status, "paused");
-    assert.match(s.pausedReason ?? "", /^stuck:identical-action:plan\.interrogate$/, `pausedReason was ${s.pausedReason}`);
+    assert.match(s.pausedReason ?? "", /^stuck:identical-action:plan\.evolve$/, `pausedReason was ${s.pausedReason}`);
   });
 
   test("the detector is inert on implicit-step phases (no watch is started)", async () => {
-    const state = { ...createState("develop", "g"), phaseIndex: 0 }; // understand — implicit
-    const h = fakeHarness(state);
-    initOrchestrator(h.pi);
-    await executeCurrentPhase(h.pi, h.ctx, state as any);
-    const toolStartH = h.handlers.get("tool_execution_start");
-    const toolEndH = h.handlers.get("tool_execution_end");
-    if (toolStartH && toolEndH) {
-      for (let i = 0; i < 5; i++) {
-        await toolStartH({ type: "tool_execution_start", toolCallId: `c${i}`, toolName: "read", args: { file_path: "x.ts" } }, h.ctx);
-        await toolEndH({ type: "tool_execution_end", toolCallId: `c${i}`, toolName: "read", result: { content: [] }, isError: false }, h.ctx);
+    // S4: every def phase is stepped — exercise the implicit-phase guard on a
+    // fixture without steps[] (legacy compat path).
+    const wf: import("../orchestrator/types.ts").Workflow = {
+      id: "s3-implicit-test", name: "Implicit", description: "t", intents: [],
+      phases: [{ id: "plain", name: "Plain", execution: "main", optional: false, task: "## DELIVERABLE\nx" }],
+    };
+    getAllWorkflows().push(wf);
+    try {
+      const state = { ...createState("s3-implicit-test", "g"), phaseIndex: 0 };
+      const h = fakeHarness(state);
+      initOrchestrator(h.pi);
+      await executeCurrentPhase(h.pi, h.ctx, state as any);
+      const toolStartH = h.handlers.get("tool_execution_start");
+      const toolEndH = h.handlers.get("tool_execution_end");
+      if (toolStartH && toolEndH) {
+        for (let i = 0; i < 5; i++) {
+          await toolStartH({ type: "tool_execution_start", toolCallId: `c${i}`, toolName: "read", args: { file_path: "x.ts" } }, h.ctx);
+          await toolEndH({ type: "tool_execution_end", toolCallId: `c${i}`, toolName: "read", result: { content: [] }, isError: false }, h.ctx);
+        }
       }
+      assert.notEqual(lastState(h).status, "paused", "implicit phases carry no step watch — nothing trips");
+    } finally {
+      const i = getAllWorkflows().indexOf(wf);
+      if (i >= 0) getAllWorkflows().splice(i, 1);
     }
-    assert.notEqual(lastState(h).status, "paused", "implicit phases carry no step watch — nothing trips");
   });
 });
 
-// --- TASK_10: develop.plan pilot acceptance — the full 3-step run -------------
+// --- TASK_10: develop.plan pilot acceptance — the full 5-step run -------------
 
-describe("S3 acceptance — develop.plan three-step run (TASK_10)", () => {
+describe("S4 acceptance — develop.plan five-step run (TASK_10)", () => {
   const waitFor = async (cond: () => boolean) => {
     for (let i = 0; i < 200 && !cond(); i++) await new Promise((r) => setTimeout(r, 10));
     assert.ok(cond(), "timed out waiting for the fire-and-forget chain");
@@ -3235,7 +3391,7 @@ describe("S3 acceptance — develop.plan three-step run (TASK_10)", () => {
   const delivered = (h: ReturnType<typeof fakeHarness>, marker: string) =>
     h.sent.some((m) => m.includes(marker));
 
-  test("interrogate → draft → eng-review run end-to-end: skills, steps, ledger, single human gate", async () => {
+  test("evolve → interrogate → draft → eng-review → design-review run end-to-end: skills, steps, ledger, single human gate", async () => {
     const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-accept-"));
     try {
       const wf = getWorkflow("develop")!;
@@ -3246,53 +3402,79 @@ describe("S3 acceptance — develop.plan three-step run (TASK_10)", () => {
       h.ctx.cwd = cwd;
       initOrchestrator(h.pi);
 
-      // Entry: step 1/3 delivers with the FULL kstack-grilling skill.
+      // Entry: step 1/5 delivers with the FULL kstack-idea-refine skill.
       await executeCurrentPhase(h.pi, h.ctx, state as any);
-      assert.ok(delivered(h, "Step 1/3") && delivered(h, "interrogate"), "step 1 instructions delivered");
-      assert.ok(delivered(h, "#### Skill gate: kstack-grilling"), "s1 must carry its own skill");
+      assert.ok(delivered(h, "Step 1/5") && delivered(h, "evolve"), "step 1 instructions delivered");
+      assert.ok(delivered(h, "#### Skill gate: kstack-idea-refine"), "s1 must carry its own skill");
       assert.equal(lastState(h).stepIndex, 0);
 
       const advance = (summary: string) =>
         h.tools.get("kstack_advance").execute("t2", { summary, status: "completed" }, undefined, undefined, h.ctx);
+      // TASK_02: every step declares a completion signal — artifact files land
+      // at repo root, marker records land in .kstack/runs/<runId>/.
+      const mark = (stepId: string, marker: string) =>
+        writeStepRecord(cwd, state, "plan", stepId, { markers: [marker] });
 
-      // Step 1 done → step 2 delivered with the FULL kstack-plan-draft skill.
-      let res = await advance("frontier settled");
+      // Step 1 done (artifact signal: understand.md) → step 2 delivered with
+      // the FULL kstack-grilling skill.
+      writeFileSync(path.join(cwd, "understand.md"), "# direction\n");
+      let res = await advance("idea evolved");
       assert.ok(!res.isError);
-      await waitFor(() => delivered(h, "Step 2/3"));
-      assert.ok(delivered(h, "#### Skill gate: kstack-plan-draft"), "s2 must carry its own skill");
+      await waitFor(() => delivered(h, "Step 2/5"));
+      assert.ok(delivered(h, "#### Skill gate: kstack-grilling"), "s2 must carry its own skill");
       assert.equal(lastState(h).stepIndex, 1);
-      assert.equal(lastState(h).results["plan.interrogate"]?.summary, "frontier settled");
+      assert.equal(lastState(h).results["plan.evolve"]?.summary, "idea evolved");
 
       // Restart mid-step: a fresh executor pass on the same state re-delivers
-      // the CURRENT step (stepIndex unchanged, no result recorded for draft).
+      // the CURRENT step (stepIndex unchanged, no result recorded for it).
       h.sent.length = 0;
       await executeCurrentPhase(h.pi, h.ctx, lastState(h) as any);
-      assert.ok(delivered(h, "Step 2/3"), "mid-step resume re-delivers step 2");
+      assert.ok(delivered(h, "Step 2/5"), "mid-step resume re-delivers step 2");
 
-      // Step 2 done → step 3 delivered with kstack-plan-eng-review.
-      res = await advance("plan written to .kstack/plans/accept.md");
+      // Steps 2→3→4 chain through draft + eng-review.
+      mark("interrogate", "INTERROGATE-DONE");
+      res = await advance("frontier settled");
       assert.ok(!res.isError);
-      await waitFor(() => delivered(h, "Step 3/3"));
-      assert.ok(delivered(h, "#### Skill gate: kstack-plan-eng-review"), "s3 must carry its own skill");
+      await waitFor(() => delivered(h, "Step 3/5"));
+      assert.ok(delivered(h, "#### Skill gate: kstack-plan-draft"), "s3 must carry its own skill");
       assert.equal(lastState(h).stepIndex, 2);
 
-      // Step 3 done → phase completes, human gate parks ONCE, ledger holds
-      // step×3 + phase + gate entries for the run.
-      res = await advance("reviewed — PLAN FILE: .kstack/plans/accept.md");
+      writeFileSync(path.join(cwd, "plan.md"), "# plan\n"); // draft artifact signal
+      res = await advance("plan written to .kstack/plans/accept.md");
+      assert.ok(!res.isError);
+      await waitFor(() => delivered(h, "Step 4/5"));
+      assert.ok(delivered(h, "#### Skill gate: kstack-plan-eng-review"), "s4 must carry its own skill");
+      assert.equal(lastState(h).stepIndex, 3);
+
+      mark("eng-review", "ENG-REVIEW-DONE");
+      res = await advance("engineering review clean");
+      assert.ok(!res.isError);
+      await waitFor(() => delivered(h, "Step 5/5"));
+      assert.ok(delivered(h, "#### Skill gate: kstack-plan-design-review"), "s5 must carry its own skill");
+      assert.equal(lastState(h).stepIndex, 4);
+
+      // Step 5 done → phase completes, human gate parks ONCE, ledger holds
+      // step×5 + phase + gate entries for the run.
+      mark("design-review", "DESIGN-REVIEW-DONE");
+      res = await advance("design reviewed — PLAN FILE: .kstack/plans/accept.md");
       const s = lastState(h);
-      assert.equal(s.status, "awaiting_approval", "the manual gate parks once after step 3");
+      assert.equal(s.status, "awaiting_approval", "the manual gate parks once after step 5");
       assert.equal(s.results["plan"]?.status, "completed");
       assert.equal(s.stepIndex, undefined);
-      assert.equal(s.version, 4);
+      assert.equal(s.version, 5);
 
       const entries = readLedger(cwd, s);
       const steps = entries.filter((e) => e.kind === "step" && e.phaseId === "plan");
-      assert.deepEqual(steps.map((e) => e.stepId), ["interrogate", "draft", "eng-review"], "one ledger step entry per step, verbatim");
+      assert.deepEqual(
+        steps.map((e) => e.stepId),
+        ["evolve", "interrogate", "draft", "eng-review", "design-review"],
+        "one ledger step entry per step, verbatim",
+      );
       assert.ok(entries.some((e) => e.kind === "phase" && e.phaseId === "plan"), "phase roll-up ledgered");
       assert.ok(entries.some((e) => e.kind === "gate" && e.payload.decision === "human"), "human gate decision ledgered");
       releasePhaseInFlight("develop", planIdx);
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     }
   });
 });

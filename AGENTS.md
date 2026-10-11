@@ -1,8 +1,9 @@
 ## Working rules — kstack-devin port
 
-- **No building without explicit consent.** We are still in the design phase:
-  discuss, plan, and detail first. Do not scaffold or write implementation code
-  until the user explicitly approves a plan.
+- **No building without explicit consent.** Standing rule: discuss, plan,
+  and detail first — no implementation until the user approves a plan.
+  For S4 the consent was given (sprint run on `task/s4-workflow-migration`;
+  approved plan = `tasks.md` backlog + `system-design_01.md` §10).
 - **Skill strategy (decided)**: Devin activates one skill at a time. If multiple
   skills are needed simultaneously, merge them into one; when sequential is
   enough, switch between skills instead.

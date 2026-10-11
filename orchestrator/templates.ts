@@ -1,6 +1,7 @@
 import type { WorkflowPhase, WorkflowContext, Workflow, WorkflowStep } from "./types.ts";
 import { getWorkflow } from "./workflows.ts";
 import { loadSkillFull, loadSkillGate, getSkillInfo } from "./skills.ts";
+import { reportCliPath } from "./records.ts";
 import { skillsEnabled, manualGates, deterministicSubagents } from "./config.ts";
 import { replaceExact } from "./text.ts";
 import { extractHandoff } from "./handoff.ts";
@@ -38,7 +39,16 @@ export const MASTER_DOD = `## SPRINT DEFINITION OF DONE (every box mandatory)
 - [ ] Conventional Commits only (feat:, fix:, docs:, …)
 - [ ] Strict task branching: all code lives in an isolated task/<slug> branch; never mix tasks in one branch`;
 
-const SPRINT_EXECUTION_PHASES = new Set(["implement", "devsecops-review", "qa-verdict", "commit-archive"]);
+const SPRINT_EXECUTION_PHASES = new Set(["implement", "devsecops-review", "qa-browsing", "docker-review", "pipeline-review", "archive"]);
+
+/**
+ * MASTER_DOD suffix for sprint execution phases — appended to chain tails
+ * (legacy path), delegated-step tasks, and main-step instructions alike, so
+ * the steps[] migration keeps the same DoD contract the chain path enforced.
+ */
+export function sprintDodSuffix(workflowId: string, phaseId: string): string {
+  return workflowId === "sprint" && SPRINT_EXECUTION_PHASES.has(phaseId) ? `\n\n${MASTER_DOD}` : "";
+}
 
 // --- Conditional digests (D14): docker needs containers, pipeline needs CI ---
 
@@ -67,14 +77,14 @@ function repoHasCI(cwd: string): boolean {
 
 /**
  * Drop conditionally-loaded sprint digests whose trigger is absent in the
- * project: kstack-sprint-docker requires Docker files, kstack-sprint-pipeline
+ * project: kstack-docker-manager requires Docker files, kstack-pipeline-sre
  * requires CI configs. Everything else passes through untouched.
  */
 export function conditionalSkillIds(ids: string[] | undefined, cwd?: string): string[] | undefined {
   if (!ids || !cwd) return ids;
   const filtered = ids.filter((id) => {
-    if (id === "kstack-sprint-docker") return repoHasDocker(cwd);
-    if (id === "kstack-sprint-pipeline") return repoHasCI(cwd);
+    if (id === "kstack-docker-manager") return repoHasDocker(cwd);
+    if (id === "kstack-pipeline-sre") return repoHasCI(cwd);
     return true;
   });
   // Return [] (not undefined) when filtering emptied the list: downstream
@@ -323,12 +333,11 @@ const SKILL_CLASSES: Record<string, SkillClass> = {
   "kstack-review": "format-critical",
   "kstack-investigate": "format-critical",
   "kstack-grilling": "format-critical",
-  "kstack-document-generate": "format-critical",
+  "kstack-document": "format-critical",
   "kstack-fix-strategy": "format-critical",
   "kstack-ship": "support",
   "kstack-office-hours": "support",
   "kstack-plan-eng-review": "support",
-  "kstack-document-release": "support",
 };
 export function skillClassFor(id: string): SkillClass {
   return SKILL_CLASSES[id] ?? "format-critical";
@@ -368,7 +377,14 @@ export function mainContractFor(phase: WorkflowPhase, ctx: Pick<WorkflowContext,
   // extract exactly that pair (up to the next unrelated heading or EOF).
   if (step) {
     const m = /## DELIVERABLE[\s\S]*?(?=\n## (?!DELIVERABLE|STOP CONDITION)|$)/.exec(step.task);
-    if (m) return m[0].trim();
+    if (m) {
+      // The resume/re-issue contract must carry the RUN's values — a literal
+      // {sprint} would let the model write artifacts under the placeholder.
+      let contract = m[0].trim();
+      contract = replaceExact(contract, /\{sprint\}/g, ctx.state.sprintNumber !== undefined ? pad2(ctx.state.sprintNumber) : "??");
+      contract = replaceExact(contract, /\{goal\}/g, ctx.state.goal);
+      return contract;
+    }
     return `## DELIVERABLE\nA clear, verifiable result for the "${step.id}" step of the "${phase.name}" phase.\n\n## STOP CONDITION\nStop when: the step task is complete and its deliverable exists.`;
   }
   const builder = MAIN_CONTRACTS[phase.id];
@@ -644,6 +660,8 @@ Stop when: all findings are addressed.
 
 ## CONTEXT
 Goal: {goal} | Branch: {branch}
+Confirmed root cause:
+{root-cause_summary}
 Prior findings:
 {findings_summary}
 
@@ -770,7 +788,7 @@ This phase runs ONLY after explicit user approval (the orchestrator entry-gates 
   // investigate/qa "fix" phases could not carry context any other way, and
   // the shared generic template's {findings_summary} silently interpolated
   // to "(not yet available)" outside the review workflow.
-  let task = phase.task ?? tasks[phase.id] ?? `Execute the "${phase.name}" phase for: {goal}. Use available tools and report results.`;
+  let task = phase.task ?? tasks[phase.id] ?? (phase.steps?.length ? phase.steps[0].task : undefined) ?? `Execute the "${phase.name}" phase for: {goal}. Use available tools and report results.`;
   const vd = phase.variant === "report-only"
     ? "\n\n**REPORT-ONLY MODE**: do NOT fix anything and do NOT commit. The report is the entire deliverable."
     : "";
@@ -893,8 +911,7 @@ export function buildDeterministicPlan(phase: WorkflowPhase, ctx: WorkflowContex
   const prefix = retry ? `${retry}\n\n` : "";
   // Sprint execution phases carry the master DoD checklist on their FINAL
   // output (chain tail or single agent); earlier chain steps stay lean.
-  const needsDod = ctx.state.workflowId === "sprint" && SPRINT_EXECUTION_PHASES.has(phase.id);
-  const dod = needsDod ? `\n\n${MASTER_DOD}` : "";
+  const dod = sprintDodSuffix(ctx.state.workflowId, phase.id);
 
   if (phase.chain && phase.chain.length > 0) {
     // STEP 3c: each chain step resolves its own skill set (default: phase.skills).
@@ -912,7 +929,7 @@ export function buildDeterministicPlan(phase: WorkflowPhase, ctx: WorkflowContex
   }
   return [
     {
-      agent: phase.agent ?? "worker",
+      agent: phase.agent ?? (phase.steps?.length ? phase.steps[0].agent : undefined) ?? "worker",
       task:
         prefix +
         interpolate(buildAgentTaskWithSkills(phase, ctx), ctx) +
@@ -980,6 +997,13 @@ export function interpolateStepTask(task: string, phase: WorkflowPhase, stepInde
   const prevSummary = prev ? ctx.state.results[`${phase.id}.${prev.id}`]?.summary : undefined;
   out = replaceExact(out, /\{previous\}/g, prevSummary || "(no prior output)");
   out = replaceExact(out, /\{open_questions\}/g, carryOverOpenQuestions(ctx) || "(none carried over)");
+  // S4/ADR-23 record contract: the step learns its identity + the report CLI
+  // path from task tokens (mirrored in spawn env for delegated steps).
+  out = replaceExact(out, /\{workflow\}/g, ctx.state.workflowId);
+  out = replaceExact(out, /\{runId\}/g, ctx.state.runId ?? "");
+  out = replaceExact(out, /\{phase\}/g, phase.id);
+  out = replaceExact(out, /\{step\}/g, phase.steps?.[stepIndex]?.id ?? "");
+  out = replaceExact(out, /\{kstack_report\}/g, reportCliPath());
   return out;
 }
 
@@ -1096,7 +1120,18 @@ export function buildStepInstructions(phase: WorkflowPhase, step: WorkflowStep, 
     parts.push(skillBlock);
   }
 
-  // Contract = the step task's own DELIVERABLE/STOP lines.
+  // S4 ambient skills (D25): behavioral digests OUTSIDE the task-skill slot.
+  const ambientBlock = buildAmbientSkillBlock(step);
+  if (ambientBlock) {
+    parts.push("");
+    parts.push(ambientBlock);
+  }
+
+  // Contract = the step task's own DELIVERABLE/STOP lines. Sprint execution
+  // phases carry the master DoD on main steps as well (the chain path
+  // appended it to the phase's final output).
+  const dod = sprintDodSuffix(ctx.state.workflowId, phase.id);
+  if (dod) parts.push(dod.trimStart());
   parts.push("");
   parts.push(mainContractFor(phase, ctx, step));
 
@@ -1125,6 +1160,32 @@ export function buildStepInstructions(phase: WorkflowPhase, step: WorkflowStep, 
 }
 
 /**
+ * ADR-23 record contract appended to every deterministic delegated-step task:
+ * the child's lifecycle is spawn → work → report → exit, and "report" means
+ * the canonical kstack-report record — HANDOFF text alone does NOT satisfy a
+ * declared signal. Identity comes from the spawn env ($KSTACK_*), which the
+ * executor sets verbatim; a declared signal gets its mandatory flag named.
+ */
+export function buildRecordContract(step: WorkflowStep): string {
+  const sig = step.signal;
+  const required =
+    sig?.kind === "verdict"
+      ? ` Your record MUST carry \`--verdict ${sig.value}==<value>\` — the workflow parks when it is missing.`
+      : sig?.kind === "marker"
+        ? ` Your record MUST carry \`--marker ${sig.value}\` — the workflow parks when it is missing.`
+        : sig?.kind === "artifact"
+          ? ` The artifact \`${sig.value}\` must exist at the repo root when you exit — the workflow parks when it is missing.`
+          : "";
+  return `## RECORD CONTRACT (canonical)
+Before exiting you MUST write your step record exactly once via the kstack-report CLI (its path is in $KSTACK_REPORT):
+\`\`\`
+"$KSTACK_REPORT" --workflow "$KSTACK_WORKFLOW" --run-id "$KSTACK_RUN_ID" --phase "$KSTACK_PHASE" --step "$KSTACK_STEP" \\
+  --summary "<2-3 sentence outcome>" [--verdict KEY==VALUE]... [--var KEY==VALUE]... [--marker <text>]... [--deliverable <path>]...
+\`\`\`
+The orchestrator never accepts HANDOFF text as a completion signal — the record is the only channel.${required}`;
+}
+
+/**
  * Deterministic-task text for a DELEGATED step: the step's own task plus its
  * FULL skill methodology (delegation always delivers the full digest — the
  * subagent's context is fresh) and the OUTPUT_CONTRACT. Never routes through
@@ -1132,5 +1193,25 @@ export function buildStepInstructions(phase: WorkflowPhase, step: WorkflowStep, 
  */
 export function buildStepTask(step: WorkflowStep): string {
   const stub: WorkflowPhase = { id: step.id, name: step.id, execution: "subagent", optional: false };
-  return buildTaskSkills(stub, step.task, step.skill ? [step.skill] : undefined);
+  // S4 ambient skills: behavioral digests ride alongside the task's single
+  // task-skill — OUTSIDE the 0-1 `skill` slot (D19/D25). Merged into the same
+  // METHODOLOGY block; the slot rule governs `skill`, not digest count.
+  const ids = [...(step.skill ? [step.skill] : []), ...(step.ambientSkills ?? [])];
+  return buildTaskSkills(stub, step.task, ids.length > 0 ? ids : undefined);
+}
+
+/**
+ * S4 ambient digest block for MAIN steps: `ambientSkills` ids render as
+ * full digests (behavioral methodology the worker must actually follow —
+ * never degraded to a DoD gate, never occupying `skill`).
+ */
+function buildAmbientSkillBlock(step: WorkflowStep): string | null {
+  const ids = step.ambientSkills ?? [];
+  if (!skillsEnabled() || ids.length === 0) return null;
+  const blocks: string[] = [];
+  for (const id of ids) {
+    const digest = loadSkillFull(id);
+    if (digest) blocks.push(`#### Ambient skill: ${id}\n${digest}`);
+  }
+  return blocks.length > 0 ? blocks.join("\n\n") : null;
 }

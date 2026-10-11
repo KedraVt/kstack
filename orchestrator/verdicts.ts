@@ -19,7 +19,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ParsedVerdict, VerdictSeverity } from "./types.ts";
+import type { ParsedVerdict, VerdictSeverity, WorkflowPhase } from "./types.ts";
 import { extractHandoff } from "./handoff.ts";
 import {
   qaArtifactPath,
@@ -30,9 +30,13 @@ import {
 } from "./artifacts.ts";
 
 /** Closed value whitelist (case-normalized to lowercase). Anything else ⇒ null. */
-const VALUE_WHITELIST = ["approved", "rejected", "green", "red", "orange", "success", "failed"] as const;
+const VALUE_WHITELIST = [
+  "approved", "rejected", "green", "red", "orange", "success", "failed",
+  // S4 vocabulary (walkthrough/ui/outcome/pipeline gates).
+  "verified", "persists", "refuted", "pass", "fail",
+] as const;
 
-/** Closed severity whitelist. Hedged values ⇒ null. */
+/** Closed severity whitelist. Hedged values ⇒ null (legacy HANDOFF channel). */
 const SEVERITY_WHITELIST = ["critical", "high", "medium", "low"] as const;
 
 /**
@@ -48,6 +52,11 @@ export const KNOWN_VARIABLES = [
   "docker-build", // devsecops docker-build-report.md
   "docker-security", // devsecops docker-build-report.md
   "software-architect-review", // software-architect-artifact_n.md
+  // S4 verdict vars (kstack-report records + HANDOFF migration path).
+  "outcome", // investigate.verify: verified|persists|refuted
+  "walkthrough", // {be,fe}-walk: pass|fail
+  "ui", // ui-check: pass|fail
+  "pipeline", // pipeline-review: approved|rejected
 ] as const;
 
 // Verdict lines: `status == green`. An optional markdown heading prefix is
@@ -57,24 +66,74 @@ export const KNOWN_VARIABLES = [
 const VAR_LINE_RE = /^\s*(?:#{1,6}\s+)?([A-Za-z][A-Za-z0-9 _-]*?)\s*==\s*(\S[^\n]*)$/;
 
 /** Values that mean "the gated work did not pass" — routing negatives. */
-export const NEGATIVE_VALUES = new Set(["rejected", "failed", "red", "orange"]);
+export const NEGATIVE_VALUES = new Set(["rejected", "failed", "red", "orange", "persists", "refuted", "fail"]);
 
 /**
- * Per-phase expectation maps (BUG-1 fix): every known verdict variable must
- * land on an explicitly expected POSITIVE value or a routing NEGATIVE.
- * Whitelisted-but-off-map values (e.g. `status == success` at the QA gate)
- * park for human decision instead of silently advancing.
+ * Per-(workflow, phase) expectation maps (ADR-7): every known verdict variable
+ * must land on an explicitly expected POSITIVE value or a routing NEGATIVE.
+ * Whitelisted-but-off-map values park for human decision instead of silently
+ * advancing. Keyed `workflowId → phaseId → var → allowed[]` so phase ids
+ * shared across workflows (`verify`, `fix`, `review`, `qa-browsing`,
+ * `implement`) can never collide.
+ *
+ * A `?`-suffixed var name marks it OPTIONAL — a legitimately-skipped step
+ * (e.g. ui-check under scope:backend) emits nothing and must not park the
+ * gate; an emitted optional var is still validated like any other.
  */
-export const PHASE_EXPECTATIONS: Record<string, Record<string, readonly string[]>> = {
-  "architect-gate": { "software-architect-review": ["approved"] },
-  "qa-verdict": { status: ["green"] },
-  "devsecops-review": {
-    "code-review": ["approved"],
-    "security-review": ["approved", "rejected"],
-    "docker-build": ["success", "failed"],
-    "docker-security": ["approved", "rejected"],
+export const EXPECTATIONS: Record<string, Record<string, Record<string, readonly string[]>>> = {
+  sprint: {
+    "architect-gate": { "software-architect-review": ["approved"] },
+    "qa-browsing": { status: ["green"] },
+    "devsecops-review": {
+      "code-review": ["approved"],
+      "security-review": ["approved"],
+      // severity is an ORDINARY verdict var in S4 — parkOn declares the
+      // freeze outcome ({red|critical|high: "freeze"}); the values below
+      // are the non-freezing outcomes. Legacy 4-word vocabulary still
+      // validates so pre-migration records route the same.
+      "severity?": ["green", "orange", "low", "medium"],
+    },
+    "docker-review": { "docker-build": ["success"], "docker-security?": ["approved"] },
+    "pipeline-review": { pipeline: ["approved"] },
+    // Per-lane walker vars (S4): two walkers sharing one `walkthrough` var
+    // would contradiction-park on every be-fail/fe-pass. All `?` because
+    // scope:backend|frontend skips whole lanes.
+    "implement": { "be-walk?": ["pass"], "fe-walk?": ["pass"], "ui?": ["pass"] },
+  },
+  develop: {
+    "implement": { walkthrough: ["pass"], "ui?": ["pass"] },
+    "qa-browsing": { status: ["green"] },
+    "review": { "code-review": ["approved"] },
+  },
+  investigate: {
+    "verify": { outcome: ["verified"] },
+    "regression-qa": { status: ["green"] },
+  },
+  review: {
+    "findings": { "code-review": ["approved"] },
+    "qa-browsing": { status: ["green"] },
   },
 };
+
+/**
+ * Expectation map for one (workflowId, phaseId) — undefined when the pair is
+ * not a verdict gate (fail-closed callers park on undefined, never default).
+ */
+export function expectationsFor(
+  workflowId: string,
+  phaseId: string,
+): Record<string, readonly string[]> | undefined {
+  return EXPECTATIONS[workflowId]?.[phaseId];
+}
+
+/** True when a phase emits gate variables: has ≥1 verdict-flagged step, or
+ * carries a routing edge (loopBackTo / loopBackOn). Publish-only phases
+ * (flagged step, no edges) count — they still parse and validate. */
+export function isVerdictBearing(phase: Pick<WorkflowPhase, "loopBackTo" | "loopBackOn" | "steps"> | undefined): boolean {
+  if (!phase) return false;
+  if (phase.loopBackTo || (phase.loopBackOn && Object.keys(phase.loopBackOn).length > 0)) return true;
+  return !!phase.steps?.some((s) => s.signal?.kind === "verdict");
+}
 
 export interface VerdictParseOutcome {
   parsed: ParsedVerdict | null;

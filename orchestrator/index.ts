@@ -2,7 +2,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { handleKstackCommand, getCompletions } from "./command.ts";
 import { createInputRouter } from "./router.ts";
-import { loadActiveState, saveState, advancePhase, gateForApproval, createState, recordStepResult } from "./state.ts";
+import { loadActiveState, saveState, advancePhase, gateForApproval, createState, recordStepResult, parkForUnreadableVerdict } from "./state.ts";
+import { stepCompletionStatus } from "./records.ts";
 import type { AdvanceOptions } from "./state.ts";
 import { getWorkflow, getWorkflowIds } from "./workflows.ts";
 import { launchPhase, invalidateRuntime, advanceBlockReason, setKstackStatus } from "./executor.ts";
@@ -209,8 +210,83 @@ export function initOrchestrator(pi: ExtensionAPI): void {
       // — the phase itself advances only after the LAST step, through the
       // normal phase-level advancePhase below (verdict routing included).
       if (phase.steps && phase.steps.length > 0) {
+        // S4/TASK_02: the declared step signal must be OBSERVED before the
+        // step may complete — a missing record/marker/artifact re-issues the
+        // step in resumeMode instead of advancing; a verdict written by a
+        // non-flagged step parks foreign-verdict.
+        {
+          const si = Math.min(state.stepIndex ?? 0, phase.steps.length - 1);
+          const curStep = phase.steps[si];
+          const check = stepCompletionStatus(state, phase, curStep, ctx.cwd);
+          if (check.kind === "foreign-verdict") {
+            const parked = parkForUnreadableVerdict(state, phase.id, "foreign-verdict");
+            saveState(pi, parked);
+            setKstackStatus(ctx, parked, workflow);
+            return {
+              content: [{
+                type: "text" as const,
+                text: `kstack: step "${curStep.id}" emitted a gate verdict but is not verdict-flagged — the record was rejected and the workflow is parked for a human decision (/kstack). Only verdict-flagged steps may emit gate variables.`,
+              }],
+            };
+          }
+          if (check.kind === "signal-missing" && params.status !== "failed") {
+            // TASK_07 unhappy path: a DELEGATED step whose worker exited
+            // without producing its record cannot be re-prompted cheaply —
+            // re-spawning it is a real retry and belongs to the human.
+            // Park; the /kstack resume path re-dispatches the same step.
+            if (curStep.execution === "subagent" && deterministicSubagents()) {
+              const parked = { ...state, status: "paused" as const, pausedReason: `signal-missing:${phase.id}.${curStep.id}:${check.want}` };
+              saveState(pi, parked);
+              setKstackStatus(ctx, parked, workflow);
+              appendLedger(
+                ctx.cwd,
+                state,
+                {
+                  kind: "run-interrupted",
+                  phaseId: phase.id,
+                  stepId: curStep.id,
+                  payload: { summary: `delegated step exited without record signal "${check.want}" — parked for a human decision` },
+                },
+                (m) => { try { ctx.ui.notify(m, "warning"); } catch { /* stale ctx */ } },
+              );
+              return {
+                content: [{
+                  type: "text" as const,
+                  text: `Step "${curStep.id}" completed its delegation without producing signal "${check.want}" — the workflow is parked. Resume via /kstack to re-dispatch the step.`,
+                }],
+              };
+            }
+            const reissue = { ...state, resumeMode: true };
+            saveState(pi, reissue);
+            setKstackStatus(ctx, reissue, workflow);
+            // TASK_04: a missing completion signal is a boundary interruption —
+            // the ledger records it verbatim (never phase-verdict, never an attempt).
+            appendLedger(
+              ctx.cwd,
+              state,
+              {
+                kind: "run-interrupted",
+                phaseId: phase.id,
+                stepId: curStep.id,
+                payload: { summary: `completion signal "${check.want}" not observed — step re-issued in resume mode` },
+              },
+              (m) => { try { ctx.ui.notify(m, "warning"); } catch { /* stale ctx */ } },
+            );
+            launchPhase(pi, ctx, reissue);
+            return {
+              content: [{
+                type: "text" as const,
+                text: `Step "${curStep.id}" completion signal "${check.want}" was not observed — the step is being re-issued in resume mode. Produce the signal (kstack-report record / declared artifact) and call kstack_advance again.`,
+              }],
+            };
+          }
+          // Routing vars emitted via the step's record land in state.vars.
+          if (check.kind === "ok" && Object.keys(check.vars).length > 0) {
+            advanceState = { ...advanceState, vars: { ...(advanceState.vars ?? {}), ...check.vars } };
+          }
+        }
         const recorded = recordStepResult(
-          state,
+          advanceState,
           phase,
           { status: params.status, summary: params.summary },
         );
@@ -531,25 +607,36 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         state.status === "active"
           ? ""
           : `[workflow ${state.status}${state.pausedReason ? `: ${state.pausedReason}` : ""} — reference only: do NOT start or continue this phase]\n\n`;
-      // Delegated results arrive via a followUp message and are never
-      // persisted — after compaction "review the output above" points at
-      // nothing. Name the durable record instead.
-      const artifactPaths = phaseArtifactPaths(phase.id, ctx.cwd, state.sprintNumber);
-      const recordLines =
-        phase.execution === "subagent" && deterministicSubagents()
-          ? artifactPaths.length
-            ? artifactPaths.map((p) => `- ${path.relative(ctx.cwd, p) || p}${existsSync(p) ? "" : " (not written yet)"}`)
-            : ["- no fixed artifact — recover via git history and the files the phase produced"]
-          : [];
-      const record = recordLines.length
-        ? "\n\n### On-disk record\nSpecialist results were delivered in an earlier message and are not persisted — if they are gone from your context, the durable record is:\n" +
-          recordLines.join("\n")
-        : "";
       // S3: a stepped phase re-fetches the CURRENT step's instructions —
       // post-compaction the model self-anchors on exactly the step it owns.
       const currentStep = phase.steps?.length
         ? phase.steps[Math.min(state.stepIndex ?? 0, phase.steps.length - 1)]
         : undefined;
+      // Delegated results arrive via a followUp message and are never
+      // persisted — after compaction "review the output above" points at
+      // nothing. Name the durable record instead. S4: delegation is STEP-level
+      // — the section fires for a legacy subagent phase OR a delegated current
+      // step; the kstack-report record (.kstack/runs/<runId>/) is the
+      // canonical channel under the step model.
+      const artifactPaths = phaseArtifactPaths(phase.id, ctx.cwd, state.sprintNumber);
+      const delegated = phase.execution === "subagent" || currentStep?.execution === "subagent";
+      const recordLines =
+        delegated && deterministicSubagents()
+          ? [
+              ...(state.runId
+                ? [
+                    `- ${path.join(".kstack", "runs", state.runId, `${phase.id}${currentStep ? `.${currentStep.id}` : ""}.json`)} (step record)`,
+                  ]
+                : []),
+              ...(artifactPaths.length
+                ? artifactPaths.map((p) => `- ${path.relative(ctx.cwd, p) || p}${existsSync(p) ? "" : " (not written yet)"}`)
+                : ["- no fixed artifact — recover via git history and the files the phase produced"]),
+            ]
+          : [];
+      const record = recordLines.length
+        ? "\n\n### On-disk record\nSpecialist results were delivered in an earlier message and are not persisted — if they are gone from your context, the durable record is:\n" +
+          recordLines.join("\n")
+        : "";
       const instructions = currentStep
         ? buildStepInstructions(phase, currentStep, { state, git, cwd: ctx.cwd })
         : buildPhaseInstructions(phase, { state, git, cwd: ctx.cwd });
@@ -566,10 +653,10 @@ export function initOrchestrator(pi: ExtensionAPI): void {
     name: "kstack_start",
     label: "Start Workflow",
     description:
-      "Start a kstack guided workflow programmatically. Workflows: develop | investigate | qa | qa-report | ship | review | quick | sprint. Use when a task matches one of these pipelines and no workflow is currently active.",
-    promptSnippet: "Start a kstack workflow (develop, investigate, qa, qa-report, ship, review, quick, sprint)",
+      "Start a kstack guided workflow programmatically. Workflows: develop | investigate | review | discover | audit | sprint. Use when a task matches one of these pipelines and no workflow is currently active.",
+    promptSnippet: "Start a kstack workflow (develop, investigate, review, discover, audit, sprint)",
     parameters: Type.Object({
-      workflow: Type.String({ description: "Workflow id: develop | investigate | qa | qa-report | ship | review | quick | sprint" }),
+      workflow: Type.String({ description: "Workflow id: develop | investigate | review | discover | audit | sprint" }),
       goal: Type.String({ description: "What the workflow should accomplish" }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext): Promise<any> {

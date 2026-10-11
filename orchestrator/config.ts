@@ -122,34 +122,29 @@ export type TimeoutClass = "EXPLORE" | "WORK" | "VERIFY";
  *   EXPLORE=900, WORK=1500, VERIFY=900; fallback KSTACK_PI_SUBAGENT_TIMEOUT=1200.
  */
 const TIMEOUT_CLASS_MAP: Record<string, TimeoutClass> = {
-  // develop
+  // shared ids (multiple workflows)
   "understand": "EXPLORE",
   "explore": "EXPLORE",
   "plan": "VERIFY",
   "implement": "WORK",
-  "qa": "WORK",
   "review": "VERIFY",
   "ship": "VERIFY",
   "document": "VERIFY",
-  "update-docs": "VERIFY",
+  "qa-browsing": "WORK",
+  "retro": "EXPLORE",
   // investigate
   "reproduce": "WORK",
   "root-cause": "WORK",
   "fix": "WORK",
   "verify": "VERIFY",
   "regression-qa": "WORK",
-  // qa / qa-report
-  "setup": "EXPLORE",
-  "test": "VERIFY",
-  "report": "VERIFY",
-  // ship
-  "pre-checks": "VERIFY",
-  "push-pr": "VERIFY",
   // review
   "diff": "VERIFY",
   "findings": "VERIFY",
-  // quick
-  "action": "WORK",
+  "comment": "VERIFY",
+  // discover / audit
+  "session": "EXPLORE",
+  "walk": "EXPLORE",
   // sprint (main phases never spawn subagents, but the 1:1 map invariant covers every id)
   "user-story": "EXPLORE",
   "capability": "EXPLORE",
@@ -157,8 +152,9 @@ const TIMEOUT_CLASS_MAP: Record<string, TimeoutClass> = {
   "architect-gate": "VERIFY",
   "backlog": "EXPLORE",
   "devsecops-review": "VERIFY",
-  "qa-verdict": "WORK",
-  "commit-archive": "VERIFY",
+  "docker-review": "VERIFY",
+  "pipeline-review": "VERIFY",
+  "archive": "VERIFY",
 };
 
 /** Resolve the timeout class of a phase id (null = unmapped). */
@@ -200,7 +196,7 @@ export function sprintArchMaxAttempts(): number {
  * else to KSTACK_PI_MODEL_FAST. UNSET envs mean "keep the agent definition's
  * own model" — the feature is fully inert by default.
  */
-const STRONG_PHASES = new Set(["implement", "architect-gate", "devsecops-review", "qa-verdict"]);
+const STRONG_PHASES = new Set(["implement", "architect-gate", "devsecops-review", "qa-browsing"]);
 
 export function modelTierFor(phaseId: string): string | undefined {
   const strong = process.env.KSTACK_PI_MODEL_STRONG;

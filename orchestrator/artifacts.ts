@@ -119,9 +119,9 @@ export function phaseArtifactPaths(phaseId: string, cwd: string, sprint?: Sprint
     }
     case "devsecops-review":
       return [codeReviewArtifactPath(cwd, sprint), securityReviewArtifactPath(cwd, sprint)];
-    case "qa-verdict":
+    case "qa-browsing":
       return sprint !== undefined ? [qaArtifactPath(cwd, sprint)] : [];
-    case "commit-archive":
+    case "archive":
       return typeof sprint === "number" ? [sprintArchiveDir(cwd, sprint)] : [];
     case "plan":
       // S3 resume-gate: the plan FILE is the phase's artifact — the caller
@@ -164,4 +164,55 @@ export function newestArchitectArtifact(cwd: string, sprintNumber?: number): str
   } catch {
     return null;
   }
+}
+
+// --- Ephemeral artifacts (§10.5 / TASK_07) -----------------------------------
+//
+// THINK docs consumed within the run — FLAT names (no _XX; only durables
+// carry the archive slot). Registered on state at creation, deleted at run
+// terminal status. Cross-run handoff artifacts under `.kstack/<wf>/` are
+// NEVER listed here (independent lifetime, outside the project root).
+
+export const EPHEMERAL_ARTIFACTS: Record<string, string[]> = {
+  develop: ["understand.md", "plan.md"],
+  sprint: ["understand.md", "user-story.md", "capability.md", "tasks.md", "summary_BE.md", "summary_FE.md"],
+  investigate: ["bug-report.md"],
+};
+
+/** Ephemeral set for a workflow id — a fresh copy (state stamps it verbatim). */
+export function ephemeralArtifactsFor(workflowId: string): string[] {
+  return [...(EPHEMERAL_ARTIFACTS[workflowId] ?? [])];
+}
+
+/**
+ * Delete the registered ephemeral paths at run terminal status. Paths are
+ * repo-relative only — absolute/`..` segments are skipped with a warning
+ * (untrusted state may have smuggled them in). A single failure never aborts
+ * the cleanup and never throws — the caller ledger-notes via onWarn.
+ * Returns the deleted + failed lists for the ledger event.
+ */
+export function cleanupEphemeralArtifacts(
+  cwd: string,
+  paths: string[],
+  onWarn?: (message: string) => void,
+): { deleted: string[]; failed: string[] } {
+  const deleted: string[] = [];
+  const failed: string[] = [];
+  for (const p of paths) {
+    try {
+      const rel = path.normalize(p);
+      if (typeof p !== "string" || path.isAbsolute(rel) || rel.startsWith("..") || rel === ".") {
+        failed.push(p);
+        onWarn?.(`kstack: refusing to delete non-repo-relative ephemeral path "${p}"`);
+        continue;
+      }
+      const abs = path.join(cwd, rel);
+      if (fs.existsSync(abs)) fs.unlinkSync(abs);
+      deleted.push(rel);
+    } catch (err) {
+      failed.push(p);
+      onWarn?.(`kstack: ephemeral cleanup failed for "${p}": ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return { deleted, failed };
 }

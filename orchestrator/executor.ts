@@ -1,8 +1,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { WorkflowState, WorkflowContext, GitContext, WorkflowPhase } from "./types.ts";
 import { getWorkflow } from "./workflows.ts";
-import { saveState, advancePhase, gateOptionalPhase, gateEntry, parkForUnreadableVerdict, loadActiveState, type AdvanceOptions } from "./state.ts";
-import { buildPhaseInstructions, buildDeterministicPlan, mainContractFor, buildStepInstructions, buildStepTask, interpolateStepTask, resolvePlanFilePath } from "./templates.ts";
+import { saveState, advancePhase, gateOptionalPhase, gateEntry, parkForUnreadableVerdict, loadActiveState, recordStepResult, type AdvanceOptions } from "./state.ts";
+import { resolvePhaseEnabled, stepSkippedByVars } from "./enabled.ts";
+import { probeCapabilities, capabilitiesUnprobed, missingRequires, missingPrefers } from "./capabilities.ts";
+import { buildPhaseInstructions, buildDeterministicPlan, mainContractFor, buildStepInstructions, buildStepTask, interpolateStepTask, resolvePlanFilePath, buildRecordContract, sprintDodSuffix } from "./templates.ts";
 import { detectGitContext, type ExecFn } from "./git.ts";
 import { runSubagent, type SpawnRequest, type SpawnResult, resolveTimeoutMs } from "./spawn.ts";
 import { parseHandoffVerdicts, verifyArtifactVerdicts, mergeParseOutcomes } from "./verdicts.ts";
@@ -13,8 +15,9 @@ import { extractHandoff } from "./handoff.ts";
 import { isRefutedStrategy, isValidatedStrategy } from "./skip.ts";
 import { replaceExact } from "./text.ts";
 import { appendLedger } from "./ledger.ts";
+import { reportCliPath } from "./records.ts";
 import { newStepRun, feedStepEvent, detectStuck, checkStepBudgets, stepBudgetDefaults, beginStepWatch, endStepWatch } from "./stuck.ts";
-import { phaseArtifactPaths } from "./artifacts.ts";
+import { phaseArtifactPaths, cleanupEphemeralArtifacts } from "./artifacts.ts";
 import { existsSync } from "node:fs";
 
 // --- Sequential-chain resilience (STEP 2f) -----------------------------------
@@ -299,6 +302,17 @@ export async function executeCurrentPhase(
   if (!phase || state.status === "completed") {
     // Workflow completed: flush the structured run report (STEP 0 telemetry).
     writeRunReport(ctx.cwd, state.workflowId);
+    // S4/§10.5: ephemeral THINK docs die with the run — delete at terminal
+    // status, ledger-note every failure (cleanup never crashes the finish).
+    if ((state.ephemeralArtifacts ?? []).length > 0) {
+      const { deleted, failed } = cleanupEphemeralArtifacts(ctx.cwd, state.ephemeralArtifacts!, (m) => notify(m, "warning"));
+      appendLedger(ctx.cwd, state, {
+        kind: "phase",
+        phaseId: state.workflowId,
+        payload: { summary: `ephemeral cleanup: ${deleted.length} deleted${failed.length ? `, ${failed.length} failed` : ""}`, artifacts: deleted },
+      }, () => {});
+      state = { ...state, ephemeralArtifacts: [] };
+    }
     saveState(pi, { ...state, status: "completed" });
     try {
       ctx.ui.setStatus("kstack", undefined);
@@ -354,6 +368,21 @@ export async function executeCurrentPhase(
   const steps = phase.steps;
   const stepped = !!(steps && steps.length > 0);
   const insidePhase = stepped && state.stepIndex !== undefined;
+
+  // S4/TASK_05 (ADR-24): enabled:"off"/"auto" resolve at ARRIVAL — autoWhen
+  // reads lastVerdicts/vars populated mid-run, so it must re-evaluate on
+  // every entry (never cached). A throwing resolver fails closed to "off"
+  // with a ledger note; every skip decision lands in results + ledger.
+  if (!insidePhase) {
+    const res = resolvePhaseEnabled(phase, wfCtx);
+    if (res.enabled === "off") {
+      const summary = res.note ?? (phase.enabled === "auto" ? "Auto-skipped: autoWhen false" : "Auto-skipped: enabled:off");
+      const skipped = advancePhase(state, phase.id, { status: "skipped", summary }, workflow.phases.length, { phases: workflow.phases, cwd: ctx.cwd });
+      saveState(pi, skipped);
+      appendLedger(ctx.cwd, state, { kind: "gate", phaseId: phase.id, payload: { gateId: phase.id, decision: "skip", summary } }, (m) => notify(m, "warning"));
+      return executeCurrentPhase(pi, ctx, skipped);
+    }
+  }
 
   if (!insidePhase && phase.skipWhen?.(wfCtx)) {
     const skipped = advancePhase(state, phase.id, { status: "skipped", summary: "Auto-skipped by condition" }, workflow.phases.length);
@@ -453,7 +482,79 @@ export async function executeCurrentPhase(
   const stepIndex = stepped ? Math.min(state.stepIndex ?? 0, steps!.length - 1) : undefined;
   const step = stepped ? steps![stepIndex!] : undefined;
 
+  // S4/TASK_05-06: declarative step skips — skipWhen {var,equals} against
+  // state.vars (per-dispatch, unlike entry gates) and requires:<caps> against
+  // state.capabilities. The skipped step records a "skipped" result; when
+  // every step of the phase skipped, the phase itself reports "skipped" so
+  // onComplete back-edges never fire off an untouched phase (INV-16).
+  const skipStep = async (note: string): Promise<void> => {
+    const rec = recordStepResult(state, phase, { status: "skipped", summary: note });
+    if (!rec) return;
+    saveState(pi, rec.state);
+    appendLedger(ctx.cwd, state, { kind: "step", phaseId: phase.id, stepId: step!.id, payload: { summary: note } }, (m) => notify(m, "warning"));
+    if (!rec.isLast) return executeCurrentPhase(pi, ctx, rec.state);
+    const ran = Object.entries(rec.state.results).some(([k, r]) => k.startsWith(phase.id + ".") && r.status === "completed");
+    const next = advancePhase(rec.state, phase.id, { status: ran ? "completed" : "skipped", summary: note }, workflow.phases.length, { phases: workflow.phases, cwd: ctx.cwd });
+    saveState(pi, next);
+    return executeCurrentPhase(pi, ctx, next);
+  };
+  if (step && stepSkippedByVars(step, state.vars)) {
+    return skipStep(`Auto-skipped: skipWhen ${step.skipWhen!.var}==${step.skipWhen!.equals}`);
+  }
+
+  // S4/TASK_06 capability gate (ADR-16): `requires` missing ⇒ skip with a
+  // ledger note; `prefers` missing ⇒ run degraded — the spawned task (or
+  // main-step instructions) carries `~capability: no-<cap>` notes.
+  let degradedNote = "";
+  if (step && (step.requires?.length || step.prefers?.length)) {
+    if (capabilitiesUnprobed(state.capabilities)) {
+      // A run started without `kstack init`: probe lazily ONCE and stamp the
+      // result — `{}` is the unprobed convention, not "everything absent".
+      state = { ...state, capabilities: probeCapabilities() };
+      saveState(pi, state);
+      wfCtx.state = state;
+    }
+    const missing = missingRequires(step, state.capabilities);
+    if (missing.length > 0) {
+      return skipStep(`Auto-skipped: missing required capability ${missing.join(", ")}`);
+    }
+    const degraded = missingPrefers(step, state.capabilities);
+    if (degraded.length > 0) {
+      degradedNote = degraded.map((c) => `~capability: no-${c}`).join(" ");
+      appendLedger(ctx.cwd, state, { kind: "step", phaseId: phase.id, stepId: step.id, payload: { summary: `degraded: ${degradedNote}` } }, (m) => notify(m, "warning"));
+    }
+  }
+
+  // S4/TASK_07 ⚠ entry gate on side-effect STEPS (ADR-16/glossary): parks
+  // BEFORE the step runs — delegated or main makes no difference, the side
+  // effect IS the step. The /kstack approve path flips entryGate to
+  // "approved"; a selection-gate "auto" row pre-approves the whole phase's
+  // side effects. recordStepResult clears the flag when the gated step
+  // completes, so each side-effect step gates independently.
+  const stepGateOverride = state.gateMode === "selection-gate" ? state.gateOverrides?.[phase.id] : undefined;
+  if (step?.sideEffect && manualGates() && state.entryGate !== "approved" && stepGateOverride !== "auto") {
+    const gated = gateEntry(state);
+    saveState(pi, gated);
+    setKstackStatus(ctx, gated, workflow);
+    appendLedger(ctx.cwd, state, { kind: "gate", phaseId: phase.id, stepId: step.id, payload: { gateId: `${phase.id}.${step.id}`, decision: "human" } }, (m) => notify(m, "warning"));
+    notify(
+      `kstack: step "${step.id}" (${phase.name}) is a human-gated side-effect step — it has NOT run yet. Approve via /kstack before it executes.`,
+      "info",
+    );
+    return;
+  }
+  if (step?.sideEffect && state.entryGate !== "approved" && stepGateOverride === "auto") {
+    appendLedger(ctx.cwd, state, { kind: "gate", phaseId: phase.id, stepId: step.id, payload: { gateId: `${phase.id}.${step.id}`, decision: "auto" } }, (m) => notify(m, "warning"));
+  }
+
   setKstackStatus(ctx, state, workflow);
+
+  // S4/TASK_07 resume-mode hint (§10.7): an interrupted step re-issues with
+  // a "continue from disk state" note on the volatile tail — the stable
+  // prefix stays byte-identical, builders read diff+tests as the oracle.
+  const resumeHint = state.resumeMode
+    ? "\n\n[resume] This step was interrupted and is being re-issued — continue from on-disk state (builders: read diff+tests as the oracle; writers: overwrite; appenders: dedup-check) rather than restarting from scratch."
+    : "";
 
   // Deterministic mode: the executor spawns subagents itself for subagent
   // phases — and, in stepped phases, for delegated STEPS (step.execution).
@@ -468,6 +569,9 @@ export async function executeCurrentPhase(
     const stepGuard: { stepId: string; trip?: string } | undefined = delegatedStep
       ? { stepId: step.id }
       : undefined;
+    // TASK_04: quota/interruption flag returned by the delegation loop —
+    // budget-exceeded marks it, the park below is the clean interruption stop.
+    const interruption: { kind?: "quota-parked" | "run-interrupted" } = {};
     const results = await runDeterministicDelegation(
       phase,
       wfCtx,
@@ -481,13 +585,33 @@ export async function executeCurrentPhase(
             // {previous} interpolates on the step's OWN task BEFORE the skill
             // digest is embedded — interpolating the assembled task would
             // also rewrite a literal `{previous}` documented inside SKILL.md.
-            task: buildStepTask({ ...step, task: interpolateStepTask(step.task, phase, stepIndex!, wfCtx) }),
+            // prefers-degrade: ~capability notes land INSIDE the task (the
+            // report context), after interpolation.
+            task:
+              buildStepTask({ ...step, task: interpolateStepTask(step.task, phase, stepIndex!, wfCtx) }) +
+              // Sprint execution phases carry the master DoD contract on
+              // delegated steps too (chain path enforced it on chain tails).
+              sprintDodSuffix(state.workflowId, phase.id) +
+              // ADR-23: spawn → work → report → exit — the record contract is
+              // mandatory for every deterministic delegated step.
+              `\n\n${buildRecordContract(step)}` +
+              (degradedNote ? `\n\n${degradedNote}` : "") + resumeHint,
             // Already interpolated — runSteps' own {previous} pass would
             // rewrite the literal token inside the embedded skill digest.
             interpolated: true,
+            // ADR-23: the child learns run/phase/step ids + the report CLI
+            // path from env — it can emit its own canonical record.
+            env: {
+              KSTACK_WORKFLOW: state.workflowId,
+              KSTACK_RUN_ID: state.runId ?? "",
+              KSTACK_PHASE: phase.id,
+              KSTACK_STEP: step.id,
+              KSTACK_REPORT: reportCliPath(),
+            },
           }]
         : undefined,
       stepGuard,
+      interruption,
     );
     if (!alive()) return;
 
@@ -507,14 +631,23 @@ export async function executeCurrentPhase(
     state = live;
     wfCtx.state = live;
 
-    // S3/D28: a tripped detector parks the run at the CURRENT stepIndex —
-    // resume re-delivers the same step. Park, never a silent kill.
-    if (stepGuard?.trip) {
-      const parked = { ...state, status: "paused" as const, pausedReason: stepGuard.trip };
+    // S3/D28 + TASK_04: a tripped detector or an exhausted quota parks the
+    // run at the CURRENT stepIndex — resume re-delivers the same step in
+    // resumeMode. Ledger kinds: stuck rules ⇒ run-interrupted, budget/quota
+    // trips ⇒ quota-parked. Never a phase-verdict, never an attempt burn.
+    if (stepGuard?.trip || interruption.kind) {
+      const reason = stepGuard?.trip ?? `quota-parked:${phase.id}${step ? `.${step.id}` : ""}`;
+      const kind =
+        interruption.kind ?? (stepGuard!.trip!.startsWith("stuck:") ? "run-interrupted" : "quota-parked");
+      const parked = { ...state, status: "paused" as const, pausedReason: reason, resumeMode: true };
       saveState(pi, parked);
       setKstackStatus(ctx, parked, workflow);
-      appendLedger(ctx.cwd, state, { kind: "step", phaseId: phase.id, stepId: step!.id, payload: { summary: `detector trip: ${stepGuard.trip}` } }, (m) => notify(m, "warning"));
-      notify(`kstack: ${stepGuard.trip} — step paused for a human decision; resume via /kstack re-runs the step.`, "warning");
+      // The budget-exceeded path already appended its quota-parked event
+      // inside the delegation loop — only the detector trip lands here.
+      if (stepGuard?.trip) {
+        appendLedger(ctx.cwd, state, { kind, phaseId: phase.id, stepId: step!.id, payload: { summary: `detector trip: ${stepGuard.trip}` } }, (m) => notify(m, "warning"));
+      }
+      notify(`kstack: ${reason} — step paused for a human decision; resume via /kstack re-runs the step in resume mode.`, "warning");
       return;
     }
 
@@ -528,7 +661,11 @@ export async function executeCurrentPhase(
     // S3: the verdict is PHASE-LEVEL and comes from the FINAL step — mid-step
     // delegations never parse.
     const isLastStep = !step || stepIndex === steps!.length - 1;
-    if (state.workflowId === "sprint" && phase.loopBackTo && verdictsEnabled() && isLastStep) {
+    // INV-9: a phase with verdict-flagged steps gets its phase verdict ONLY
+    // from the flagged kstack-report records (advancePhase merges them) — the
+    // legacy HANDOFF stash stays for UNFLAGGED verdict phases (pre-migration).
+    const hasFlaggedSteps = (phase.steps ?? []).some((s) => s.signal?.kind === "verdict");
+    if (state.workflowId === "sprint" && phase.loopBackTo && !hasFlaggedSteps && verdictsEnabled() && isLastStep) {
       const outcome = mergeParseOutcomes(
         // B1 fix: parse the UNCAPPED rawOutput. `output` is capOutput()'d at
         // 50KB — and the ## HANDOFF section (the only channel the parser
@@ -602,6 +739,11 @@ export async function executeCurrentPhase(
   let instructions = step
     ? buildStepInstructions(phase, step, wfCtx)
     : buildPhaseInstructions(phase, wfCtx);
+  // prefers-degrade (ADR-16): main steps see the same ~capability note the
+  // delegated task carried — the run continues degraded, never silently.
+  if (degradedNote) instructions += `\n\n${degradedNote}`;
+  // resume-mode re-issue (§10.7): same hint the delegated task carried.
+  instructions += resumeHint;
 
   // S3 resume-gate (D28): re-delivering a phase's LAST step whose declared
   // artifact is missing keeps the step open — the note rides the volatile
@@ -657,11 +799,17 @@ export async function runDeterministicDelegation(
   // (executeCurrentPhase) passes nothing and gets the real runSubagent.
   spawnFn: typeof runSubagent = runSubagent,
   // S3 delegated step: a prebuilt one-entry plan built from buildStepTask
-  // (steps never route through buildDeterministicPlan).
-  planOverride?: Array<{ agent: string; task: string; interpolated?: boolean }>,
+  // (steps never route through buildDeterministicPlan). S4/ADR-23: `env`
+  // carries run/phase/step ids + the kstack-report CLI path into the child.
+  planOverride?: Array<{ agent: string; task: string; interpolated?: boolean; env?: Record<string, string> }>,
   // S3/D28 out-param: when set (delegated-step runs only) a StepRun watches the
   // child event stream; a detector trip lands in .trip and aborts the spawn.
   stepGuard?: { stepId: string; trip?: string },
+  // TASK_04 out-param: set when the delegation stopped early on a quota
+  // (wall-clock budget) — the caller parks cleanly instead of completing the
+  // phase on partial results. The quota-parked ledger event is appended at
+  // the break point; resume re-dispatches the SAME step (resumeMode).
+  interruption?: { kind?: "quota-parked" | "run-interrupted" },
 ): Promise<Array<{ agent: string; result: SpawnResult }>> {
   const plan = planOverride ?? buildDeterministicPlan(phase as any, wfCtx);
   // STEP 4d: a collapsed validate-only root-cause step may be REFUTED — then
@@ -676,7 +824,7 @@ export async function runDeterministicDelegation(
   const delegationStart = Date.now();
 
   const runSteps = async (
-    steps: Array<{ agent: string; task: string; interpolated?: boolean }>,
+    steps: Array<{ agent: string; task: string; interpolated?: boolean; env?: Record<string, string> }>,
   ): Promise<Array<{ agent: string; result: SpawnResult }>> => {
     const out: Array<{ agent: string; result: SpawnResult }> = [];
     let previous = "";
@@ -691,6 +839,21 @@ export async function runDeterministicDelegation(
           event: "budget-exceeded",
           budgetSec: Math.round((budget as number) / 1000),
         });
+        // TASK_04: quota hit mid-delegation — ledger kind quota-parked (never
+        // phase-verdict, never an attempt), interruption flag tells the caller
+        // to park rather than complete the phase on partial chain results.
+        if (interruption) interruption.kind = "quota-parked";
+        appendLedger(
+          ctx.cwd,
+          wfCtx.state,
+          {
+            kind: "quota-parked",
+            phaseId: phase.id,
+            stepId: stepGuard?.stepId,
+            payload: { summary: `delegation wall-clock budget (${Math.round((budget as number) / 1000)}s) exhausted before "${step.agent}"` },
+          },
+          () => { /* ledger failures never block the park path */ },
+        );
         try {
           ctx.ui.notify(
             `kstack: delegation wall-clock budget (${Math.round((budget as number) / 1000)}s) exhausted — stopping phase "${phase.id}" before "${step.agent}".`,
@@ -743,6 +906,8 @@ export async function runDeterministicDelegation(
         agent: step.agent,
         task,
         cwd: wfCtx.cwd,
+        // S4/ADR-23: run/phase/step ids + kstack-report path for step records.
+        env: step.env,
         // STEP 5a: per-class timeout resolved from the phase id.
         phaseId: phase.id,
         // E4/D10 model tiers: inert unless KSTACK_PI_MODEL_FAST/_STRONG are set.

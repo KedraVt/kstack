@@ -17,7 +17,8 @@
 import { SettingsList, type SettingItem, type SettingsListTheme } from "@earendil-works/pi-tui";
 import { getSettingsListTheme, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { deterministicSubagents, manualGates, optionalPhases } from "./config.ts";
-import type { GateRow, Workflow } from "./types.ts";
+import { derivedSkippable, enabledPhaseIds, resolvePhaseEnabled } from "./enabled.ts";
+import type { GateRow, Workflow, WorkflowContext } from "./types.ts";
 
 export interface GateConfiguration {
   gateMode: "human-gate" | "selection-gate";
@@ -32,17 +33,38 @@ export interface GateConfiguration {
  * entry + post-completion gates into one decision); else advance:"manual" →
  * manual row. push-pr is excluded explicitly.
  */
-export function gateInventory(workflow: Workflow): GateRow[] {
+export function gateInventory(workflow: Workflow, wfCtx?: WorkflowContext): GateRow[] {
   const askOptional = optionalPhases() === "ask";
   const manual = manualGates();
   const deterministic = deterministicSubagents();
   const rows: GateRow[] = [];
+  // S4/TASK_05: enabled:"off" phases never gate, and INV-13 derived
+  // skippability (produces/needs) removes "skip" from optional producers an
+  // enabled phase still needs. ctx is optional — legacy callers without it
+  // keep the pre-S4 row set.
+  const enabled = wfCtx ? enabledPhaseIds(workflow, wfCtx) : null;
   workflow.phases.forEach((phase, index) => {
     if (phase.id === "push-pr") return; // never a pre-flight row
     const name = `${index + 1}. ${phase.name}`;
+    // S4: enabled:"auto" phases are the panel's "engine detects, user forces"
+    // rows (auto+override). They always surface — even when the current
+    // resolution is "off", because an "auto" override force-runs them.
+    if (phase.enabled === "auto") {
+      const skippable = enabled ? derivedSkippable(workflow, enabled, phase.id) : undefined;
+      rows.push(skippable === false
+        ? { phaseId: phase.id, name, kind: "optional", skippable: false }
+        : { phaseId: phase.id, name, kind: "optional" });
+      return;
+    }
+    if (wfCtx && resolvePhaseEnabled(phase, wfCtx).enabled === "off") return;
     if (phase.optional) {
       // "auto"/"skip" env modes already decide globally — no human gate exists.
-      if (askOptional) rows.push({ phaseId: phase.id, name, kind: "optional" });
+      if (askOptional) {
+        const skippable = enabled ? derivedSkippable(workflow, enabled, phase.id) : undefined;
+        rows.push(skippable === false
+          ? { phaseId: phase.id, name, kind: "optional", skippable: false }
+          : { phaseId: phase.id, name, kind: "optional" });
+      }
       return;
     }
     if (phase.execution === "subagent" && phase.advance === "manual") {
@@ -57,6 +79,13 @@ export function gateInventory(workflow: Workflow): GateRow[] {
           ? { phaseId: phase.id, name, kind: "entry", warning: true }
           : { phaseId: phase.id, name, kind: "manual" },
       );
+      return;
+    }
+    // S4/TASK_07: a phase containing sideEffect steps gets one ⚠ entry row —
+    // "auto" on it pre-approves every side-effect step inside (executor
+    // consults the same phase-keyed override at each gated step).
+    if (manual && phase.steps?.some((s) => s.sideEffect)) {
+      rows.push({ phaseId: phase.id, name, kind: "entry", warning: true });
       return;
     }
     if (manual && phase.advance === "manual") {
@@ -129,8 +158,9 @@ export async function configureGates(
       label: `${row.warning ? "⚠ " : ""}${row.name}`,
       description: DESCRIPTIONS[row.kind],
       currentValue: "human",
-      // INV-05: "skip" is only selectable on optional rows.
-      values: row.kind === "optional" ? ["human", "auto", "skip"] : ["human", "auto"],
+      // INV-05: "skip" is only selectable on optional rows; INV-13 further
+      // removes it from optional producers an enabled phase still needs.
+      values: row.kind === "optional" && row.skippable !== false ? ["human", "auto", "skip"] : ["human", "auto"],
     })),
     { id: "__done__", label: "▶ Start workflow", currentValue: "", values: ["start"] },
   ];

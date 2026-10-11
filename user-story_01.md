@@ -2,13 +2,16 @@
 
 ## Goal
 
-As a **kstack operator** (and the agent executing its workflows), I want every
-workflow — develop, investigate, qa, qa-report, ship, review, sprint, quick —
-redesigned on the step model introduced in S3, so that skill knowledge arrives
-just-in-time per atomic unit of work, and rejection loops route
-deterministically where they add value — instead of today's mixed model where
-one piloted phase is stepped and everything else still injects skills
-per-phase through legacy fields.
+As a **kstack operator** (and the agent executing its workflows), I want the
+approved six-workflow catalog — develop, sprint, investigate, review,
+discover, audit — redesigned on the step model introduced in S3, so that
+skill knowledge arrives just-in-time per atomic unit of work, and rejection
+loops route deterministically where they add value — instead of today's
+mixed model where one piloted phase is stepped and everything else still
+injects skills per-phase through legacy fields. (`qa`, `qa-report`,
+standalone `ship` and `quick` were removed during the approved redesign —
+their real cases are covered by `review` with internal `qa-browsing` and
+the develop/sprint/investigate phases.)
 
 ## Actor
 
@@ -36,10 +39,11 @@ stays the reference implementation with only a light review.
 - [ ] AC-2 — No `WorkflowPhase` in any workflow carries a legacy
   `agent`/`task`/`skills`/`chain` field (T10); the fields exist in the type
   only if still needed by non-workflow machinery — otherwise removed.
-- [ ] AC-3 — Verdict loops are active per the D23 rollout table: develop
-  (qa FAIL→implement, review REQUEST_CHANGES→implement), qa (report
-  FAIL→fix→retest), investigate (verify persists→fix, refuted→root-cause),
-  review (findings→fix→re-review), ship (review blocks push pre-push);
+- [ ] AC-3 — Verdict loops are active per the approved redesign:
+  develop (walkthrough fail→build, ui-check fail→build, qa status→implement,
+  review rejected→implement), investigate (verify persists→fix,
+  refuted→root-cause — first multi-target `loopBackOn`), review
+  (target:own → fix→findings bounded; target:external → comment ⚠, no fix);
   sprint loops unchanged.
 - [ ] AC-4 — Every verdict-bearing phase outside sprint routes through the
   same fail-closed machinery as sprint: parsed verdict → expectation map →
@@ -57,10 +61,38 @@ stays the reference implementation with only a light review.
 - [ ] AC-8 — `bun test` is green at sprint end, including new coverage for
   the non-sprint verdict machinery and per-step verdict semantics.
 - [ ] AC-9 — No `pr push` / remote push is performed at any point this
-  sprint (user constraint); commit-archive parks at its entry gate.
+  sprint (user constraint): this live run's legacy commit-archive phase
+  parks at its entry gate; the NEW sprint decomposition carries no push
+  phase at all (archive+retro only) and develop's `ship` phase stays
+  ⚠-gated — the constraint holds trivially.
 - [ ] AC-10 — Each migrated workflow has a recorded verification run or a
   documented reason a live run was not possible (sprint-light cannot fully
   re-run itself mid-session).
+- [ ] AC-11 — New run-start machinery works end-to-end on ≥1 workflow:
+  `asks[]` answers land in `state.vars`, a `skipWhen: {var,equals}` step
+  skips, an `enabled:"auto"` phase resolves via `autoWhen`, and derived
+  skippability is enforced (a needed producer cannot be skipped).
+- [ ] AC-12 — Artifact lifecycle holds: `state.ephemeralArtifacts` files
+  are deleted at terminal status (ledger event), and cross-run handoff
+  artifacts under `.kstack/<workflow>/` survive.
+- [ ] AC-13 — `kstack init` on a scratch repo writes the versioned
+  `<!-- kstack:begin v1 -->` block (2 rules), probes capabilities, installs
+  missing agent defs and scaffolds `.kstack/`; re-run is refused and
+  `--update` rewrites only the block.
+- [ ] AC-14 — All project artifacts and inter-agent communication are in
+  English; `AGENTS.md` carries the language rule and the skill
+  authoring-gate rule.
+- [ ] AC-15 — Verdict routing completions hold: `parkOn` beats
+  `loopBackOn`/advance, `feedback-type==spec` parks (never auto-reruns
+  backlog), parallel lanes engage only under the triple gate
+  (scope==mixed ∧ opt-in ∧ parallel-safe==true) with disjoint file-sets,
+  and verifier steps emit findings via records, not repo files.
+- [ ] AC-16 — Publish-only verdicts work: an edgeless verdict phase
+  writes the validated verdict to `state.lastVerdicts[phaseId]` and
+  advances; `review.fix` runs iff `lastVerdicts.findings.code-review
+  != "approved"` (autoWhen re-evaluated at phase arrival), and
+  `onComplete` fires only on completed status — an approved re-review
+  terminates at `retro`, never loops back into `fix`.
 
 ## Non-goals
 

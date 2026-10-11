@@ -54,36 +54,41 @@ describe("verdict parser (deep-review fixes)", () => {
 // --- Fail-closed verdict routing ---------------------------------------------
 
 describe("routeVerdict fail-closed", () => {
+  // S4: keyed by (workflowId, phaseId); edges resolve from the real sprint def.
+  const rv = (phaseId: string, parsed: Parameters<typeof routeVerdict>[2]) =>
+    routeVerdict("sprint", phaseId, parsed, { phase: getWorkflow("sprint")!.phases.find((p) => p.id === phaseId) });
+
   test("missing expectation map parks instead of advancing", () => {
-    assert.equal(routeVerdict("no-such-gate", { verdicts: { status: "green" } }).kind, "park");
+    assert.equal(routeVerdict("sprint", "no-such-gate", { verdicts: { status: "green" } }).kind, "park");
+    assert.equal(routeVerdict("no-such-workflow", "qa-verdict", { verdicts: { status: "green" } }).kind, "park");
   });
 
   test("negative verdict routes to loop-back even when not in allowed list", () => {
     // status==red is NOT in allowed ["green"] — it is the designed fix-loop
     // trigger and must be checked BEFORE allowed-list membership.
-    assert.equal(routeVerdict("qa-verdict", { verdicts: { status: "red" } }).kind, "loop-back");
-    assert.equal(routeVerdict("qa-verdict", { verdicts: { status: "orange" } }).kind, "loop-back");
+    assert.equal(rv("qa-browsing", { verdicts: { status: "red" } }).kind, "loop-back");
+    assert.equal(rv("qa-browsing", { verdicts: { status: "orange" } }).kind, "loop-back");
   });
 
   test("off-map non-negative value parks", () => {
-    assert.equal(routeVerdict("qa-verdict", { verdicts: { status: "approved" } }).kind, "park");
+    assert.equal(rv("qa-browsing", { verdicts: { status: "approved" } }).kind, "park");
   });
 
   test("missing required variable parks", () => {
-    assert.equal(routeVerdict("qa-verdict", { verdicts: {} }).kind, "park");
+    assert.equal(rv("qa-browsing", { verdicts: {} }).kind, "park");
   });
 
   test("positive verdict advances", () => {
-    assert.equal(routeVerdict("qa-verdict", { verdicts: { status: "green" } }).kind, "advance");
+    assert.equal(rv("qa-browsing", { verdicts: { status: "green" } }).kind, "advance");
   });
 
   test("security rejection with high severity freezes; low loops back", () => {
-    const high = routeVerdict("devsecops-review", {
+    const high = rv("devsecops-review", {
       verdicts: { "code-review": "approved", "security-review": "rejected" },
       severity: "critical",
     });
     assert.equal(high.kind, "freeze");
-    const low = routeVerdict("devsecops-review", {
+    const low = rv("devsecops-review", {
       verdicts: { "code-review": "approved", "security-review": "rejected" },
       severity: "low",
     });
@@ -127,13 +132,15 @@ describe("advancePhase gate integrity", () => {
 
   test("loopBackTo naming a missing phase parks instead of approving", () => {
     const state = {
-      ...base(),
+      ...createState("sprint", "goal"),
       phaseIndex: 2,
       pendingVerdict: { phaseId: "ghost-gate", parsed: { verdicts: { status: "red" } }, excerpt: "" },
     };
+    // A phase id with no EXPECTATIONS entry parks no-expectation; a mapped
+    // phase whose edge names a missing phase parks unroutable — both hold.
     const next = advancePhase(state, "ghost-gate", { status: "completed", summary: "done" }, 3, { phases });
     assert.equal(next.status, "paused");
-    assert.match(next.pausedReason ?? "", /unroutable/);
+    assert.match(next.pausedReason ?? "", /no-expectation/);
   });
 });
 
@@ -156,12 +163,13 @@ describe("entry gate", () => {
     assert.equal(next.entryGate, undefined);
   });
 
-  test("commit-archive is the sprint phase that needs the entry gate", () => {
+  test("archive is in sprint and review carries the side-effect entry gate", () => {
     const sprint = getWorkflow("sprint")!;
-    const commitArchive = sprint.phases.find((p) => p.id === "commit-archive");
-    assert.ok(commitArchive, "commit-archive phase missing");
-    assert.equal(commitArchive.advance, "manual");
-    assert.equal(sprint.phases[sprint.phases.length - 1].id, "commit-archive");
+    const archive = sprint.phases.find((p) => p.id === "archive");
+    assert.ok(archive, "archive phase exists in sprint");
+    const review = getWorkflow("review")!;
+    const sideEffectStep = review.phases.some((p) => p.steps?.some((s) => s.sideEffect));
+    assert.ok(sideEffectStep, "review has side-effect step requiring entry gate");
   });
 });
 

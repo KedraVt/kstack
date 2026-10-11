@@ -160,6 +160,12 @@ export interface SpawnRequest {
    * under `bun test` must force node.exe — bun cannot host the pi CLI.
    */
   execPathOverride?: string;
+  /**
+   * S4/ADR-23: extra env merged over silentChildEnv() — run/phase/step ids
+   * and the kstack-report CLI path ride here so a delegated step can emit
+   * its own canonical record.
+   */
+  env?: Record<string, string>;
 }
 
 /**
@@ -459,7 +465,7 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
           // which is the only way to stop pi's internal exec/grep/find spawns
           // — none pass the flag — from flashing a console window per call.
           windowsHide: true,
-          env: silentChildEnv(),
+          env: { ...silentChildEnv(), ...req.env },
         });
       } catch (err: any) {
         // Synchronous spawn failures (invalid args, permissions) are
