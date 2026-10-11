@@ -15,7 +15,7 @@ metadata:
 compatibility: Runtime/bin helpers degrade gracefully; pure review methodology otherwise.
 ---
 
-<!-- provenance: gstack/gstack-plan-eng-review (scope gate, Step 0, review sections) — boilerplate stripped: brain-cache, learnings, plan-mode machinery adapted to pi · rewritten S1 2026-02-11 -->
+<!-- provenance: gstack/gstack-plan-eng-review (scope gate, Step 0, review sections) — boilerplate stripped: brain-cache, learnings, plan-mode machinery adapted to pi · rewritten S1 2026-02-11 — amended S4: orchestrated mode, fidelity check, fix-forward -->
 
 # Plan Engineering Review
 
@@ -28,6 +28,14 @@ bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry
 ```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), default the review target to the current branch diff or the artifact supplied in the task, make assumptions explicit with `~assumed`, and never block a gate waiting for an answer.
+
+> **Orchestrated run?** When the task supplies the artifact path, that plan
+> file IS the review target — skip the scope gate and the Design Doc Check
+> (office-hours offer included), start at Step 0. Findings run
+> **fix-forward**: clearly-correct resolutions are applied as edits to the
+> plan file and marked `applied ✎` in the findings table; only genuine
+> trade-offs surface as `UNRESOLVED DECISIONS` — the review is the last
+> pass, no kick-back to drafting.
 
 ## Scope gate (FIRST — hard STOP, overrides everything below)
 
@@ -85,11 +93,15 @@ Before reviewing anything:
 7. **Distribution** — new artifact type (binary, package, image, app) without
    a build/publish pipeline → flag it; deferred distribution must appear in
    "NOT in scope", never silently dropped.
+8. **Fidelity** — the plan carries every upstream decision supplied with the
+   task/step inputs. A silently-dropped decision or scope re-inflation vs
+   `NOT in scope` → flag it.
 
 **If the complexity check triggers (>8 files or >2 new services): STOP** —
 `ask_user_question` naming what's overbuilt + a proposed minimal version;
-reduce or proceed only on the answer. Once the user accepts/rejects the scope
-reduction, commit fully — never re-argue scope in later sections.
+reduce or proceed only on the answer (orchestrated: park it under
+`UNRESOLVED DECISIONS` — the gate decides). Once the user accepts/rejects
+the scope reduction, commit fully — never re-argue scope in later sections.
 
 ## The four-section review
 
@@ -97,6 +109,8 @@ Work interactively, one section at a time (Architecture → Code Quality →
 Tests → Performance), at most 8 top issues per section. Read
 `references/review-sections.md` and execute it in full — sections, outside
 voice, required outputs, and report format are the source of truth.
+Orchestrated runs still run all four sections but fix-forward instead of
+asking per finding.
 
 ## Judgment layer (apply throughout — instincts, not checklist)
 
@@ -131,10 +145,16 @@ bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry
 ## DoD gate (verification)
 
 - Scope gate ran first — target confirmed via `ask_user_question` before any
-  repo exploration.
-- Step 0 scope challenge emitted; complexity-smell stop honored if triggered.
+  repo exploration; orchestrated runs (artifact path supplied) skipped it
+  and the Design Doc Check entirely.
+- Step 0 scope challenge emitted — fidelity check included; complexity-smell
+  stop honored if triggered.
 - All four review sections ran (or skip reasons stated); ≤8 issues each;
   every recommendation is opinionated with tradeoffs.
+- Orchestrated runs fix-forwarded: clearly-correct resolutions applied as
+  plan-file edits marked `applied ✎` in the findings table; `UNRESOLVED
+  DECISIONS` reserved for genuine trade-offs. Standalone runs stayed
+  interactive.
 - Plan file ends with `## REVIEW REPORT` + terminal unresolved-decisions
   line (exact contract above) — body prose doesn't count.
 
@@ -153,5 +173,6 @@ bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry
 
 ---
 
-**First action is the scope gate — `ask_user_question` before any repo
-exploration. Every recommendation is opinionated with concrete tradeoffs.**
+**Standalone: first action is the scope gate — `ask_user_question` before
+any repo exploration. Every recommendation is opinionated with concrete
+tradeoffs.**

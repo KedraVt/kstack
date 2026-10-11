@@ -1263,13 +1263,13 @@ describe("input router (Q4): short inputs still re-anchor during an active workf
     // resumed and implemented the plan instead of staying parked.
     const handler = createInputRouter({} as any);
     const out = handler(
-      { text: "rendi la nav più compatta", source: "interactive" },
+      { text: "make the nav more compact", source: "interactive" },
       fakeRouterCtx(sprintState(2, { status: "awaiting_approval" })),
     ) as any;
     assert.equal(out.action, "transform");
     assert.match(out.text, /PARKED for user approval/);
     assert.ok(!out.text.includes("Continue working on the current phase"));
-    assert.ok(out.text.endsWith("rendi la nav più compatta"));
+    assert.ok(out.text.endsWith("make the nav more compact"));
   });
 
   test("intent suggestions still fire for long input without a workflow", () => {

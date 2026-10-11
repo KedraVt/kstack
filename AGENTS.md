@@ -19,3 +19,10 @@
   (`pi --mode json -p --no-session`, no user on the wire) must not block on
   `ask_user_question` — each carries a "Headless run?" fallback line that
   picks the safe option and records `~assumed` choices in the report.
+- **Language**: all artifacts and inter-agent communication are English —
+  docs, skills, ephemeral files, subagent task briefs, and their reports.
+  Exception: the main agent replies to the user in the user's language
+  (Italian if the user writes Italian).
+- **Skill authoring gate**: every new or revised `kstack-*` skill passes
+  the `.devin/skills/authoring-skills` pipeline (Phases 0-4 + pre-flight
+  minimum; baseline/evals validated on live runs).

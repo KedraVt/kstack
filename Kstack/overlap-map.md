@@ -1,111 +1,111 @@
-# S1-T2 — Overlap map (definitiva)
+# S1-T2 — Overlap map (final)
 
-Basata sull'audit T1 (estrazione meccanica) + lettura dei corpi unici.
-Le 78 dir si riducono a **48 corpi unici** (16+14 copie identiche tra layer).
+Based on the T1 audit (mechanical extraction) + reading of the unique bodies.
+The 78 dirs reduce to **48 unique bodies** (16+14 identical copies across layers).
 
-## Cluster e sovrapposizioni reali
+## Clusters and real overlaps
 
 ### 1. Debug / root-cause
-| Membro | Layer | Note |
+| Member | Layer | Notes |
 |---|---|---|
-| `beta-debugging` | sprint-beta | fusione esistente: skeleton investigate + disciplina systematic. Contratto DEBUG REPORT + 3-strike. **Vincitore.** |
-| `gstack-investigate` | gstack | sussunto; in più ha solo gli hook memory (da portare nel vincitore se si tiene il memory layer) |
-| `systematic-debugging` | kedra | sussunto; 8 reference file utili → `beta-debugging/references/` |
-| `gstack-fix-strategy` | sprint-beta | ruolo diverso (valida causa confermata → fix plan); usato dalla chain investigate. **Resta.** |
-| `agent-introspection-debugging` | kedra | dominio diverso: self-debug dell'agente (loop, context drift). Non sovrapposto. **Resta** — candidato step S3 (stuck machinery). |
+| `beta-debugging` | sprint-beta | existing merge: investigate skeleton + systematic discipline. DEBUG REPORT + 3-strike contract. **Winner.** |
+| `gstack-investigate` | gstack | subsumed; only adds the memory hooks (to port into the winner if the memory layer is kept) |
+| `systematic-debugging` | kedra | subsumed; 8 useful reference files → `beta-debugging/references/` |
+| `gstack-fix-strategy` | sprint-beta | different role (validates confirmed cause → fix plan); used by the investigate chain. **Stays.** |
+| `agent-introspection-debugging` | kedra | different domain: agent self-debug (loops, context drift). Not overlapping. **Stays** — S3 step candidate (stuck machinery). |
 
 ### 2. Code review
-| Membro | Layer | Note |
+| Member | Layer | Notes |
 |---|---|---|
-| `beta-code-review` | sprint-beta | fusione review + code-audit-reviewer. Verdict `code-review == approved|rejected` compatibile col parser. **Vincitore.** |
-| `gstack-review` | gstack | sussunto; asset da migrare: `review/checklist.md`, `design-checklist.md`, `greptile-triage.md`, `specialists/*` (7), `TODOS-format.md`. Persi: review-army dispatch, fix-first auto-fix, adversarial Codex (voluto — il fix-loop è materia di S4, Codex è dep esterna opt-in) |
-| `code-audit-reviewer` | kedra | sussunto |
-| `code-simplification` | kedra+β | NON review: refactoring clarity. **Resta** (manuale). |
-| `code-tour` | kedra+β | NON review: file `.tour` VSCode. **Keep-manual debole** — vedi open question. |
+| `beta-code-review` | sprint-beta | review + code-audit-reviewer merge. `code-review == approved|rejected` verdict compatible with the parser. **Winner.** |
+| `gstack-review` | gstack | subsumed; assets to migrate: `review/checklist.md`, `design-checklist.md`, `greptile-triage.md`, `specialists/*` (7), `TODOS-format.md`. Lost: review-army dispatch, fix-first auto-fix, adversarial Codex (intentional — the fix-loop is S4 business, Codex is an opt-in external dep) |
+| `code-audit-reviewer` | kedra | subsumed |
+| `code-simplification` | kedra+β | NOT review: refactoring clarity. **Stays** (manual). |
+| `code-tour` | kedra+β | NOT review: VSCode `.tour` files. **Weak keep-manual** — see open question. |
 
 ### 3. QA
-| Membro | Layer | Note |
+| Member | Layer | Notes |
 |---|---|---|
-| `beta-qa` | sprint-beta | fusione qa + qa-only + triage qa-git. Dual-channel `status == green|red|orange`. **Vincitore.** |
-| `gstack-qa` | gstack | sussunto; asset: `qa/references/issue-taxonomy.md`, `qa/templates/qa-report-template.md` |
-| `gstack-qa-only` | gstack | sussunto (report-only è un mode di beta-qa) |
-| `qa-git` | kedra | sussunto (triage → beta-qa; save-point → beta-ship) |
+| `beta-qa` | sprint-beta | qa + qa-only + qa-git triage merge. Dual-channel `status == green|red|orange`. **Winner.** |
+| `gstack-qa` | gstack | subsumed; assets: `qa/references/issue-taxonomy.md`, `qa/templates/qa-report-template.md` |
+| `gstack-qa-only` | gstack | subsumed (report-only is a beta-qa mode) |
+| `qa-git` | kedra | subsumed (triage → beta-qa; save-point → beta-ship) |
 
 ### 4. Security
-| Membro | Layer | Note |
+| Member | Layer | Notes |
 |---|---|---|
-| `beta-security` | sprint-beta | fusione appsec-hardening + cso. Verdict `security-review ==` + severity. **Vincitore.** |
-| `gstack-cso` | gstack | sussunto; asset: `cso/sections/audit-phases.md` |
-| `appsec-hardening` | kedra | sussunto |
-| `docker-manager` | kedra+β | complementare (audit Dockerfile condizionale, sprint devsecops). **Resta.** |
-| `pipeline-sre` | kedra+β | complementare (CI/CD audit condizionale). **Resta.** |
+| `beta-security` | sprint-beta | appsec-hardening + cso merge. `security-review ==` verdict + severity. **Winner.** |
+| `gstack-cso` | gstack | subsumed; asset: `cso/sections/audit-phases.md` |
+| `appsec-hardening` | kedra | subsumed |
+| `docker-manager` | kedra+β | complementary (conditional Dockerfile audit, sprint devsecops). **Stays.** |
+| `pipeline-sre` | kedra+β | complementary (conditional CI/CD audit). **Stays.** |
 
 ### 5. Ship / release
-| Membro | Layer | Note |
+| Member | Layer | Notes |
 |---|---|---|
-| `beta-ship` | sprint-beta | fusione ship + save-point qa-git. SHIP REPORT + BLOCKED. **Vincitore.** |
-| `gstack-ship` | gstack | sussunto; asset: `ship/sections/*` (8 file) + `review/TODOS-format.md` |
+| `beta-ship` | sprint-beta | ship + qa-git save-point merge. SHIP REPORT + BLOCKED. **Winner.** |
+| `gstack-ship` | gstack | subsumed; assets: `ship/sections/*` (8 files) + `review/TODOS-format.md` |
 
 ### 6. Plan / interview
-Nessuna fusione beta esistente. Tutti upstream `gstack-*` con boilerplate condiviso.
+No existing beta merge. All upstream `gstack-*` with shared boilerplate.
 
-| Membro | Note |
+| Member | Notes |
 |---|---|
-| `grilling` | vendored, ha `## DoD gate`. Step develop.plan.s1. **Resta.** |
-| `gstack-office-hours` | YC product judgment, 2 mode. **Keep-rewrite** + sorgente split `plan-draft` (D22). |
+| `grilling` | vendored, has `## DoD gate`. develop.plan.s1 step. **Stays.** |
+| `gstack-office-hours` | YC product judgment, 2 modes. **Keep-rewrite** + `plan-draft` split source (D22). |
 | `gstack-plan-eng-review` | load-bearing develop.plan.s3. **Keep-rewrite.** |
-| `gstack-plan-ceo-review` | mega review, mode EXPANSION/HOLD ecc. **Keep-rewrite.** |
-| `gstack-plan-design-review` | designer's eye; dip. "design binary" upstream → da neutralizzare. **Keep-rewrite.** |
+| `gstack-plan-ceo-review` | mega review, EXPANSION/HOLD etc. modes. **Keep-rewrite.** |
+| `gstack-plan-design-review` | designer's eye; upstream "design binary" dep → to neutralize. **Keep-rewrite.** |
 | `gstack-plan-devex-review` | DX review. **Keep-rewrite.** |
-| `gstack-autoplan` | meta-pipeline che orchestra i 4 plan-review + Codex dual-voice. Con step model S3/S4 diventa decomposizione nativa. **Keep-rewrite manuale** (marcato: redesign S4). |
-| `gstack-spec` | spec → issue backlog-ready, redaction gate (usa `gstack-redact`). **Keep-rewrite.** |
+| `gstack-autoplan` | meta-pipeline orchestrating the 4 plan-reviews + Codex dual-voice. With the S3/S4 step model it becomes native decomposition. **Manual keep-rewrite** (marked: S4 redesign). |
+| `gstack-spec` | spec → backlog-ready issue, redaction gate (uses `gstack-redact`). **Keep-rewrite.** |
 
-### 7. Sprint / DDD (kedra, copie identiche in β)
+### 7. Sprint / DDD (kedra, identical copies in β)
 `product-capability`, `system-design`, `adr`, `tasks`, `test-driven-development`
 (+`testing-anti-patterns.md`), `verification-before-completion`,
-`strategic-compact`. Tutti referenziati dal workflow sprint o complementari.
-**Tutti restano.** Contratti `_XX.md`/`STATUS ==` già compatibili.
+`strategic-compact`. All referenced by the sprint workflow or complementary.
+**All stay.** `_XX.md`/`STATUS ==` contracts already compatible.
 
 ### 8. Docs
-`gstack-document-generate` + `gstack-document-release`: nessuna fusione —
-usati da develop.document e ship.update-docs. **Keep-rewrite.**
+`gstack-document-generate` + `gstack-document-release`: no merge —
+used by develop.document and ship.update-docs. **Keep-rewrite.**
 Asset: `document-release/sections/release-body.md`.
 
 ### 9. Memory / context
-| Membro | Note |
+| Member | Notes |
 |---|---|
-| `gstack-context-save` / `gstack-context-restore` | UX save/restore contesto su `~/.gstack/projects/`. **Keep-rewrite** (redesign S5b). |
-| `gstack-learn` | UI sullo store learnings (show/search/prune/export/add). **Keep-rewrite.** |
-| `gstack-retro` | retro settimanale su git; non wired; dip `gstack-global-discover` **mancante** in runtime/bin. **Drop candidato** (D9 note). |
-| `strategic-compact` | compact report per sub-agent — vedi cluster 7. |
+| `gstack-context-save` / `gstack-context-restore` | context save/restore UX on `~/.gstack/projects/`. **Keep-rewrite** (S5b redesign). |
+| `gstack-learn` | UI over the learnings store (show/search/prune/export/add). **Keep-rewrite.** |
+| `gstack-retro` | weekly git retro; not wired; dep `gstack-global-discover` **missing** from runtime/bin. **Drop candidate** (D9 note). |
+| `strategic-compact` | compact report for sub-agents — see cluster 7. |
 
 ### 10. Browser ops
-`gstack-scrape` (intent→refuse-mutating→prototype sui tool `gstack_*` browse) e
-`gstack-skillify` (codifica scrape → skill permanente; dip `browse/src/browser-skill-write.ts`,
-`~/.gstack/browser-skills/`). **Keep-rewrite entrambe.**
+`gstack-scrape` (intent→refuse-mutating→prototype over the `gstack_*` browse tools) and
+`gstack-skillify` (codify a scrape → permanent skill; deps `browse/src/browser-skill-write.ts`,
+`~/.gstack/browser-skills/`). **Keep-rewrite both.**
 
 ### 11. Utility / misc
-| Membro | Note |
+| Member | Notes |
 |---|---|
-| `add-model` | helper `~/.pi/agent/models.json` + `upsert.mjs` + `references/schema.md`. Pi-nativo. **Resta.** |
-| `manim-video` | pipeline Manim + asset py. Nicchia ma autocontenuta. **Resta** (manuale). |
-| `gstack` (root) | router meta-skill — il routing ora lo fa `/kstack` + orchestratore. **Drop.** |
+| `add-model` | helper `~/.pi/agent/models.json` + `upsert.mjs` + `references/schema.md`. Pi-native. **Stays.** |
+| `manim-video` | Manim pipeline + py assets. Niche but self-contained. **Stays** (manual). |
+| `gstack` (root) | router meta-skill — routing is now done by `/kstack` + the orchestrator. **Drop.** |
 
-### 12. Locali (T6 — da `~/.agents/skills/`, gated rubrica)
-| Membro | Note |
+### 12. Local skills (T6 — from `~/.agents/skills/`, rubric-gated)
+| Member | Notes |
 |---|---|
-| `impeccable` | design UI completo: 35 reference + 40 script .mjs. Path `.pi/skills/impeccable/` da adattare. Overlap parziale con `gstack-design-review` e `design-taste-frontend` → vedi open questions. **Port.** |
-| `design-taste-frontend` | anti-slop landing/portfolio, 87KB single-file. Overlap parziale impeccable. **Port** (o merge — decisione utente). |
-| `mindrun` | pre-test static walkthrough; primo candidato step pre-implement S4. **Port.** |
-| `retro` (locale) | session retro → migliorie env agente. ≠ gstack-retro. **Port.** |
+| `impeccable` | full UI design: 35 references + 40 .mjs scripts. `.pi/skills/impeccable/` paths to adapt. Partial overlap with `gstack-design-review` and `design-taste-frontend` → see open questions. **Port.** |
+| `design-taste-frontend` | anti-slop landing/portfolio, 87KB single-file. Partial impeccable overlap. **Port** (or merge — user decision). |
+| `mindrun` | pre-test static walkthrough; first S4 pre-implement step candidate. **Port.** |
+| `retro` (local) | session retro → agent env improvements. ≠ gstack-retro. **Port.** |
 
-## Numeri
+## Numbers
 
-- Corpi unici valutati: 48 (23 gstack + 18 kedra + 7 beta-unique)
-- Vincitori beta (già fusi): 5
-- Drop per sussunzione: 11
-- Drop router/meta: 1 (+ retro se confermato)
-- Keep-rewrite upstream: 16 → 15 se retro drop
-- Keep (kedra/vendored/utilities): 21
-- Port locali: 4 (+ plan-draft nuova da D22)
-- **Catalogo target: ~34-36 skill** (+1 plan-draft)
+- Unique bodies evaluated: 48 (23 gstack + 18 kedra + 7 beta-unique)
+- Beta winners (already merged): 5
+- Drops by subsumption: 11
+- Router/meta drops: 1 (+ retro if confirmed)
+- Upstream keep-rewrites: 16 → 15 if retro dropped
+- Keeps (kedra/vendored/utilities): 21
+- Local ports: 4 (+ new plan-draft from D22)
+- **Target catalog: ~34-36 skills** (+1 plan-draft)

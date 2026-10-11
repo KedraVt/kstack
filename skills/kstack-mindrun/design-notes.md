@@ -1,166 +1,166 @@
-# Design Notes — Skill di bug-discovery statica (nome da definire a fine progetto)
+# Design Notes — Static bug-discovery skill (final name TBD at project end)
 
-> Cartella di lavoro: `cline-skill/`. Il nome definitivo della skill viene deciso a fine progetto;
-> nella bozza di `SKILL.md` si usa `pipeline-desk-check` come nome provvisorio.
+> Working folder: `cline-skill/`. The skill's final name is decided at project end;
+> the `SKILL.md` draft uses `pipeline-desk-check` as a provisional name.
 
-## 1. Obiettivo e posizionamento
+## 1. Goal and positioning
 
-Scoprire bug e incoerenze **invisibili alla compilazione** testando il software *teoricamente*:
-roleplay dell'agente attraverso la pipeline del software (UI → input → trasformazione → output),
-con catene causa-effetto ancorate alla lettura del codice reale, senza eseguire l'app.
+Discover bugs and inconsistencies **invisible to compilation** by testing the software *theoretically*:
+the agent role-plays through the software pipeline (UI → input → transformation → output),
+with cause-effect chains anchored to reading the real code, without running the app.
 
-- **Quando si attiva**: il codice compila, nessun bug noto, prima dei test runtime.
-- **Output**: trigger falsificabili pronti a diventare test + domande all'utente sui comportamenti
-  non specificati + matrice DoD verificata.
-- **Posizionamento esplicito** (per evitare overlap): è *pre-emptive static discovery*.
-  - vs `diagnosing-bugs` (Pocock) / `systematic-debugging` (locale): quelle partono da un sintomo
-    osservato e richiedono un feedback loop; questa genera i candidati E i feedback loop, senza sintomo.
-  - vs `bug-hunt-swarm`: quella è diagnosis-first (bug già noto); questa cerca difetti latenti.
-  - vs `code-audit-reviewer` (locale): quella revisiona a 5 dimensioni; questa cammina il flusso d'uso.
-- **Collocazione nel sprint flow** (produttore/consumatore da registrare in README.md):
-  dopo `code-audit-reviewer`, prima di `qa-git`.
+- **When it activates**: the code compiles, no known bugs, before runtime tests.
+- **Output**: falsifiable triggers ready to become tests + questions for the user about
+  unspecified behaviors + verified DoD matrix.
+- **Explicit positioning** (to avoid overlap): it's *pre-emptive static discovery*.
+  - vs `diagnosing-bugs` (Pocock) / `systematic-debugging` (local): those start from an
+    observed symptom and require a feedback loop; this one generates the candidates AND the
+    feedback loops, without a symptom.
+  - vs `bug-hunt-swarm`: that one is diagnosis-first (bug already known); this one hunts latent defects.
+  - vs `code-audit-reviewer` (local): that one reviews along 5 dimensions; this one walks the usage flow.
+- **Placement in the sprint flow** (producer/consumer to record in README.md):
+  after `code-audit-reviewer`, before `qa-git`.
 
-## 2. Workflow a 6 fasi
+## 2. Six-phase workflow
 
-### Fase 0 — Briefing DoD (non bloccante)
-- Con l'utente si definiscono i DoD della pipeline: input attesi, trasformazioni, output, gestione errori.
-- Si scelgono **2–3 scenari**: happy path + un edge case + un input "ostile". Ogni scenario avrà la sua trace table.
-- Formato: investigation brief (da bug-hunt-swarm) — cosa deve succedere / cosa non è ancora provato /
-  che cosa conterebbe come conferma.
-- Se l'utente non è disponibile: si procede con assunzioni marcate `~` (non bloccante, pattern Pocock).
+### Phase 0 — DoD briefing (non-blocking)
+- With the user, define the pipeline DoDs: expected inputs, transformations, outputs, error handling.
+- Pick **2–3 scenarios**: happy path + one edge case + one "hostile" input. Each scenario gets its own trace table.
+- Format: investigation brief (from bug-hunt-swarm) — what must happen / what is not yet proven /
+  what would count as confirmation.
+- If the user is unavailable: proceed with assumptions marked `~` (non-blocking, Pocock pattern).
 
-### Fase 1 — Breadboard UI
-- Modello Places / affordances / wiring (da `breadboarding`, rjs/shaping-skills — Shape Up):
-  cosa è visibile, cosa è bloccante, dove passa il controllo al codice.
+### Phase 1 — Breadboard UI
+- Places / affordances / wiring model (from `breadboarding`, rjs/shaping-skills — Shape Up):
+  what is visible, what is blocking, where control passes to the code.
 
-### Fase 2 — Pipeline walk
-- **Regola centrale (da trace-the-code)**: a ogni step si legge il codice reale, mai la memoria di
-  quello che "dovrebbe" fare.
-- Domande fisse ripetute a ogni step (da cognitive-walkthrough, adattate):
-  come arriva l'input qui? / cosa assume il codice su di esso? / cosa succede se l'assunzione è violata? /
-  dove finisce l'output e chi lo valida?
-- **Output tabellare**: per ogni step → `step | input atteso | come lo riceve il codice | output prodotto | destinazione`.
-- **Trace table per scenario** (desk-checking classico, da examprep-ai): `Iter | VarA | VarB | ... | Output`,
-  che evolve step per step.
-- **Marcatori**: `?` = comportamento non specificato → domanda per l'utente; `~` = assunzione
-  non verificata, si prosegue.
-- **Naive pass (comportamento "bambino")**: a ogni step, spiegare lo step come a un bambino di 6 anni;
-  ogni "ovviamente / naturalmente / semplicemente" è un'assunzione implicita → Premessa da verificare.
+### Phase 2 — Pipeline walk
+- **Central rule (from trace-the-code)**: at each step read the real code, never your memory of
+  what it "should" do.
+- Fixed questions repeated at each step (from cognitive-walkthrough, adapted):
+  how does the input get here? / what does the code assume about it? / what happens if the
+  assumption is violated? / where does the output end up and who validates it?
+- **Tabular output**: for each step → `step | expected input | how the code receives it | output produced | destination`.
+- **Per-scenario trace table** (classic desk-checking, from examprep-ai): `Iter | VarA | VarB | ... | Output`,
+  evolving step by step.
+- **Markers**: `?` = unspecified behavior → question for the user; `~` = unverified
+  assumption, keep going.
+- **Naive pass ("child" behavior)**: at each step, explain the step as to a 6-year-old;
+  every "obviously / naturally / simply" is an implicit assumption → a Premise to verify.
 
-#### Regole del naive pass (ri-armo e destini)
-- Il naive pass **non è una fase, è un contesto**: si ri-arma a ogni confine strutturale
-  (cambio modulo/file dominante, cambio paradigma: UI→backend, sync→async, processo→processo, app→DB, I/O esterno),
-  **dopo ogni finding accettato** (momento di massima fiducia = massimo rischio di bias),
-  e al checkpoint di metà walkthrough (rete di sicurezza).
-- Due tipi di "perché", due destini:
-  - *Perché-meccanico* ("come lo sai? dove nel codice?") → l'agente si risponde SOLO rileggendo il codice.
-  - *Perché-intent* ("perché si rifiuta l'input vuoto invece di autocorreggerlo?") → se il briefing
-    non lo copre, va nella coda `?` per l'utente. Mai rispondersi da solo.
-- **Regola d'oro**: una risposta non è accettata finché non cita file+riga.
+#### Naive pass rules (re-arming and destinations)
+- The naive pass **is not a phase, it's a context**: it re-arms at every structural boundary
+  (dominant module/file change, paradigm change: UI→backend, sync→async, process→process, app→DB, external I/O),
+  **after every accepted finding** (peak-confidence moment = peak bias risk),
+  and at the mid-walkthrough checkpoint (safety net).
+- Two kinds of "why", two destinations:
+  - *Mechanical-why* ("how do you know? where in the code?") → the agent answers ONLY by re-reading the code.
+  - *Intent-why* ("why is empty input rejected instead of auto-corrected?") → if the briefing
+    doesn't cover it, it goes in the `?` queue for the user. Never answer it yourself.
+- **Golden rule**: an answer is not accepted until it cites file+line.
 
-### Fase 3 — Causal chain check
-- **Checklist degli assi del mismatch** (da code-review-and-quality, addyosmani):
-  tipo, unità/misura, ordine, stato, null/vuoto, encoding.
-- **Formato finding a 5 campi** (da Logic-Lens logic-review):
-  `Premises: / Trace: / Divergence: / Trigger: / Remedy:` — campi obbligatori, non parafrasabili.
-  Un finding senza Trigger concreto (input specifico → catena → output errato) è "a vibe": si scarta o si affina.
-- **Design-intent gate** (Logic-Lens): prima di segnalare un problema a un boundary, verificare se il codice
-  gestisce esplicitamente il caso (throw, 429, reject). Se sì, NON è un bug.
-- **Rebuttal avversariale** (Logic-Lens 5.5 + uglybug): per ogni finding, 3 domande di confutazione
-  (premise / path / consequence rebuttal). Penalità asimmetrica nello Skeptic: respingere un bug vero
-  costa 2x rispetto ad accettarne uno falso (anti-sycophancy, SycEval arXiv 2502.08177).
-- **Verifica fedeltà citazioni** (ruolo Reproducer di uglybug): pass separato in cui si rileggono SOLO
-  le citazioni di codice dei finding. Critico: l'agente sta testando il proprio codice.
-- Multi-wave con dedup e auto-stop (2 wave pulite consecutive) se il progetto è grande.
+### Phase 3 — Causal chain check
+- **Mismatch-axes checklist** (from code-review-and-quality, addyosmani):
+  type, unit/measure, order, state, null/empty, encoding.
+- **5-field finding format** (from Logic-Lens logic-review):
+  `Premises: / Trace: / Divergence: / Trigger: / Remedy:` — mandatory fields, not paraphrasable.
+  A finding without a concrete Trigger (specific input → chain → wrong output) is "a vibe": discard or refine it.
+- **Design-intent gate** (Logic-Lens): before flagging a problem at a boundary, check whether the code
+  explicitly handles the case (throw, 429, reject). If yes, it is NOT a bug.
+- **Adversarial rebuttal** (Logic-Lens 5.5 + uglybug): for each finding, 3 refutation questions
+  (premise / path / consequence rebuttal). Asymmetric penalty in the Skeptic: rejecting a real bug
+  costs 2x vs accepting a false one (anti-sycophancy, SycEval arXiv 2502.08177).
+- **Citation-fidelity check** (uglybug's Reproducer role): a separate pass re-reading ONLY
+  the findings' code citations. Critical: the agent is testing its own code.
+- Multi-wave with dedup and auto-stop (2 consecutive clean waves) if the project is large.
 
-### Fase 4 — Report
-- **Matrice DoD come singola fonte di verità**: una riga per ogni DoD del briefing,
-  verdetto `verificata / mismatch / non specificata → domanda`.
-- **Findings ranke** con confidence (high/medium/low) + "smallest proof step" (da bug-hunt-swarm).
-- **Triage a 3 velocità**: `prove now / fix next / follow up later`.
-- **Coda domande**: prioritarie (sul percorso happy-path) prima; poi **overflow**
-  (cap indicativo ~3 domande/step per proteggere l'attenzione dell'utente — l'overflow va nel report,
-  MAI verso il silenzio; dedup prima dell'overflow).
-- **Sensore di briefing incompleto**: se più di 2–3 step consecutivi traboccano il cap,
-  riaprire il briefing invece di accumulare domande.
-- **Execution Gate opzionale** (Logic-Lens step 8): se un runtime è disponibile, generare un riproducer
-  minimo per i finding critici ed eseguirlo; i verificati prendono tag ✅.
-- Artefatto: `qa/desk-check_XX.md` con blocco `STATUS ==` parseable dal planner
-  (convenzione `code-audit-reviewer` locale).
+### Phase 4 — Report
+- **DoD matrix as single source of truth**: one row per briefing DoD,
+  verdict `verified / mismatch / unspecified → question`.
+- **Ranked findings** with confidence (high/medium/low) + "smallest proof step" (from bug-hunt-swarm).
+- **3-speed triage**: `prove now / fix next / follow up later`.
+- **Question queue**: priority questions (on the happy path) first; then **overflow**
+  (indicative cap ~3 questions/step to protect the user's attention — overflow goes in the report,
+  NEVER into silence; dedup before overflow).
+- **Incomplete-briefing sensor**: if more than 2–3 consecutive steps overflow the cap,
+  reopen the briefing instead of accumulating questions.
+- **Optional Execution Gate** (Logic-Lens step 8): if a runtime is available, generate a minimal
+  reproducer for the critical findings and run it; verified ones get the ✅ tag.
+- Artifact: `qa/desk-check_XX.md` with a `STATUS ==` block parseable by the planner
+  (local `code-audit-reviewer` convention).
 
-### Fase 5 — Handoff
-- I mismatch diventano **task** (via skill `kstack-tasks` locale), non righe di report dimenticate.
-- Ogni finding critico diventa un **feedback loop / test** per `diagnosing-bugs` o QA reale.
-  La skill NON esegue nulla di suo (salvo Execution Gate opzionale).
+### Phase 5 — Handoff
+- Mismatches become **tasks** (via the local `kstack-tasks` skill), not forgotten report rows.
+- Every critical finding becomes a **feedback loop / test** for `diagnosing-bugs` or real QA.
+  The skill does NOT execute anything itself (except the optional Execution Gate).
 
-## 3. Failure signs (come riconoscere la degenerazione)
+## 3. Failure signs (how to spot degeneration)
 
-- L'agente descrive ciò che *intendeva* scrivere, non ciò che ha scritto (da trace-the-code).
-- L'agente risponde ai "perché" senza aprire file → torna al naive pass.
-- Le domande `?` superano il cap o sono varianti della stessa → briefing incompleto, riaprirlo.
-- L'agente smette di chiedere "come fai a saperlo?" dopo i primi step → bias dell'esperto tornato,
-  ri-armare il naive pass.
+- The agent describes what it *meant* to write, not what it wrote (from trace-the-code).
+- The agent answers "why" questions without opening files → back to the naive pass.
+- The `?` questions exceed the cap or are variants of the same one → incomplete briefing, reopen it.
+- The agent stops asking "how do you know?" after the first steps → expert bias has returned,
+  re-arm the naive pass.
 
-## 4. Architettura d'esecuzione
+## 4. Execution architecture
 
-Single-agent a fasi separate (walkthrough → skeptic → reproducer), con sub-agent opzionali
-per progetti grandi (pattern bug-hunt-swarm: "for a tiny and obvious issue, investigate locally").
+Single-agent with separate phases (walkthrough → skeptic → reproducer), with optional sub-agents
+for large projects (bug-hunt-swarm pattern: "for a tiny and obvious issue, investigate locally").
 
-## 5. Fonti (verificate durante la ricerca)
+## 5. Sources (verified during research)
 
-| Fonte | Stato | Prende |
+| Source | Status | Takes |
 |---|---|---|
-| Logic-Lens / logic-review (hyhmrright, via sickn33) | ✅ verificata | 5 campi, rebuttal, design-intent gate, exec gate |
-| uglybug / bug-hunt (mathifonseca / danpeg) | ✅ verificata | Skeptic asimmetrico, Reproducer, multi-wave |
-| cognitive-walkthrough (mastepanoski) | ✅ verificata | roleplay novice, domande fisse per step |
-| grill-me / grilling / to-questionnaire / diagnosing-bugs (mattpocock) | ✅ verificata | briefing-interview, checkpoint non bloccante, falsificabilità |
-| bug-hunt-swarm (dimillian) | ✅ verificata | investigation brief, ranking+confidence, triage |
-| trace-the-code (alinafe82/cognitive-deadlift) | ✅ verificata (1 install) | regola "codice reale mai memoria", failure signs |
-| breadboarding (rjs/shaping-skills) | ✅ verificata | Places/affordances/wiring, tabelle come verità |
-| examprep-ai (sickn33) | ✅ verificata | trace table Iter/Vars/Output |
-| double-check (meain/dotfiles) | ⚠️ plausibile non confermata | verifica per affermazione (stato→file, comportamento→trace) |
-| code-review-and-quality (addyosmani) | ⚠️ plausibile non verificata | assi del mismatch |
-| TRACE (2389-research), Virtual-Lab | ❓ non verificate | matrice di verifica, multi-scenario (assunte sul merito) |
+| Logic-Lens / logic-review (hyhmrright, via sickn33) | ✅ verified | 5 fields, rebuttal, design-intent gate, exec gate |
+| uglybug / bug-hunt (mathifonseca / danpeg) | ✅ verified | asymmetric Skeptic, Reproducer, multi-wave |
+| cognitive-walkthrough (mastepanoski) | ✅ verified | novice roleplay, per-step fixed questions |
+| grill-me / grilling / to-questionnaire / diagnosing-bugs (mattpocock) | ✅ verified | briefing-interview, non-blocking checkpoint, falsifiability |
+| bug-hunt-swarm (dimillian) | ✅ verified | investigation brief, ranking+confidence, triage |
+| trace-the-code (alinafe82/cognitive-deadlift) | ✅ verified (1 install) | "real code never memory" rule, failure signs |
+| breadboarding (rjs/shaping-skills) | ✅ verified | Places/affordances/wiring, tables as truth |
+| examprep-ai (sickn33) | ✅ verified | trace table Iter/Vars/Output |
+| double-check (meain/dotfiles) | ⚠️ plausible unconfirmed | per-claim verification (state→file, behavior→trace) |
+| code-review-and-quality (addyosmani) | ⚠️ plausible unverified | mismatch axes |
+| TRACE (2389-research), Virtual-Lab | ❓ unverified | verification matrix, multi-scenario (accepted on merit) |
 
-## 6. Decisioni aperte
+## 6. Open decisions
 
-- **Nome della skill**: ✅ **DEFINITO: `kstack-mindrun`** (verificato libero su skills.sh; concorrenti scartati:
-  `premortem` affollato 1.2k+ install, `preflight` inquinato, `prebug` libero ma meno fedele al metodo).
-  Cartella rinominata `cline-skill/` → `mindrun/`, frontmatter `name: mindrun`, artefatti rinominati
-  `mindrun-briefing.md` / `mindrun-report.md`, prefisso task `[mindrun]`, tagline nella description.
-- Registrare producer/consumer nel `README.md` quando la skill è finalizzata.
-- Licenza: campo omesso per ora (da aggiungere se distribuita).
+- **Skill name**: ✅ **DECIDED: `kstack-mindrun`** (verified free on skills.sh; rejected competitors:
+  `premortem` crowded 1.2k+ installs, `preflight` polluted, `prebug` free but less faithful to the method).
+  Folder renamed `cline-skill/` → `mindrun/`, frontmatter `name: mindrun`, artifacts renamed
+  `mindrun-briefing.md` / `mindrun-report.md`, `[mindrun]` task prefix, tagline in the description.
+- Record producer/consumer in `README.md` when the skill is finalized.
+- License: field omitted for now (add if distributed).
 
-## 7. Stato attuale (post-stesura)
+## 7. Current state (post-drafting)
 
-Skill scritta e **validata** (`skills-ref validate` → "Valid skill"):
+Skill written and **validated** (`skills-ref validate` → "Valid skill"):
 
 ```
 cline-skill/
-├── SKILL.md                      # 138 righe, inglese, frontmatter conforme
-├── design-notes.md               # questo file (non distribuito)
+├── SKILL.md                      # 138 lines, English, conformant frontmatter
+├── design-notes.md               # this file (not distributed)
 └── references/
-    ├── briefing-template.md      # template F0
-    ├── finding-format.md         # 5 campi + acceptance gate + esempi good/bad
-    ├── mismatch-axes.md          # 6 assi con domande ed esempi
-    └── report-template.md        # template report incrementale + STATUS block
+    ├── briefing-template.md      # F0 template
+    ├── finding-format.md         # 5 fields + acceptance gate + good/bad examples
+    ├── mismatch-axes.md          # 6 axes with questions and examples
+    └── report-template.md        # incremental report template + STATUS block
 ```
 
-Decisioni applicate rispetto al piano v2:
-- Artefatti ridotti 5 → 2 (`desk-check-briefing.md`, `desk-check-report.md`); breadboard e walk
-  sono sezioni del report, proposed-tasks è sezione di coda del report.
-- Naive pass riformulato come **standard di comprensione per-step** ("riesci a ricostruire la
-  catena input→output dal solo codice?"), non come comportamento ispettivo: niente ri-armo
-  esplicito, niente bacchettamento degli impliciti, domande solo meccaniche.
-- Report scritto **incrementalmente** dopo ogni step → il report parziale è lo stato di resume.
-- Lingua: inglese ovunque (SKILL.md + references).
-- Validazione formale passata con nome provvisorio coincidente con la cartella.
+Decisions applied vs the v2 plan:
+- Artifacts reduced 5 → 2 (`desk-check-briefing.md`, `desk-check-report.md`); breadboard and walk
+  are report sections, proposed-tasks is the report's tail section.
+- Naive pass reformulated as a **per-step comprehension standard** ("can you reconstruct the
+  input→output chain from the code alone?"), not as an inspectorial behavior: no explicit
+  re-arming, no slapping down of implicits, mechanical questions only.
+- Report written **incrementally** after each step → the partial report is the resume state.
+- Language: English everywhere (SKILL.md + references).
+- Formal validation passed with the provisional name matching the folder.
 
-## 8. Installazioni
+## 8. Installs
 
-- **Pi** (earendil-works/pi): `~/.pi/agent/skills/kstack-mindrun/` (user-level, tutti i progetti) — ✅ validata
-- **Cline**: `~/.cline/skills/kstack-mindrun/` (user-level, IDE/CLI/SDK) — ✅ validata
-- Sorgente di verità: `Desktop\.agents-clean\mindrun\` — le installazioni sono copie: dopo ogni
-  modifica al sorgente, ricopiare sulle destinazioni (o sostituire con symlink/junction).
-
+- **Pi** (earendil-works/pi): `~/.pi/agent/skills/kstack-mindrun/` (user-level, all projects) — ✅ validated
+- **Cline**: `~/.cline/skills/kstack-mindrun/` (user-level, IDE/CLI/SDK) — ✅ validated
+- Source of truth: `Desktop\.agents-clean\mindrun\` — the installs are copies: after every
+  change to the source, re-copy to the destinations (or replace with symlink/junction).
 
