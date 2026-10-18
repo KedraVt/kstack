@@ -311,13 +311,13 @@ interface StepWatch {
 let watch: StepWatch | null = null;
 
 export function beginStepWatch(phaseId: string, stepId: string): void {
-  // The ms dim is OFF for main-session watches: a main step's wall clock
-  // includes the user's think/answer time, which no event-driven check can
-  // tell apart from a stall — a >30min human pause would false-fire a healthy
-  // run mid-interview. turns/tokens/usd still bound real model work; the
-  // delegated-step path (executor's onEvent polling) keeps the wall-clock cap
-  // because a subagent has no human on the wire.
-  watch = { run: newStepRun(), phaseId, stepId, budgets: { ...stepBudgetDefaults(), ms: Number.POSITIVE_INFINITY } };
+  // Budgets are OFF for main-session watches: a main step is a conversation
+  // with the user (planning continues until the user is satisfied), so turns,
+  // tokens and wall clock measure the discussion, not a stall. Only the stuck
+  // RULES (repeated/alternating actions, error streaks) still guard it. The
+  // delegated-step path keeps its budgets — a subagent has no human on the wire.
+  const off = Number.POSITIVE_INFINITY;
+  watch = { run: newStepRun(), phaseId, stepId, budgets: { turns: off, tokens: off, usd: off, ms: off, usdPerMin: off } };
 }
 
 export function endStepWatch(): void {

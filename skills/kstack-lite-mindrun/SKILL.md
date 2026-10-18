@@ -2,8 +2,8 @@
 name: kstack-lite-mindrun
 description: >-
   Static code-walkthrough verdict gate for delegated runs: traces the
-  just-built code against the plan doc's declared behaviors and emits
-  `walkthrough == pass|fail` for the orchestrator. Use when dispatched as
+  just-built code against the plan doc's declared behaviors and emits a
+  pass|fail walkthrough verdict for the orchestrator. Use when dispatched as
   an implement-phase post-build walkthrough step (develop, sprint) — "walk the code
   against the plan", "grade the build against Done when", "mindrun the
   implementation" — on `{plan_file}` + `{previous}`; no user on the wire.
@@ -12,7 +12,7 @@ description: >-
   known (use kstack-investigate), or for style/architecture review (use
   kstack-review).
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 compatibility: None — read-only delegated step; runtime/bin telemetry degrades gracefully.
 ---
 
@@ -35,7 +35,10 @@ bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry
 
 **The contract:** in = `{plan_file}` + `{previous}` (`build` summary) · grid =
 the plan's `Done when` column + `## Edge cases & risks` · out = five-field
-findings + one verbatim `walkthrough ==` line.
+findings + one verdict line under the **verdict key** your task's RECORD
+CONTRACT names (`walkthrough` in develop; the lane key `be-walk` / `fe-walk`
+in sprint). The contract's key is the only one the orchestrator reads — any
+other key is discarded and the step parks as missing its verdict.
 
 ## Central rules
 
@@ -54,7 +57,7 @@ Extract the grid BEFORE opening the implementation:
   gap (missing file, skipped task) is itself a finding.
 
 Grid absent → never self-infer it (the parent's cardinal failure): report the
-missing pieces via the record's blocker channel; end with no `walkthrough ==` line.
+missing pieces via the record's blocker channel; end with no verdict line.
 
 ## Phase 1 — Breadboard
 
@@ -99,13 +102,17 @@ End the report with exactly this terminal block:
 
 ```markdown
 ## Walkthrough verdict
-walkthrough == pass            ← or `fail`; exactly one, verbatim
+<verdict key> == pass          ← or `fail`; exactly one, key from the RECORD CONTRACT
 dod: N verified | N failed | N unverifiable · findings: N
 [fail only — per finding:] file:line — divergence — trigger
 ```
 
 Emitted via `kstack-report` (the step task carries the exact invocation):
-`walkthrough` is the gate variable; finding lines feed the `build` loop-back.
+`--verdict <verdict key>==pass|fail` is the gate; finding lines feed the
+`build` loop-back.
+
+❌ `--verdict walkthrough==pass` in a sprint `be-walk` step (discarded → park)
+✅ `--verdict be-walk==pass` — the key the RECORD CONTRACT names
 
 ```bash
 bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-lite-mindrun --status end 2>/dev/null || true
@@ -114,7 +121,8 @@ bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry
 **Central rules, again:** read the real execution path, never the memory of
 what the code "should" do — including the build summary's claims. A claim is
 not accepted until it cites file:line. Every finding carries a falsifiable
-Trigger. An absent grid is a blocker, never self-inferred.
+Trigger. An absent grid is a blocker, never self-inferred. The verdict key is
+the one the RECORD CONTRACT names.
 
 ## DoD gate (verification)
 
@@ -123,7 +131,8 @@ Trigger. An absent grid is a blocker, never self-inferred.
 - Every claim cites file:line, re-read in the real file at quote verification.
 - Every surviving finding: five fields + concrete Trigger; design-intent gate
   and skeptic pass applied; written for the builder (repro + remedy).
-- Terminal block verbatim — one `walkthrough ==` line; `fail` carries findings.
+- Terminal block verbatim — one verdict line under the RECORD CONTRACT's key
+  (also passed as `--verdict` to kstack-report); `fail` carries findings.
 - Read-only, headless contract kept: zero files, zero commands, zero questions.
 
 ## Related skills

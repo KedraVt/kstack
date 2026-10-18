@@ -54,7 +54,9 @@ export const KNOWN_VARIABLES = [
   "software-architect-review", // software-architect-artifact_n.md
   // S4 verdict vars (kstack-report records + HANDOFF migration path).
   "outcome", // investigate.verify: verified|persists|refuted
-  "walkthrough", // {be,fe}-walk: pass|fail
+  "walkthrough", // develop implement.walkthrough: pass|fail
+  "be-walk", // sprint implement.be-walk lane: pass|fail
+  "fe-walk", // sprint implement.fe-walk lane: pass|fail
   "ui", // ui-check: pass|fail
   "pipeline", // pipeline-review: approved|rejected
 ] as const;

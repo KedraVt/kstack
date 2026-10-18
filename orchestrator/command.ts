@@ -416,8 +416,6 @@ function menuScore(w: { id: string }, git: GitContext): number {
 
 // --- Sprint human-control panels (plan B7 / D3, D4, D11) ---------------------
 
-const FREEZE_RESUME_PHRASE = "security remediation approved";
-
 /**
  * F4 guard (2026-09 handoff): sprint panels can mutate state and relaunch a
  * phase while a delegation chain for the same phase is still running — the

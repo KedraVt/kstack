@@ -868,14 +868,11 @@ const PHASE_BOUNDARIES: Record<string, string> = {
  * round explicitly.
  */
 export function carryOverOpenQuestions(ctx: Pick<WorkflowContext, "state">): string {
-  let summary = ctx.state.results["understand"]?.summary ?? "";
-  if (!summary || !summary.includes("OPEN QUESTIONS:")) {
-    for (const [key, res] of Object.entries(ctx.state.results)) {
-      if (key.startsWith("understand") && res?.summary?.includes("OPEN QUESTIONS:")) {
-        summary = res.summary;
-        break;
-      }
-    }
+  // Newest summary carrying the section wins: develop records it under
+  // "plan.evolve", sprint under "understand.evolve" / "understand".
+  let summary = "";
+  for (const res of Object.values(ctx.state.results)) {
+    if (res?.summary?.includes("OPEN QUESTIONS:")) summary = res.summary;
   }
   const m = /OPEN QUESTIONS:\s*\n?((?:[ \t]*[-*•]\s*[^\n]+\n?)+)/.exec(summary);
   if (!m) return "";
@@ -886,8 +883,8 @@ export function carryOverOpenQuestions(ctx: Pick<WorkflowContext, "state">): str
     .slice(0, 10);
   if (items.length === 0) return "";
   return [
-    "### Carried-over open questions (from the Understand phase)",
-    "The user left these unresolved in phase 1. Resolve them with the user or fold each into an interview round — do not silently assume them away.",
+    "### Carried-over open questions",
+    "These were left unresolved by an earlier step. Resolve them with the user or fold each into an interview round — do not silently assume them away.",
     "",
     ...items,
   ].join("\n");

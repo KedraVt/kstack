@@ -471,7 +471,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         return {
           content: [{
             type: "text" as const,
-            text: `SECURITY FREEZE: ${info?.severity ?? "critical/high"} severity security rejection in "${phase.id}". The pipeline is FROZEN — no further automated work. A human security panel must review ${info?.artifactPath ?? "devsecops/security-review-artifact.md"}; only /kstack next can unfreeze after that review. Do NOT attempt fixes or call kstack_advance again.`,
+            text: `SECURITY FREEZE: ${info?.severity ?? "critical/high"} severity security rejection in "${phase.id}". The pipeline is FROZEN — no further automated work. A human security panel must review ${info?.artifactPath ?? "devsecops/security-review-artifact.md"}; only the user resolves the freeze via /kstack after that review. Do NOT attempt fixes or call kstack_advance again.`,
           }],
           isError: false,
         };

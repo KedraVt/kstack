@@ -81,6 +81,7 @@ Probe graft-first when available; fall back to ripgrep/ls. Report entry points, 
 
 ## STOP CONDITION
 Stop when: understand.md exists and captures the raw direction. Do NOT write the plan; do NOT implement.
+End your kstack_advance summary with a section \`OPEN QUESTIONS:\` — one bullet (\`- …\`) per question still unresolved (or exactly \`OPEN QUESTIONS: none\`); the interrogate step receives them verbatim.
 
 ## CONTEXT
 Goal: {goal} | Branch: {branch}
@@ -957,6 +958,7 @@ Probe graft-first when available; fall back to ripgrep.`,
 
 ## STOP CONDITION
 Stop when: understand.md exists and captures direction + actors + options.
+End your kstack_advance summary with a section \`OPEN QUESTIONS:\` — one bullet (\`- …\`) per question still unresolved (or exactly \`OPEN QUESTIONS: none\`); the interrogate step receives them verbatim.
 
 ## CONTEXT
 Sprint {sprint} | Goal: {goal} | Branch: {branch}
@@ -1410,7 +1412,7 @@ Sprint {sprint} | Goal: {goal} | Branch: {branch}`,
           execution: "main",
           signal: { kind: "marker", value: "ARCHIVED" },
           task: `## DELIVERABLE
-Move all durable sprint artifacts (capability.md, system-design_{sprint}.md, ADR-log_{sprint}.md, tasks.md, qa-artifact_{sprint}.md, and devsecops/) into their archive slot under .kstack/workflows/sprint/sprint_{sprint}/. Ephemeral scratch files (understand.md, user-story.md, summary_BE.md, summary_FE.md) remain in place for terminal cleanup.
+Only the DURABLE artifacts moved into their archive slot under .kstack/workflows/sprint/sprint_{sprint}/ — system-design_{sprint}.md, ADR-log_{sprint}.md, qa-artifact_{sprint}.md and devsecops/ are the survivors. Ephemerals (understand.md, user-story.md, capability.md, tasks.md, summary_BE.md, summary_FE.md) stay in place: the run's terminal cleanup deletes them — never move or archive them.
 
 ## STOP CONDITION
 Stop when: the durables are moved and named under .kstack/workflows/sprint/sprint_{sprint}/. Mechanical step — do NOT commit, do NOT start new work.

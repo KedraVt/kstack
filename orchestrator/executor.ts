@@ -218,7 +218,7 @@ export function advanceBlockReason(state: WorkflowState): string | null {
   if (state.status === "paused") {
     const reason = state.pausedReason ?? "";
     if (state.frozenUntilHuman || reason.startsWith("security-freeze:")) {
-      return `the sprint is FROZEN by a critical/high security rejection — only the /kstack panel (with the exact confirmation phrase) may unfreeze it`;
+      return `the sprint is FROZEN by a critical/high security rejection — only the user may resolve it via the /kstack freeze panel (re-run, return with guidance, accept risk, abort)`;
     }
     if (state.verdictPark) {
       return `the phase's verdict was unreadable — only the /kstack panel may continue, return or abort (no attempt was burned)`;
@@ -1137,7 +1137,7 @@ export function activeConstraintLines(state: WorkflowState, phase?: WorkflowPhas
   const lines: string[] = [];
   if (state.frozenUntilHuman || (state.pausedReason ?? "").startsWith("security-freeze:")) {
     lines.push(
-      "CONSTRAINT: a review gate is FROZEN by a critical/high security rejection. Do NOT work around it and do NOT call kstack_advance — the user must unfreeze via /kstack (exact confirmation phrase).",
+      "CONSTRAINT: a review gate is FROZEN by a critical/high security rejection. Do NOT work around it and do NOT call kstack_advance — the user resolves it via the /kstack freeze panel.",
     );
   }
   if (state.verdictPark) {

@@ -409,7 +409,10 @@ function resolvePiInvocation(
   if (cliScript) {
     return { command: runtime, args: [...preload, cliScript, ...args] };
   }
-  return { command: process.platform === "win32" ? "pi.cmd" : "pi", args };
+  // Not "pi.cmd": shell:false spawn of a .cmd is EINVAL on Node ≥20.12; a
+  // missing "pi" fails with a clear ENOENT instead (the global-install lookup
+  // above is the real Windows path).
+  return { command: "pi", args };
 }
 
 /**

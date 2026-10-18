@@ -2,7 +2,7 @@
  * Sprint-number discovery (plan B6 / E5) + archival layout (D7).
  *
  * The current sprint's artifacts live in the PROJECT ROOT while the sprint
- * runs; on GREEN everything archives to `.kstack/sprints/sprint_XX/`. Sprint
+ * runs; on GREEN the durables archive to `.kstack/workflows/sprint/sprint_XX/`. Sprint
  * numbers are discovered by scanning root AND the archive: max+1.
  *
  * HIJACK GUARD: more than one plausible "current" number (multiple distinct

@@ -1085,10 +1085,11 @@ describe("S4 executor — sideEffect gate + resume + ephemeral (TASK_07)", () =>
       const res = cleanupEphemeralArtifacts(cwd, ["../x.md", "ok.md"]);
       assert.deepEqual(res.failed, ["../x.md"]);
       assert.deepEqual(res.deleted, ["ok.md"]);
-      assert.deepEqual(ephemeralArtifactsFor("develop"), ["understand.md"]);
-      assert.ok(ephemeralArtifactsFor("sprint").includes("summary_BE.md"));
-      assert.ok(ephemeralArtifactsFor("sprint").includes("user-story.md"));
-      assert.equal(ephemeralArtifactsFor("sprint").includes("tasks.md"), false, "tasks.md is durable, not ephemeral");
+      assert.deepEqual(ephemeralArtifactsFor("develop"), ["understand.md", "plan.md"]);
+      for (const f of ["understand.md", "user-story.md", "capability.md", "tasks.md", "summary_BE.md", "summary_FE.md"]) {
+        assert.ok(ephemeralArtifactsFor("sprint").includes(f), `${f} is a sprint ephemeral — deleted at terminal status`);
+      }
+      assert.deepEqual(ephemeralArtifactsFor("investigate"), ["bug-report.md"]);
       assert.deepEqual(ephemeralArtifactsFor("nope"), []);
     } finally {
       rmSync(cwd, { recursive: true, force: true });

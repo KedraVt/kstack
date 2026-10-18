@@ -6,7 +6,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
-import { createState, parkForUnreadableVerdict } from "../orchestrator/state.ts";
+import { createState, parkForUnreadableVerdict, routeVerdict } from "../orchestrator/state.ts";
+import { carryOverOpenQuestions } from "../orchestrator/templates.ts";
+import { beginStepWatch, endStepWatch, feedWatchEvent } from "../orchestrator/stuck.ts";
+import { parseHandoffVerdicts } from "../orchestrator/verdicts.ts";
 import { getWorkflow, getWorkflowIds } from "../orchestrator/workflows.ts";
 import { initOrchestrator } from "../orchestrator/index.ts";
 import { handleSprintPanel, manualAdvancePanel } from "../orchestrator/command.ts";
@@ -152,6 +155,42 @@ describe("human step gates", () => {
     writeStepRecord(h.ctx.cwd, { workflow: "investigate", runId: state.runId!, phase: "reproduce", step: "repro", summary: "repro", markers: ["REPRO-DONE"] });
     await h.advance("reproduced");
     assert.equal(h.last().status, "active");
+  });
+});
+
+describe("planning interactivity", () => {
+  test("open questions carry over from develop's plan.evolve (not only sprint's understand)", () => {
+    const state = { ...createState("develop", "g"), results: { "plan.evolve": { status: "completed" as const, summary: "done\nOPEN QUESTIONS:\n- auth provider?\n- offline mode?" } } };
+    const out = carryOverOpenQuestions({ state });
+    assert.match(out, /- auth provider\?/);
+    assert.match(out, /- offline mode\?/);
+  });
+
+  test("a main-step watch never trips on long conversations (no turn/token cap)", () => {
+    beginStepWatch("plan", "interrogate");
+    try {
+      for (let i = 0; i < 200; i++) {
+        const v = feedWatchEvent({ type: "message_end", message: { role: "assistant", usage: { input: 5000, output: 2000 } } } as any);
+        assert.equal(v?.trip, undefined, `tripped at turn ${i}`);
+        feedWatchEvent({ type: "message_end", message: { role: "user" } } as any);
+      }
+    } finally {
+      endStepWatch();
+    }
+  });
+});
+
+describe("verdict routing consistency", () => {
+  test("investigate.verify routes persists→fix, refuted→root-cause, verified→advance", () => {
+    const verify = phaseOf("investigate", "verify");
+    assert.deepEqual(routeVerdict("investigate", "verify", { verdicts: { outcome: "persists" } }, { phase: verify }), { kind: "loop-back", target: "fix" });
+    assert.deepEqual(routeVerdict("investigate", "verify", { verdicts: { outcome: "refuted" } }, { phase: verify }), { kind: "loop-back", target: "root-cause" });
+    assert.equal(routeVerdict("investigate", "verify", { verdicts: { outcome: "verified" } }, { phase: verify }).kind, "advance");
+  });
+
+  test("the legacy HANDOFF parser knows the sprint lane keys", () => {
+    const out = parseHandoffVerdicts("## HANDOFF\nbe-walk == pass\nfe-walk == fail\n");
+    assert.deepEqual(out.parsed?.verdicts, { "be-walk": "pass", "fe-walk": "fail" });
   });
 });
 
