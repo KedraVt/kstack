@@ -179,6 +179,20 @@ export const EPHEMERAL_ARTIFACTS: Record<string, string[]> = {
   investigate: ["bug-report.md"],
 };
 
+/**
+ * Sprint gate reports (QA, devsecops reviews, docker report) are problems the
+ * sprint resolves through its loops — ephemeral, not durables. Their names
+ * carry the sprint number, so they are registered once it is assigned.
+ */
+export function sprintGateEphemerals(sprint: number): string[] {
+  return [
+    qaArtifactName(sprint),
+    `devsecops/${codeReviewArtifactName(sprint)}`,
+    securityReviewArtifactRel(sprint),
+    `devsecops/${dockerBuildReportName(sprint)}`,
+  ];
+}
+
 /** Ephemeral set for a workflow id — a fresh copy (state stamps it verbatim). */
 export function ephemeralArtifactsFor(workflowId: string): string[] {
   return [...(EPHEMERAL_ARTIFACTS[workflowId] ?? [])];

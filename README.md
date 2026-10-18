@@ -14,7 +14,6 @@ One extension, two layers:
 - **Skill ingestion** — the canonical `skills/<id>/SKILL.md` is injected by the workflow itself: full methodology to whoever does the work, compact DoD+best-practices gates for verification and repeats.
 - **Documentation phases** — optional doc-update phase on `develop` and `ship` (Diataxis coverage map, chained generation for missing docs).
 - **`qa-report` workflow** — full QA methodology, report-only, never modifies code.
-- **`kstack_start` tool** — programmatic workflow entry point (usable by any agent, including subagents).
 
 ## What's new (feat/sprint-workflow branch)
 
@@ -28,7 +27,7 @@ One extension, two layers:
 - **Trust boundary note** — dual-channel verification trusts files in the repo root: a malicious repo can pre-plant both channels against a predictable next sprint number. Sprint stamping, anomaly guards, and the hard commit-archive gate raise the bar but do not close within-sprint planting — review gate artifacts before approving.
 - **Bounded loop-backs** — rejected reviews return work to the implementing phase with extracted blocker feedback; after N attempts (configurable) the sprint parks for human decision instead of looping forever. Accepting an exhausted gate ("Accept result — continue past the gate") resets the loop budget, so the next review gate gets a fresh ceiling instead of parking on its first rejection.
 - **Unreadable-verdict park** — if a gate's output can't be parsed into a known verdict, the sprint parks WITHOUT burning an attempt; the panel shows only the failing lines so you can approve/loop/inspect deliberately.
-- **Sprint requires deterministic delegation** — the sprint gates route exclusively on executor-produced verdicts, so the workflow refuses to start while `KSTACK_PI_DETERMINISTIC=off` (both `/kstack sprint` and the `kstack_start` tool explain this). Kill-switch parks (`KSTACK_PI_VERDICTS=off` / `_LOOPBACKS=off`) likewise land in a decision panel offering **Accept / Re-run / Abort**.
+- **Sprint requires deterministic delegation** — the sprint gates route exclusively on executor-produced verdicts, so the workflow refuses to start while `KSTACK_PI_DETERMINISTIC=off` (`/kstack sprint` explains this). Kill-switch parks (`KSTACK_PI_VERDICTS=off` / `_LOOPBACKS=off`) likewise land in a decision panel offering **Accept / Re-run / Abort**.
 - **Strict BE→FE chain** — implementation runs backend-developer then frontend-developer sequentially per task wave; model tiers (`KSTACK_PI_MODEL_STRONG/FAST`) let judgment phases run on stronger models while mechanical phases stay cheap.
 - **Fixed**: phase instructions are now delivered with `followUp` streaming behavior — eliminates the "Agent is already processing" error that silently dropped phase handoffs.
 - **Unified skill catalog** — 28 skills in a flat `skills/kstack-*/` layout, all manually invocable via `/skill:kstack-*`.
@@ -129,9 +128,9 @@ The extension monitors your input and suggests workflows when it detects intent:
 
 Suggestions are advisory — the LLM asks before starting a workflow. Slash commands and short inputs are never intercepted.
 
-### Programmatic start
+### Starting a workflow
 
-Any agent — including spawned subagents, which load this extension too — can bootstrap a workflow with the `kstack_start { workflow, goal }` tool.
+Workflows start ONLY through `/kstack` — the pre-flight panel (gate mode, per-gate choices) is never skipped. There is no programmatic start tool: agents and subagents cannot bootstrap a workflow on their own.
 
 ### Browser tools (65)
 
@@ -220,7 +219,7 @@ kstack-pi/
 │   ├── commands.generated.ts  Allowed command set (auto-generated)
 │   └── schemas.ts           TypeBox parameter schemas
 ├── orchestrator/
-│   ├── index.ts             Registers /kstack, kstack_advance, kstack_phase, kstack_start, input router
+│   ├── index.ts             Registers /kstack, kstack_advance, kstack_phase, input router
 │   ├── types.ts             Workflow, Phase, State interfaces
 │   ├── state.ts             State machine (persist via pi appendEntry; approval gates)
 │   ├── git.ts               Git context detection
@@ -252,7 +251,7 @@ kstack-pi/
 ### How the orchestrator works
 
 ```
-/kstack or kstack_start ──┐
+/kstack ──────────────────┐
                           ├──→ State Machine ──→ Phase Executor ──► main phase:
 input router ─────────────┘         ↑                              instructions to LLM
                                     │                                    │
@@ -263,7 +262,7 @@ input router ─────────────┘         ↑             
                       kstack_advance ←──── LLM executes/reviews ←── instructions
 ```
 
-1. User starts a workflow via `/kstack`, `kstack_start`, or the router suggests one
+1. User starts a workflow via `/kstack` (the router may suggest one)
 2. The orchestrator injects phase instructions into the LLM context (`followUp` delivery — never mid-turn)
 3. Subagent phases are executed by the orchestrator itself: specialists run in isolated `pi` processes and their output is prefixed for review
 4. The LLM calls `kstack_advance` with a summary — this is the only progression mechanism; it must never defer back to the user

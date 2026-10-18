@@ -17,7 +17,7 @@ import { replaceExact } from "./text.ts";
 import { appendLedger } from "./ledger.ts";
 import { reportCliPath, verdictKeysFor } from "./records.ts";
 import { newStepRun, feedStepEvent, detectStuck, checkStepBudgets, stepBudgetDefaults, beginStepWatch, endStepWatch } from "./stuck.ts";
-import { phaseArtifactPaths, cleanupEphemeralArtifacts } from "./artifacts.ts";
+import { phaseArtifactPaths, cleanupEphemeralArtifacts, sprintGateEphemerals } from "./artifacts.ts";
 import { existsSync } from "node:fs";
 
 // --- Sequential-chain resilience (STEP 2f) -----------------------------------
@@ -338,7 +338,11 @@ export async function executeCurrentPhase(
       notify(`kstack sprint: sprint numbering anomaly — ${discovery.anomaly}. Resolve manually, then resume via /kstack (the panel re-checks the numbering).`, "warning");
       return;
     }
-    const numbered = { ...state, sprintNumber: discovery.next };
+    const numbered = {
+      ...state,
+      sprintNumber: discovery.next,
+      ephemeralArtifacts: [...new Set([...(state.ephemeralArtifacts ?? []), ...sprintGateEphemerals(discovery.next)])],
+    };
     saveState(pi, numbered);
     state = numbered;
     wfCtx.state = numbered;

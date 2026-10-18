@@ -15,7 +15,8 @@ import { initOrchestrator } from "../orchestrator/index.ts";
 import { handleSprintPanel, manualAdvancePanel } from "../orchestrator/command.ts";
 import { buildRecordContract, interpolateStepTask } from "../orchestrator/templates.ts";
 import { reportCliPath, verdictKeysFor, writeStepRecord, readStepRecord } from "../orchestrator/records.ts";
-import { invalidateRuntime, releasePhaseInFlight } from "../orchestrator/executor.ts";
+import { invalidateRuntime, releasePhaseInFlight, executeCurrentPhase } from "../orchestrator/executor.ts";
+import { sprintGateEphemerals } from "../orchestrator/artifacts.ts";
 
 // Fire-and-forget launches must never outlive this file (in-flight registry is module-level).
 const prevDeterministic = process.env.KSTACK_PI_DETERMINISTIC;
@@ -155,6 +156,28 @@ describe("human step gates", () => {
     writeStepRecord(h.ctx.cwd, { workflow: "investigate", runId: state.runId!, phase: "reproduce", step: "repro", summary: "repro", markers: ["REPRO-DONE"] });
     await h.advance("reproduced");
     assert.equal(h.last().status, "active");
+  });
+});
+
+describe("workflow entry + artifact lifetime", () => {
+  test("no programmatic start tool: workflows start only through /kstack", () => {
+    const names: string[] = [];
+    initOrchestrator({ registerTool: (t: any) => names.push(t.name), registerCommand: () => {}, on: () => {} } as any);
+    assert.ok(!names.includes("kstack_start"), names.join(","));
+    assert.ok(names.includes("kstack_advance"));
+  });
+
+  test("QA + devsecops reports become ephemerals once the sprint number is assigned", async () => {
+    const idx = indexOf("sprint", "user-story");
+    const state = { ...createState("sprint", "g"), phaseIndex: idx };
+    const h = harness(state);
+    await executeCurrentPhase(h.pi, h.ctx, state, { execGit: async () => ({ stdout: "", stderr: "", code: 1 }) as any });
+    const s = h.last();
+    assert.equal(s.sprintNumber, 1);
+    for (const f of sprintGateEphemerals(1)) assert.ok(s.ephemeralArtifacts.includes(f), `${f} must be deleted at terminal status`);
+    assert.ok(s.ephemeralArtifacts.includes("qa-artifact_01.md"));
+    assert.ok(s.ephemeralArtifacts.includes("devsecops/security-review-artifact_01.md"));
+    assert.ok(s.ephemeralArtifacts.includes("tasks.md"), "the base sprint ephemerals stay registered");
   });
 });
 

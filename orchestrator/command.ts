@@ -366,8 +366,8 @@ async function startWorkflow(workflowId: string, ctx: ExtensionCommandContext, p
   // S3/D20 pre-flight configure (TRANSIENT — never a persisted status):
   // enumerate the gates this workflow can actually fire and, in interactive
   // mode only, let the user choose per-gate handling BEFORE the state exists.
-  // Dismissed/headless ⇒ human-gate defaults; the kstack_start tool path never
-  // engages configure (env defaults apply there).
+  // Dismissed/headless ⇒ human-gate defaults. /kstack is the ONLY way to start
+  // a workflow — there is no programmatic entry that could skip this panel.
   const gateRows = gateInventory(workflow, { state: { vars: askVars } as any, git, cwd: ctx.cwd });
   let gateMode: WorkflowState["gateMode"] = "human-gate";
   let gateOverrides: WorkflowState["gateOverrides"] = {};

@@ -2,10 +2,10 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { handleKstackCommand, getCompletions } from "./command.ts";
 import { createInputRouter } from "./router.ts";
-import { loadActiveState, saveState, advancePhase, gateForApproval, createState, recordStepResult } from "./state.ts";
+import { loadActiveState, saveState, advancePhase, gateForApproval, recordStepResult } from "./state.ts";
 import { stepCompletionStatus } from "./records.ts";
 import type { AdvanceOptions } from "./state.ts";
-import { getWorkflow, getWorkflowIds } from "./workflows.ts";
+import { getWorkflow } from "./workflows.ts";
 import { launchPhase, invalidateRuntime, advanceBlockReason, setKstackStatus } from "./executor.ts";
 import { manualGates, autoGateValidated, optionalPhases, deterministicSubagents } from "./config.ts";
 import { parsePlanFileMarker, buildPhaseInstructions, buildStepInstructions, resolvePlanFilePath } from "./templates.ts";
@@ -13,7 +13,7 @@ import { detectGitContext } from "./git.ts";
 import { isValidatedStrategy } from "./skip.ts";
 import { existsSync } from "node:fs";
 import * as path from "node:path";
-import { ensureRun, writeRunReport } from "./telemetry.ts";
+import { writeRunReport } from "./telemetry.ts";
 import { phaseArtifactPaths } from "./artifacts.ts";
 import { appendLedger } from "./ledger.ts";
 import { feedWatchEvent, endStepWatch, stepWatchStats, type StepWatchEvent } from "./stuck.ts";
@@ -671,67 +671,6 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         : buildPhaseInstructions(phase, { state, git, cwd: ctx.cwd });
       return {
         content: [{ type: "text" as const, text: posture + instructions + record }],
-      };
-    },
-  });
-
-  // Programmatic workflow entry point. Because subagent processes load this
-  // extension too, any agent (main or spawned) can bootstrap a workflow by
-  // calling this tool — no slash command required.
-  pi.registerTool({
-    name: "kstack_start",
-    label: "Start Workflow",
-    description:
-      "Start a kstack guided workflow programmatically. Workflows: develop | investigate | review | discover | audit | sprint. Use when a task matches one of these pipelines and no workflow is currently active.",
-    promptSnippet: "Start a kstack workflow (develop, investigate, review, discover, audit, sprint)",
-    parameters: Type.Object({
-      workflow: Type.String({ description: "Workflow id: develop | investigate | review | discover | audit | sprint" }),
-      goal: Type.String({ description: "What the workflow should accomplish" }),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext): Promise<any> {
-      const existing = loadActiveState(ctx);
-      if (existing) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `A "${existing.workflowId}" workflow is already ${existing.status} at phase ${existing.phaseIndex + 1}. Finish or abort it before starting a new one.`,
-          }],
-          isError: true,
-        };
-      }
-      const workflow = getWorkflow(params.workflow.toLowerCase());
-      if (!workflow) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Unknown workflow "${params.workflow}". Available: ${getWorkflowIds().join(", ")}.`,
-          }],
-          isError: true,
-        };
-      }
-      // Sprint gates route ONLY on pendingVerdict (executor delegation output);
-      // without deterministic delegation they would be inert (Q2 fix).
-      if (workflow.id === "sprint" && !deterministicSubagents()) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `The "sprint" workflow requires deterministic subagent delegation (KSTACK_PI_DETERMINISTIC). It is currently disabled: the review gates would be inert. Re-enable it or use a different workflow.`,
-          }],
-          isError: true,
-        };
-      }
-      const state = createState(workflow.id, params.goal);
-      saveState(pi, state);
-      ensureRun(state.workflowId); // STEP 0 telemetry: start accumulating
-      ctx.ui.notify(`kstack: starting ${workflow.name} (${workflow.phases.length} phases)`, "info");
-      // Non-blocking: phase instructions arrive as a follow-up message once
-      // any deterministic subagent work for the first phase has completed.
-      launchPhase(pi, ctx, state);
-      return {
-        content: [{
-          type: "text" as const,
-          text: `Started workflow "${workflow.id}" (${workflow.phases.length} phases). The first phase instructions will arrive shortly.`,
-        }],
       };
     },
   });
