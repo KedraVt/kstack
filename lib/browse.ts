@@ -15,8 +15,8 @@
  *      grep would miss).
  *   9. classifyError(): 4-pattern semantic map + raw fallback (post-exit, non-blocking).
  */
-import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, statSync, unlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { silentChildEnv } from "./silent-spawn.ts";
@@ -108,6 +108,41 @@ export interface RunResult {
   signal?: string;
 }
 
+/**
+ * The daemon's start lock is held only while a server boots (the CLI waits
+ * ≤15s), so one older than this is orphaned — whatever PID it names.
+ */
+export const STALE_LOCK_MS = 2 * 60 * 1000;
+
+const gitRoots = new Map<string, string | null>();
+
+/** Same resolution as browse/src/config.ts: BROWSE_STATE_FILE, else <git root | cwd>/.gstack/browse.json. */
+export function serverLockPath(cwd: string = process.cwd()): string {
+  if (process.env.BROWSE_STATE_FILE) return `${process.env.BROWSE_STATE_FILE}.lock`;
+  if (!gitRoots.has(cwd)) {
+    const r = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, windowsHide: true, encoding: "utf-8", timeout: 8000 });
+    gitRoots.set(cwd, r.status === 0 && r.stdout.trim() ? r.stdout.trim() : null);
+  }
+  return join(gitRoots.get(cwd) ?? cwd, ".gstack", "browse.json.lock");
+}
+
+/**
+ * Remove an orphaned start lock. Upstream judges staleness by PID liveness
+ * only; Windows reuses PIDs, so a crash-left lock naming a PID now owned by
+ * another program blocked every start ("Another instance is starting the
+ * server") for weeks. Age is the reliable signal. Returns true when removed.
+ */
+export function clearStaleServerLock(cwd: string = process.cwd(), now: number = Date.now()): boolean {
+  try {
+    const lock = serverLockPath(cwd);
+    if (now - statSync(lock).mtimeMs <= STALE_LOCK_MS) return false;
+    unlinkSync(lock);
+    return true;
+  } catch {
+    return false; // no lock, or it vanished meanwhile — nothing to clear
+  }
+}
+
 /** Spawn a kstack browse subprocess and capture its output. No shell. */
 export function runBrowse(
   cmd: string,
@@ -126,6 +161,7 @@ export function runBrowse(
     });
   }
 
+  clearStaleServerLock();
   return new Promise((resolveP) => {
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const child = spawn(bin.path, [cmd, ...args], {

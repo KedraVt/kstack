@@ -29,7 +29,7 @@
     "typebox": "*"
   },
   "scripts": {
-    "test": "bun test test/orchestrator.test.ts test/sprint.test.ts test/typecheck.test.ts test/security-boundary.test.ts test/executor-delegation.test.ts test/remediation.test.ts test/s4.test.ts test/workflow-control.test.ts test/regression-blast-radius.test.ts test/repro-sprint-issues.test.ts test/repro-sprint-planning-security.test.ts",
+    "test": "bun test test/orchestrator.test.ts test/sprint.test.ts test/typecheck.test.ts test/security-boundary.test.ts test/executor-delegation.test.ts test/remediation.test.ts test/s4.test.ts test/workflow-control.test.ts test/regression-blast-radius.test.ts test/repro-sprint-issues.test.ts test/repro-sprint-planning-security.test.ts test/browse-lock.test.ts",
     "typecheck": "bunx tsc --noEmit"
   },
   "devDependencies": {
