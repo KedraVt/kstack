@@ -117,29 +117,15 @@ changes manually (MIT, pin a version in the skill header).
 
 ### Skill output-contract improvements — especially `kstack-office-hours`
 
-**What:** Review and improve the canonical `skills/kstack-*/SKILL.md` files so they steer agent
-behavior more reliably inside workflows. Priority: `kstack-office-hours` (planning-phase
-quality gate).
-
-> **Update 2026-10-08 (post-S1/S2):** the digest layer is gone — `skills-distilled/` was deleted
-> and the canonical SKILL.md is the only injected source. The `## DoD gate` parsed from each
-> SKILL.md is what verification phases and repeat deliveries receive (D13). The output-contract
-> critique below now applies to the canonical files.
+> **Update 2026-10-12 (SHIPPED):** `kstack-office-hours` completely rewritten per
+> `authoring-skills` & `writing-for-agents`. Stripped YC/startup/pricing bloat; replaced
+> with interactive technical discovery & stress-test (3 structured options + write-in,
+> raw vs pre-designed branch triage, minimal wedge vs extensible architecture trade-offs).
+> Output contract unified on non-ephemeral `.kstack/discover/direction.md`. Checked DoD gate in place.
 
 Pain points to address:
-- Office-hours is persona-heavy (YC partner voice) but light on **workflow integration**:
-  when to smart-skip, how to converge to a plan artifact, what handoff format the next phase
-  (`develop.plan`) actually consumes. The skill should specify its output contract, not just its posture.
-- Missing exit criteria: no explicit "session done when X" condition, so planning phases can loop.
 - Other skills: audit each for the same gap — do they define inputs, output shape, and stop
   conditions, or only tone?
-
-**Why:** Skill bodies are injected into subagent prompts every session; vague ones cost tokens AND
-produce mushy plans that downstream gates reject → retry loops. Sharper office-hours output =
-fewer develop-plan rework cycles = better end-to-end workflow.
-
-**Files:** `skills/kstack-office-hours/SKILL.md` first, then the rest; cross-check against
-phase instructions in `orchestrator/workflows.ts` so skill output matches what gates expect.
 
 ### Workflow: `/kstack design` — full design-review cycle
 

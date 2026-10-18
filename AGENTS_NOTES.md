@@ -14,30 +14,43 @@ sync.
 > `agents/` until the next manual sync — keep that in mind when debugging
 > "the prompt says X but the subagent did Y".
 
-## Shared contract (all workflow subagents)
+## Shared contract (S4 step model)
 
-Every agent that participates in a deterministic delegation chain ends its
-report with a `## HANDOFF` section (≤4000 chars) beginning with
-`VERIFIED FACTS:`. The orchestrator parses the LAST `## HANDOFF` marker —
-earlier markers in the report body are ignored. Verdict lines inside HANDOFF
-are bare `KEY == VALUE` lines; `##`-prefixed heading lines also parse.
+Every delegated subagent (`execution: "subagent"`) runs under an ephemeral lifecycle:
+`spawn → work → report → exit`.
+
+- **Canonical Record Contract**: Delegated subagents complete their work by invoking
+  the `kstack-report` CLI (carried in `$KSTACK_REPORT`), writing a structured record
+  to `.kstack/runs/<runId>/`. The orchestrator NEVER accepts free-form `HANDOFF` text
+  as a completion signal — the record is the only channel.
+- **Verifier Rule (§10.13)**: Verifier specialists (`qa-engineer`, `devsecops-reviewer`,
+  `software-architect`) write NO artifact files to the repository root or subtrees.
+  Findings, repro steps, and remediations ride the record's `--evidence` (or
+  `--deliverable` under `.kstack/runs/<runId>/` if massive), and verdicts ride
+  `--verdict <key>==<value>`.
+- **Trust Directive**: Specialists trust `{previous}` output as prior context,
+  re-checking only claims that are load-bearing for their immediate actions.
 
 Per-agent notes:
 
-- **worker.md / reviewer.md** — carry the `Trust the HANDOFF…` trust directive
-  AND the emit contract (added 2026-09 review; both are chain participants).
+- **worker.md / reviewer.md** — general and code-review specialists; invoke
+  `$KSTACK_REPORT` with `--marker` or `--verdict` as declared in task.
+- **scout.md** — fast codebase orientation; uses `read, bash` and browser tools
+  `kstack_*` for web evidence; signals via `--marker SCOUT-DONE`.
 - **frontend-developer.md** — must NEVER `git checkout main`/`git pull`
   mid-chain: the sprint implement chain has backend commits on the task branch
-  that `checkout main` would abandon.
-- **qa-engineer.md / software-architect.md** — emit `##`-prefixed verdict lines
-  (`## STATUS == GREEN`, `## software-architect-review == blank`); the parser
-  tolerates the prefix, so no prompt change was needed.
-- **sprint-planner.md** — ORPHANED: no workflow phase delegates to it. Kept
-  documented-as-such for manual invocation and a future planner-delegation
-  variant.
-- **planner.md** — "VERIFIED FACTS … treat as context, not proof, re-check
-  load-bearing claims" directive (efficiency plan STEP 2e).
-
-Rationale for the trust directive (unchanged): without it the receiving
-specialist re-verifies its input end-to-end, duplicating turns and wall time.
-Load-bearing claims justifying code changes are always re-checked.
+  that `checkout main` would abandon. Handles implementation, `fe-walk`, and `ui-check`.
+- **backend-developer.md** — handles atomic backend tasks (TDD) and `be-walk` mindrun
+  walkthroughs.
+- **qa-engineer.md** — browser QA and test verification; classifies verdicts as
+  `green`, `orange` (testability blocker), or `red`; emits `--verdict status==<value>`
+  and `--evidence`.
+- **devsecops-reviewer.md** — adversarial code and security audit; emits verdicts for
+  `code-review`, `security-review` (with required `severity` on rejection), and conditional
+  `docker-*` via `$KSTACK_REPORT`.
+- **software-architect.md** — principal architecture review of design artifacts; emits
+  `--verdict software-architect-review==approved|rejected`.
+- **planner.md** — fallback planner for deterministic plans; planning in canonical S4
+  workflows runs as `execution: "main"` on the host agent.
+- **sprint-planner.md** — ORPHANED: planning steps run as main phases on the host agent.
+  Kept documented-as-such for manual invocation and future planner-delegation variants.
