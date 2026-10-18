@@ -23,7 +23,7 @@ import { silentChildEnv, winPreloadArgs } from "../lib/silent-spawn.ts";
 // (harmless-looking fast failure), and `livenessThresholdMs` threw inside the
 // abort-poll TIMER callback 1s into the retry, which is an uncaughtException
 // that killed the whole pi process ("pi exiting due to uncaughtException").
-import { livenessThresholdMs, subagentTimeoutFor } from "./config.ts";
+import { inactivityTimeoutMs, livenessThresholdMs, subagentTimeoutFor } from "./config.ts";
 
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 const OUTPUT_CAP = 50 * 1024;
@@ -116,6 +116,11 @@ export interface SpawnRequest {
    */
   modelOverride?: string;
   timeoutMs?: number;
+  /**
+   * Maximum silence duration in ms before terminating the child as unresponsive.
+   * Defaults to config.inactivityTimeoutMs(). Pass "off" to disable silence termination.
+   */
+  inactivityTimeoutMs?: number | "off";
   /**
    * Polled once per second; when it returns true (e.g. the session was
    * reloaded mid-run) the child process is killed and the run aborts.
@@ -226,6 +231,8 @@ export interface SpawnResult {
   incomplete?: boolean;
   /** True when the child was killed by the timeout. */
   timedOut?: boolean;
+  /** True when the child was terminated specifically due to inactivity/silence. */
+  inactivityTimedOut?: boolean;
   /** True when the failure is configuration-level (e.g. unknown agent) — never retried. */
   configError?: boolean;
   /** Aggregate provider usage reported on assistant messages. */
@@ -341,17 +348,33 @@ async function writePromptToTempFile(agentName: string, systemPrompt: string): P
  * `process.argv[1]` is unreliable inside compiled/test-runner hosts.
  */
 function resolvePiCliScript(): string | null {
+  // Check global npm install first to avoid resolving stale devDependencies in extensions
+  const globalPrefixes = [
+    process.env.APPDATA ? path.join(process.env.APPDATA, "npm/node_modules/@earendil-works/pi-coding-agent") : null,
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, "npm/node_modules/@earendil-works/pi-coding-agent") : null,
+  ].filter(Boolean) as string[];
+
+  for (const prefix of globalPrefixes) {
+    for (const sub of ["dist/bundle/cli.js", "dist/cli.js"]) {
+      const candidate = path.join(prefix, sub);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+
   try {
     // import.meta.resolve honors the package's "import" exports condition —
     // createRequire's "require" condition is NOT exported by this package and
     // always throws (verified: ERR_PACKAGE_PATH_NOT_EXPORTED). bin: dist/cli.js
     // is a sibling of the resolved main (dist/index.js).
     const pkgEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
-    const cli = path.join(path.dirname(pkgEntry), "cli.js");
-    return fs.existsSync(cli) ? cli : null;
+    for (const sub of ["bundle/cli.js", "cli.js"]) {
+      const cli = path.join(path.dirname(pkgEntry), sub);
+      if (fs.existsSync(cli)) return cli;
+    }
   } catch {
-    return null;
+    /* ignore */
   }
+  return null;
 }
 
 function resolvePiInvocation(
@@ -375,6 +398,7 @@ function resolvePiInvocation(
   }
   const execName = path.basename(process.execPath).toLowerCase();
   const isGenericRuntime = /^(node|bun)(\.exe)?$/.test(execName);
+  const runtime = /^bun(\.exe)?$/.test(execName) ? "node" : process.execPath;
   if (!isGenericRuntime) {
     // Compiled/self-contained pi host (e.g. devin.exe): argv goes straight to
     // the binary — no -r slot exists, but NODE_OPTIONS still covers any
@@ -383,9 +407,9 @@ function resolvePiInvocation(
   }
   const cliScript = resolvePiCliScript();
   if (cliScript) {
-    return { command: process.execPath, args: [...preload, cliScript, ...args] };
+    return { command: runtime, args: [...preload, cliScript, ...args] };
   }
-  return { command: "pi", args };
+  return { command: process.platform === "win32" ? "pi.cmd" : "pi", args };
 }
 
 /**
@@ -436,6 +460,8 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
     let aborted = false;
     let toolCalls = 0;
     let timedOut = false;
+    let inactivityTimedOut = false;
+    let inactivityGapSec = 0;
     let spawnErrorMessage: string | null = null;
     let buffer = "";
     const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -445,6 +471,9 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
     let lastEventType = "(start)";
     let lastToolName: string | undefined;
     let livenessNotified = false;
+    // Inactivity / silence timeout tracking
+    let lastActivityAt = Date.now();
+    const effectiveInactivityMs = req.inactivityTimeoutMs !== undefined ? req.inactivityTimeoutMs : inactivityTimeoutMs();
     // Provider health: the last provider-level error (auto_retry_start events
     // and error stop reasons). When a child dies with no output, this is far
     // more actionable than the stderr noise (e.g. the model-registry banner).
@@ -493,6 +522,7 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
         try {
           const event = JSON.parse(line);
           lastEventAt = Date.now();
+          lastActivityAt = Date.now();
           if (event?.type) lastEventType = String(event.type);
           const toolName = event?.toolName ?? event?.name ?? event?.tool?.name;
           if (toolName) lastToolName = String(toolName);
@@ -501,6 +531,7 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
           }
           if (event.type === "message_end" && event.message?.role === "assistant") {
             turns++;
+            if (req.timeoutMs === undefined) armKillTimer(timeoutMs);
             const u = event.message.usage;
             if (u) {
               usage.input += Number(u.input ?? u.inputTokens ?? 0) || 0;
@@ -509,12 +540,15 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
               usage.cacheWrite += Number(u.cacheWrite ?? u.cacheWriteTokens ?? 0) || 0;
             }
           }
-          if (event?.type === 'tool_execution_start') toolCalls++;
+          if (event?.type === 'tool_execution_start') {
+            toolCalls++;
+            if (req.timeoutMs === undefined) armKillTimer(timeoutMs);
+          }
           if (event?.type === "auto_retry_start" && event?.errorMessage) {
             lastProviderError = String(event.errorMessage);
           }
           if (event?.type === "message_end" && event?.message?.role === "assistant" && event?.message?.stopReason === "error") {
-            lastProviderError = lastProviderError ?? "assistant message ended with stopReason=error";
+            lastProviderError = event?.message?.errorMessage ?? event?.errorMessage ?? lastProviderError ?? "assistant message ended with stopReason=error";
           }
           if (req.onEvent) {
             try {
@@ -531,30 +565,41 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
       };
 
       proc.stdout.on("data", (data) => {
+        lastActivityAt = Date.now();
         buffer += data.toString();
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
         for (const line of lines) processLine(line);
       });
       proc.stderr.on("data", (data) => {
+        lastActivityAt = Date.now();
         stderr += data.toString();
       });
 
-      const timer = setTimeout(() => {
-        try {
-          timedOut = true;
-          debugLog(`timeout after ${Math.round(timeoutMs / 1000)}s — killing tree`);
-          killTree(proc, false);
-          setTimeout(() => killTree(proc, true), 5000);
-        } catch {
-          /* ignore */
-        }
-      }, timeoutMs);
-      timer.unref?.();
+      let killTimer: any;
+      const armKillTimer = (ms: number) => {
+        if (killTimer) clearTimeout(killTimer);
+        killTimer = setTimeout(() => {
+          try {
+            timedOut = true;
+            debugLog(`timeout after ${Math.round(ms / 1000)}s — killing tree`);
+            killTree(proc, false);
+            setTimeout(() => killTree(proc, true), 5000);
+          } catch {
+            /* ignore */
+          }
+        }, ms);
+        killTimer.unref?.();
+      };
+      armKillTimer(timeoutMs);
 
       // Cooperative abort: if the parent chain is invalidated (session
       // reload/switch), kill the child promptly instead of letting it run to
       // completion for work nobody will read.
+      const pollIntervalMs = typeof effectiveInactivityMs === "number" && effectiveInactivityMs < 1000
+        ? Math.max(25, Math.floor(effectiveInactivityMs / 2))
+        : 1000;
+
       const abortPoll = setInterval(() => {
         try {
           if (req.shouldAbort?.()) {
@@ -582,13 +627,27 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
               }
             }
           }
+          // Inactivity / liveness timeout: terminate hung or deadlocked subagent.
+          if (effectiveInactivityMs !== "off" && effectiveInactivityMs > 0) {
+            const silenceMs = Date.now() - lastActivityAt;
+            if (silenceMs > effectiveInactivityMs) {
+              timedOut = true;
+              inactivityTimedOut = true;
+              inactivityGapSec = Math.round(silenceMs / 1000);
+              clearInterval(abortPoll);
+              debugLog(`inactivity timeout after ${inactivityGapSec}s of silence (last event: ${lastEventType}) — killing tree`);
+              killTree(proc, false);
+              setTimeout(() => killTree(proc, true), 5000);
+              return;
+            }
+          }
         } catch (err: any) {
           // CRASH GUARD: an exception inside a timer callback is an
           // uncaughtException and kills the whole host process. A liveness or
           // abort hiccup must only degrade this run, never pi itself.
           debugLog(`abortPoll tick error: ${err?.message ?? err}`);
         }
-      }, 1000);
+      }, pollIntervalMs);
       abortPoll.unref?.();
 
       let settled = false;
@@ -596,7 +655,7 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
         if (settled) return;
         settled = true;
         clearInterval(abortPoll);
-        clearTimeout(timer);
+        if (killTimer) clearTimeout(killTimer);
         try {
           proc.stdout?.destroy();
         } catch {
@@ -651,13 +710,17 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
     }
     if (timedOut) {
       // STEP 2d: preserve the partial transcript, labeled incomplete.
+      const errorMsg = inactivityTimedOut
+        ? `Subagent "${req.agent}" timed out: no activity/signal detected for ${inactivityGapSec}s (last activity: ${lastEventType}${lastToolName ? ` [${lastToolName}]` : ""}). Limit configurable via KSTACK_PI_INACTIVITY_TIMEOUT_SEC.`
+        : `Subagent "${req.agent}" timed out after ${Math.round(timeoutMs / 1000)}s (limit configurable via KSTACK_PI_SUBAGENT_TIMEOUT, in seconds).`;
       return {
         ok: false,
         output: capOutput(rawOutput),
         rawOutput,
         incomplete: true,
         timedOut: true,
-        error: `Subagent "${req.agent}" timed out after ${Math.round(timeoutMs / 1000)}s (limit configurable via KSTACK_PI_SUBAGENT_TIMEOUT, in seconds).`,
+        inactivityTimedOut: inactivityTimedOut || undefined,
+        error: errorMsg,
         exitCode,
         durationMs: Date.now() - started,
       };

@@ -168,16 +168,29 @@ export function newestArchitectArtifact(cwd: string, sprintNumber?: number): str
 
 // --- Ephemeral artifacts (§10.5 / TASK_07) -----------------------------------
 //
-// THINK docs consumed within the run — FLAT names (no _XX; only durables
-// carry the archive slot). Registered on state at creation, deleted at run
-// terminal status. Cross-run handoff artifacts under `.kstack/<wf>/` are
+// THINK scratch docs consumed strictly within the active run — FLAT names.
+// Only true scratch / handoff notes that have no durable archival value belong here.
+// Durable specifications (user-story, capability, tasks, system-design, etc.)
+// are preserved and archived under .kstack/workflows/<workflow>/, NEVER deleted.
+// Cross-run handoff artifacts under `.kstack/workflows/<wf>/` are
 // NEVER listed here (independent lifetime, outside the project root).
 
 export const EPHEMERAL_ARTIFACTS: Record<string, string[]> = {
-  develop: ["understand.md", "plan.md"],
-  sprint: ["understand.md", "user-story.md", "capability.md", "tasks.md", "summary_BE.md", "summary_FE.md"],
-  investigate: ["bug-report.md"],
+  develop: ["understand.md"],
+  sprint: ["understand.md", "user-story.md", "summary_BE.md", "summary_FE.md"],
+  investigate: [],
 };
+
+/**
+ * Returns the canonical archival directory for a workflow:
+ * `<cwd>/.kstack/workflows/<workflowId>[/<slot>]`
+ */
+export function workflowArchiveDir(cwd: string, workflowId: string, slot?: string): string {
+  if (slot) {
+    return path.join(cwd, ".kstack", "workflows", workflowId, slot);
+  }
+  return path.join(cwd, ".kstack", "workflows", workflowId);
+}
 
 /** Ephemeral set for a workflow id — a fresh copy (state stamps it verbatim). */
 export function ephemeralArtifactsFor(workflowId: string): string[] {

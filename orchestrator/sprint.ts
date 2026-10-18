@@ -43,21 +43,36 @@ function scanDir(dir: string): Map<number, string[]> {
   return found;
 }
 
-/** All archived sprint dirs under `.kstack/sprints/` (best-effort). */
+/** All archived sprint dirs under `.kstack/workflows/sprint/` (with legacy fallback to `.kstack/sprints/` and `sprints/`). */
 export function archivedSprintDirs(cwd: string): string[] {
-  const root = path.join(cwd, ".kstack", "sprints");
-  try {
-    return fs
-      .readdirSync(root, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-      .map((e) => path.join(root, e.name));
-  } catch {
-    return [];
+  const roots = [
+    path.join(cwd, ".kstack", "workflows", "sprint"),
+    path.join(cwd, ".kstack", "sprints"),
+    path.join(cwd, "sprints"),
+  ];
+  const found: string[] = [];
+  const seenNames = new Set<string>();
+
+  for (const root of roots) {
+    try {
+      const entries = fs
+        .readdirSync(root, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && e.name.startsWith("sprint_"));
+      for (const e of entries) {
+        if (!seenNames.has(e.name)) {
+          seenNames.add(e.name);
+          found.push(path.join(root, e.name));
+        }
+      }
+    } catch {
+      /* missing dir — nothing to scan */
+    }
   }
+  return found;
 }
 
 /**
- * Compute the next sprint number from root + `.kstack/sprints/*` discovery.
+ * Compute the next sprint number from root + `.kstack/workflows/sprint/*` discovery.
  * Empty project ⇒ 01; gaps are fine ((01,03) ⇒ 04). Anomalies never guess:
  * they pause the workflow with a human-readable reason.
  */
@@ -79,7 +94,7 @@ export function computeNextSprintNumber(cwd: string): SprintDiscovery {
   if (collisions.length > 0) {
     return {
       next: NaN,
-      anomaly: `sprint number ${collisions.map(pad2).join(", ")} exists both in project root and .kstack/sprints/ — archive or remove one copy first`,
+      anomaly: `sprint number ${collisions.map(pad2).join(", ")} exists both in project root and .kstack/workflows/sprint/ — archive or remove one copy first`,
     };
   }
 
@@ -90,7 +105,7 @@ export function computeNextSprintNumber(cwd: string): SprintDiscovery {
   if (root.size > 1) {
     return {
       next: NaN,
-      anomaly: `project root holds ${root.size} un-archived sprints (${[...root.keys()].map(pad2).join(", ")}) — archive finished sprints to .kstack/sprints/ first`,
+      anomaly: `project root holds ${root.size} un-archived sprints (${[...root.keys()].map(pad2).join(", ")}) — archive finished sprints to .kstack/workflows/sprint/ first`,
     };
   }
 
@@ -98,7 +113,7 @@ export function computeNextSprintNumber(cwd: string): SprintDiscovery {
   return { next: max + 1, anomaly: null };
 }
 
-/** D7 archival target for a completed sprint. */
+/** D7 archival target for a completed sprint under `.kstack/workflows/sprint/sprint_XX`. */
 export function sprintArchiveDir(cwd: string, sprintNumber: number): string {
-  return path.join(cwd, ".kstack", "sprints", `sprint_${pad2(sprintNumber)}`);
+  return path.join(cwd, ".kstack", "workflows", "sprint", `sprint_${pad2(sprintNumber)}`);
 }

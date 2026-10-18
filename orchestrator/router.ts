@@ -23,6 +23,9 @@ export function createInputRouter(_pi: ExtensionAPI) {
   return (event: InputEvent, ctx: ExtensionContext): InputEventResult => {
     if (event.source !== "interactive") return { action: "continue" };
     if (event.text.startsWith("/")) return { action: "continue" };
+    // A bare stop word is a request to halt — never wrap it in "continue working".
+    // Only the WHOLE message: "stop asking and use X" still gets the re-anchor.
+    if (/^\s*(abort|cancel|stop|terminate|quit|exit|annulla|termina|esci|fermati)\s*[.!]*\s*$/i.test(event.text)) return { action: "continue" };
 
     const activeState = loadActiveState(ctx);
     if (activeState) {

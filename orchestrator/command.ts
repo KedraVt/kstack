@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getAllWorkflows, getWorkflow, getWorkflowIds } from "./workflows.ts";
-import { loadActiveState, createState, saveState, abortState, resumeState, reissueGate, approveNext, approveEntryGate, approveOptionalPhase, skipPendingOptional, isSecurityFrozen, unfreeze, forceApproveParked, returnParkedWithContext, forceContinuePastGate } from "./state.ts";
+import { loadActiveState, createState, saveState, abortState, resumeState, reissueGate, approveNext, approveEntryGate, approveOptionalPhase, skipPendingOptional, isSecurityFrozen, unfreeze, forceApproveParked, returnParkedWithContext, forceContinuePastGate, advancePhase, recordStepResult } from "./state.ts";
 import { detectGitContext } from "./git.ts";
 import { initAgentsMd } from "./init.ts";
 import { deterministicSubagents } from "./config.ts";
@@ -12,7 +12,9 @@ import { launchPhase, executeCurrentPhase, releasePhaseInFlight, isPhaseInFlight
 import { writeRunReport } from "./telemetry.ts";
 import { appendLedger } from "./ledger.ts";
 import { endStepWatch } from "./stuck.ts";
-import type { GitContext, WorkflowState } from "./types.ts";
+import { verdictKeysFor, writeStepRecord } from "./records.ts";
+import { verdictValuesFor } from "./templates.ts";
+import type { GitContext, WorkflowPhase, WorkflowState, WorkflowStep } from "./types.ts";
 
 /**
  * Launch the executor with the optional-phase gate disarmed: the user just
@@ -250,7 +252,9 @@ export async function handleKstackCommand(args: string, ctx: ExtensionCommandCon
         [
           entryGated
             ? `Approve & RUN: ${activeState.workflowId} → gated phase "${phaseName}" ${progress} (it has not executed yet)`
-            : `Approve & continue: ${activeState.workflowId} → next phase after "${workflow?.phases[activeState.phaseIndex - 1]?.name ?? "previous phase"}" ${progress}`,
+            : activeState.stepGate
+              ? `Approve & continue: ${activeState.workflowId} → ${phaseName} ${progress} · step "${currentStepOf(activeState)?.id ?? "?"}"`
+              : `Approve & continue: ${activeState.workflowId} → next phase after "${workflow?.phases[activeState.phaseIndex - 1]?.name ?? "previous phase"}" ${progress}`,
           "Abort workflow",
         ],
       );
@@ -269,13 +273,22 @@ export async function handleKstackCommand(args: string, ctx: ExtensionCommandCon
       return;
     }
 
-    const choice = await ctx.ui.select("Workflow in progress", [
-      `Resume: ${activeState.workflowId} → ${phaseName} ${progress}`,
-      "Abort workflow",
-      "Start new workflow",
-    ]);
+    const choice = await ctx.ui.select(
+      activeState.status === "paused" ? `Workflow paused${activeState.pausedReason ? ` — ${activeState.pausedReason}` : ""}` : "Workflow in progress",
+      [
+        `Resume: ${activeState.workflowId} → ${phaseName} ${progress}`,
+        "Advance manually…",
+        "Abort workflow",
+        "Start new workflow",
+      ],
+    );
 
     if (!choice) return;
+
+    if (choice === "Advance manually…") {
+      await manualAdvancePanel(activeState, ctx, pi);
+      return;
+    }
 
     if (choice.startsWith("Resume")) {
       // Same racing class as the decision panels: a resume while a delegation
@@ -361,18 +374,23 @@ async function startWorkflow(workflowId: string, ctx: ExtensionCommandContext, p
   // TUI-only by design: RPC mode also exposes dialog UI (ctx.hasUI) but a
   // remote caller cannot see a dialog — the conservative default skips
   // configure and applies env/human-gate defaults (S3 review note).
-  if (gateRows.length > 0 && ctx.mode === "tui") {
+  // Human step gating: choosing "human-gate" (or dismissing the panel, whose
+  // announced default is human-gate) makes EVERY completed step wait for the
+  // user's /kstack approval. Runs that never showed the panel keep phase gates.
+  let stepGates = false;
+  if (ctx.mode === "tui") {
     const config = await configureGates(gateRows, ctx, workflow.name);
     if (config) {
       gateMode = config.gateMode;
       gateOverrides = config.gateOverrides;
     }
+    stepGates = gateMode === "human-gate";
   }
 
   // S4/TASK_06: stamp probed capabilities at run start (kstack init is the
   // primary writer — §10.8; this covers panel-started runs; the executor's
   // lazy probe covers tool-started/legacy states where {} means unprobed).
-  const state: WorkflowState = { ...createState(workflowId, goal), gateMode, gateOverrides, vars: askVars, capabilities: probeCapabilities() };
+  const state: WorkflowState = { ...createState(workflowId, goal), gateMode, gateOverrides, vars: askVars, capabilities: probeCapabilities(), ...(stepGates ? { stepGates: true } : {}) };
   saveState(pi, state);
 
   ctx.ui.notify(`Starting: ${workflow.name} (${workflow.phases.length} phases)`, "info");
@@ -434,33 +452,67 @@ function panelGuard(ctx: ExtensionCommandContext, state: WorkflowState): boolean
  * no separate !hasUI protocol exists to hook into.
  */
 export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<boolean> {
-  if (state.workflowId !== "sprint") return false;
-  const phases = getWorkflow("sprint")?.phases ?? [];
+  // Park panels serve EVERY workflow: without them a non-sprint verdict park
+  // fell through to the generic Resume, which re-parked forever.
+  const phases = getWorkflow(state.workflowId)?.phases ?? [];
+  const wfId = state.workflowId;
 
-  // D3 SECURITY FREEZE: blocked until the typed confirmation phrase arrives.
+  // D3 SECURITY FREEZE: structured resolution options via select panel.
   if (isSecurityFrozen(state)) {
     const info = state.freezeInfo;
-    const answer = await ctx.ui.input(
-      "SECURITY FREEZE",
-      `A ${info?.severity ?? "critical/high"}-severity security rejection froze the sprint at "${info?.phaseId}".\n\n` +
-        `Review ${info?.artifactPath ?? "devsecops/security-review-artifact.md"} with your security panel FIRST.\n` +
-        `Type exactly "${FREEZE_RESUME_PHRASE}" to unfreeze and re-run the review gate. Leave empty to keep the freeze; type ABORT to abandon the workflow.`,
+    const choice = await ctx.ui.select(
+      `SECURITY FREEZE: A ${info?.severity ?? "critical/high"}-severity security rejection froze the sprint at "${info?.phaseId}". Review ${info?.artifactPath ?? "devsecops/security-review-artifact.md"} with your security panel FIRST.`,
+      [
+        "Re-run review gate",
+        "Accept risk — continue past the gate",
+        "Return phase with guidance",
+        "Custom remediation…",
+        "Abort workflow",
+      ],
     );
-    if (answer !== undefined && answer.trim().toLowerCase() === FREEZE_RESUME_PHRASE) {
+    if (
+      choice === "Re-run review gate" ||
+      choice === "Accept risk — continue past the gate" ||
+      choice === "Return phase with guidance" ||
+      choice === "Custom remediation…"
+    ) {
       if (panelGuard(ctx, state)) return true;
-      const unfrozen = unfreeze(state, getWorkflow(state.workflowId)?.phases);
-      auditGateDecision(ctx, state, "run");
-      saveState(pi, unfrozen);
-      ctx.ui.notify("Freeze lifted — re-running the devsecops review gate.", "info");
-      launchPhase(pi, ctx, unfrozen);
-    } else if (answer !== undefined && answer.trim().toUpperCase() === "ABORT") {
-      // Review W3: an explicit escape hatch — the freeze must never soft-lock
-      // a user who lost the phrase or wants to abandon the sprint.
-      if (await ctx.ui.confirm("Abort frozen workflow?", `Abandon "sprint" despite the unresolved security finding?`)) {
+      if (choice === "Re-run review gate") {
+        const unfrozen = unfreeze(state, getWorkflow(state.workflowId)?.phases);
+        auditGateDecision(ctx, state, "run");
+        saveState(pi, unfrozen);
+        ctx.ui.notify("Freeze lifted — re-running the devsecops review gate.", "info");
+        launchPhase(pi, ctx, unfrozen);
+      } else if (choice === "Accept risk — continue past the gate") {
+        const next = forceContinuePastGate(state, phases);
+        auditGateDecision(ctx, state, "run");
+        saveState(pi, next);
+        launchPhase(pi, ctx, next);
+      } else if (choice === "Return phase with guidance") {
+        const next = returnParkedWithContext(state, phases, undefined, ctx.cwd);
+        if (next) {
+          auditGateDecision(ctx, state, "return");
+          saveState(pi, next);
+          launchPhase(pi, ctx, next);
+        }
+      } else if (choice === "Custom remediation…") {
+        const custom = await ctx.ui.input(
+          "Custom security remediation",
+          "Specify guidance or remediation instruction for the phase",
+        );
+        const next = returnParkedWithContext(state, phases, custom?.trim() || undefined, ctx.cwd);
+        if (next) {
+          auditGateDecision(ctx, state, "return");
+          saveState(pi, next);
+          launchPhase(pi, ctx, next);
+        }
+      }
+    } else if (choice === "Abort workflow") {
+      if (await ctx.ui.confirm("Abort frozen workflow?", `Abandon "${wfId}" despite the unresolved security finding?`)) {
         abortWorkflow(pi, ctx, state, "Frozen workflow aborted.");
       }
     } else {
-      ctx.ui.notify(`Freeze kept${answer === undefined ? " (prompt dismissed)" : answer.trim() === "" ? "" : " — exact phrase not provided"}.`, "warning");
+      ctx.ui.notify("Freeze kept (selection dismissed).", "warning");
     }
     return true;
   }
@@ -468,6 +520,7 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
   // D4 UNREADABLE VERDICT PARK: fixed choices over ONLY the failing lines.
   if (state.verdictPark) {
     const phaseId = state.verdictPark;
+    const phase = phases.find((p) => p.id === phaseId);
     // pausedReason encodes the park cause as "verdict-unreadable:<phaseId>:<cause>"
     // (state.ts); parks written before the cause existed fall back to no-verdict.
     const cause = state.pausedReason?.split(":")[2] ?? "no-verdict";
@@ -476,11 +529,22 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
         ? "the parsed HANDOFF verdict disagrees with the on-disk artifact"
         : cause === "unroutable"
           ? "a whitelisted verdict value is off this phase's expectation map"
-          : "the agent emitted no trustworthy verdict";
-    const excerpt = state.pendingVerdict?.excerpt?.trim() || "(no verdict-shaped lines found in the subagent HANDOFF)";
+          : state.pausedReason?.startsWith("park-on:") || state.pausedReason?.startsWith("feedback-spec:")
+            ? `a designed park fired (${state.pausedReason})`
+            : "the agent emitted no trustworthy verdict";
+    const excerpt = state.pendingVerdict?.excerpt?.trim() || "(no verdict-shaped lines found in the step records)";
+    const flagged = phase?.steps?.some((st) => st.signal?.kind === "verdict") ?? false;
+    const options = [
+      "Continue as approved",
+      ...(flagged ? ["Set verdict manually…"] : []),
+      ...(phase?.loopBackTo ? ["Return phase with context"] : []),
+      "Re-run the step",
+      "View report excerpt",
+      "Abort workflow",
+    ];
     const choice = await ctx.ui.select(
       `Verdict unreadable in "${phaseId}" — ${causeText} — parked WITHOUT burning an attempt. Verdict lines found: ${excerpt.slice(0, 200)}`,
-      ["Continue as approved", "Return phase with context", "View report excerpt", "Other…", "Abort workflow"],
+      options,
     );
     if (choice === "Continue as approved") {
       if (panelGuard(ctx, state)) return true;
@@ -488,7 +552,23 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
       auditGateDecision(ctx, state, "run");
       saveState(pi, next);
       launchPhase(pi, ctx, next);
-    } else if (choice === "Return phase with context" || choice === "Other…") {
+    } else if (choice === "Set verdict manually…" && phase) {
+      if (panelGuard(ctx, state)) return true;
+      if (!(await setPhaseVerdictsManually(state, phase, ctx))) return true;
+      const lastStep = phase.steps![phase.steps!.length - 1];
+      const resumed: WorkflowState = { ...state, status: "active", verdictPark: undefined, pausedReason: undefined, pendingVerdict: undefined };
+      const next = advancePhase(
+        resumed,
+        phase.id,
+        { status: "completed", summary: state.results[`${phase.id}.${lastStep.id}`]?.summary ?? "Verdict set manually by the user." },
+        phases.length,
+        { phases, cwd: ctx.cwd },
+      );
+      auditGateDecision(ctx, state, "run");
+      saveState(pi, next);
+      if (next.status === "active" || next.status === "completed") launchPhase(pi, ctx, next);
+      else ctx.ui.notify(`kstack: the manual verdict routed to a new park — ${next.pausedReason ?? next.status}. Run /kstack to decide.`, "warning");
+    } else if (choice === "Return phase with context") {
       const extra = await ctx.ui.input(
         "Feedback for the retried phase",
         "Optional custom guidance appended to the RETRY CONTEXT (empty = rely on extracted blockers)",
@@ -502,10 +582,17 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
       auditGateDecision(ctx, state, "return");
       saveState(pi, next);
       launchPhase(pi, ctx, next);
+    } else if (choice === "Re-run the step") {
+      if (panelGuard(ctx, state)) return true;
+      // The parked phase's last step re-delivers (stepIndex is clamped at delivery).
+      const resumed = resumeState(state);
+      auditGateDecision(ctx, state, "run");
+      saveState(pi, resumed);
+      launchPhase(pi, ctx, resumed);
     } else if (choice === "View report excerpt") {
       ctx.ui.notify(`Verdict excerpt: ${excerpt.slice(0, 1500)}`, "info");
     } else if (choice === "Abort workflow") {
-      if (await ctx.ui.confirm("Abort workflow?", `Stop "sprint" at phase ${state.phaseIndex + 1}?`)) {
+      if (await ctx.ui.confirm("Abort workflow?", `Stop "${wfId}" at phase ${state.phaseIndex + 1}?`)) {
         abortWorkflow(pi, ctx, state, "Workflow aborted.");
       }
     }
@@ -519,7 +606,7 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
   // or an endless Resume→re-run→pause loop — the documented "human decides"
   // contract had no decision UI. Offer the same choices as loop exhaustion.
   if (state.status === "paused" && (reason.startsWith("verdicts-disabled:") || reason.startsWith("loopback-disabled:"))) {
-    const choice = await ctx.ui.select(`Sprint paused — ${reason}`, [
+    const choice = await ctx.ui.select(`${wfId} paused — ${reason}`, [
       "Accept result — continue past the gate",
       "Re-run the gated phase",
       "Abort workflow",
@@ -537,7 +624,7 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
       saveState(pi, resumed);
       launchPhase(pi, ctx, resumed);
     } else if (choice === "Abort workflow") {
-      if (await ctx.ui.confirm("Abort workflow?", `Stop "sprint" at phase ${state.phaseIndex + 1}?`)) {
+      if (await ctx.ui.confirm("Abort workflow?", `Stop "${wfId}" at phase ${state.phaseIndex + 1}?`)) {
         abortWorkflow(pi, ctx, state, "Workflow aborted.");
       }
     }
@@ -550,7 +637,7 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
     const choices = exhausted
       ? ["Re-run the gated phase (+1 verified attempt)", "Accept result — continue past the gate", "Abort workflow"]
       : [reason.startsWith("branch-violation:") ? "Resume (re-checks the git branch first)" : "Resume (re-checks sprint numbering first)", "Abort workflow"];
-    const choice = await ctx.ui.select(`Sprint paused — ${reason}`, choices);
+    const choice = await ctx.ui.select(`${wfId} paused — ${reason}`, choices);
     if (choice?.startsWith("Resume")) {
       if (panelGuard(ctx, state)) return true;
       const resumed = resumeState(state);
@@ -575,7 +662,7 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
       saveState(pi, next);
       launchPhase(pi, ctx, next);
     } else if (choice === "Abort workflow") {
-      if (await ctx.ui.confirm("Abort workflow?", `Stop "sprint" at phase ${state.phaseIndex + 1}?`)) {
+      if (await ctx.ui.confirm("Abort workflow?", `Stop "${wfId}" at phase ${state.phaseIndex + 1}?`)) {
         abortWorkflow(pi, ctx, state, "Workflow aborted.");
       }
     }
@@ -583,4 +670,116 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
   }
 
   return false;
+}
+
+// --- Manual advance (human override, every workflow) ------------------------
+
+/** The step the cursor points at, or undefined past the last step / unstepped phase. */
+function currentStepOf(state: WorkflowState): WorkflowStep | undefined {
+  const steps = getWorkflow(state.workflowId)?.phases[state.phaseIndex]?.steps;
+  if (!steps?.length) return undefined;
+  return steps[Math.min(state.stepIndex ?? 0, steps.length - 1)];
+}
+
+/**
+ * Write a human-chosen verdict record for every verdict-flagged, non-skipped
+ * step of `phase` — the routing then runs through the normal record merge,
+ * so a manual "rejected" still loops back exactly like an agent's would.
+ * Returns false when the user cancels or the run has no record channel.
+ */
+async function setPhaseVerdictsManually(state: WorkflowState, phase: WorkflowPhase, ctx: ExtensionCommandContext): Promise<boolean> {
+  if (!state.runId) {
+    ctx.ui.notify("kstack: this run has no runId — verdict records cannot be written.", "error");
+    return false;
+  }
+  const flagged = (phase.steps ?? []).filter(
+    (st) => st.signal?.kind === "verdict" && state.results[`${phase.id}.${st.id}`]?.status !== "skipped",
+  );
+  const writes: Array<{ step: WorkflowStep; key: string; value: string }> = [];
+  for (const step of flagged) {
+    const key = step.signal!.value;
+    const value = await ctx.ui.select(`Verdict for "${phase.id}.${step.id}" (${key})`, verdictValuesFor(state.workflowId, phase.id, key));
+    if (!value) return false;
+    writes.push({ step, key, value });
+  }
+  for (const { step, key, value } of writes) {
+    writeStepRecord(ctx.cwd, {
+      workflow: state.workflowId,
+      runId: state.runId,
+      phase: phase.id,
+      step: step.id,
+      summary: `Verdict ${key}==${value} set manually by the user via /kstack.`,
+      verdicts: { [key]: value },
+      ...(step.signal?.kind === "marker" ? { markers: [step.signal.value] } : {}),
+    });
+  }
+  return true;
+}
+
+/**
+ * "Advance manually…" — the human escape hatch from ANY non-terminal state:
+ * complete the current step (writing the record its signal needs, verdict
+ * chosen by the user) or jump to the next phase. Never blocked by a missing
+ * signal: the human decision IS the signal.
+ */
+export async function manualAdvancePanel(state: WorkflowState, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<void> {
+  const workflow = getWorkflow(state.workflowId);
+  const phases = workflow?.phases ?? [];
+  const phase = phases[state.phaseIndex];
+  if (!phase) {
+    ctx.ui.notify("kstack: no current phase to advance.", "warning");
+    return;
+  }
+  const step = phase.steps?.length && (state.stepIndex ?? 0) < phase.steps.length ? currentStepOf(state) : undefined;
+  const completeStep = step ? `Complete step "${step.id}" (${phase.name}) as done` : undefined;
+  const nextPhase = `Advance to the next phase — skip the rest of "${phase.name}"`;
+  const choice = await ctx.ui.select("Advance manually", [...(completeStep ? [completeStep] : []), nextPhase, "Cancel"]);
+  if (!choice || choice === "Cancel") return;
+  if (decisionBlockedByInFlightChain(ctx, state)) return;
+
+  if (choice === nextPhase) {
+    if (!(await ctx.ui.confirm("Skip ahead?", `Mark "${phase.name}" complete and start the next phase? Remaining steps of this phase will not run.`))) return;
+    endStepWatch();
+    const next = forceApproveParked(state, phases);
+    auditGateDecision(ctx, state, "run");
+    saveState(pi, next);
+    ctx.ui.notify(`kstack: "${phase.name}" advanced manually.`, "info");
+    launchPhase(pi, ctx, next);
+    return;
+  }
+
+  // Complete the current step: satisfy its declared signal on the human's word.
+  const sig = step!.signal;
+  if (sig?.kind === "verdict") {
+    if (!state.runId) {
+      ctx.ui.notify("kstack: this run has no runId — the verdict record cannot be written.", "error");
+      return;
+    }
+    const value = await ctx.ui.select(`Verdict for "${phase.id}.${step!.id}" (${sig.value})`, verdictValuesFor(state.workflowId, phase.id, sig.value));
+    if (!value) return;
+    writeStepRecord(ctx.cwd, { workflow: state.workflowId, runId: state.runId, phase: phase.id, step: step!.id, summary: `Verdict ${sig.value}==${value} set manually by the user via /kstack.`, verdicts: { [sig.value]: value } });
+  } else if (sig?.kind === "marker" && state.runId) {
+    writeStepRecord(ctx.cwd, { workflow: state.workflowId, runId: state.runId, phase: phase.id, step: step!.id, summary: "Completed manually by the user via /kstack.", markers: [sig.value] });
+  }
+  endStepWatch();
+  const base: WorkflowState = {
+    ...state, status: "active", pausedReason: undefined, verdictPark: undefined, pendingVerdict: undefined,
+    resumeMode: undefined, reissues: undefined, stepGate: undefined,
+  };
+  const rec = recordStepResult(base, phase, { status: "completed", summary: "Completed manually by the user via /kstack." });
+  if (!rec) return;
+  appendLedger(ctx.cwd, state, { kind: "step", phaseId: phase.id, stepId: step!.id, payload: { summary: "completed manually by the user" } }, (m) => {
+    try { ctx.ui.notify(m, "warning"); } catch { /* stale ctx */ }
+  });
+  auditGateDecision(ctx, state, "run");
+  const next = rec.isLast
+    ? advancePhase(rec.state, phase.id, { status: "completed", summary: state.results[`${phase.id}.${step!.id}`]?.summary ?? "Completed manually by the user via /kstack." }, phases.length, { phases, cwd: ctx.cwd })
+    : rec.state;
+  saveState(pi, next);
+  if (next.status === "active" || next.status === "completed") {
+    ctx.ui.notify(`kstack: step "${step!.id}" completed manually.`, "info");
+    launchPhase(pi, ctx, next);
+  } else {
+    ctx.ui.notify(`kstack: step "${step!.id}" completed; the phase routed to a park — ${next.pausedReason ?? next.status}. Run /kstack to decide.`, "warning");
+  }
 }

@@ -1292,6 +1292,7 @@ import {
   timeoutClassFor,
   subagentTimeoutFor,
   livenessThresholdMs,
+  inactivityTimeoutMs,
   maxRunTokens,
 } from "../orchestrator/config.ts";
 import { recordTokens, totalTokensUsed, recordLiveness, buildRunReport as reportOf } from "../orchestrator/telemetry.ts";
@@ -1367,6 +1368,29 @@ describe("numeric config parser (STEP 5a / COR-10)", () => {
     } finally {
       if (original === undefined) delete process.env[NAME];
       else process.env[NAME] = original;
+    }
+  });
+
+  test("inactivity kill is opt-in (default off), honors envs and supports off", () => {
+    const keys = ["KSTACK_PI_INACTIVITY_TIMEOUT_SEC", "KSTACK_PI_LIVENESS_KILL_SEC", "KSTACK_PI_LIVENESS_SEC"];
+    const saved: Record<string, string | undefined> = {};
+    for (const k of keys) { saved[k] = process.env[k]; delete process.env[k]; }
+    try {
+      assert.equal(inactivityTimeoutMs(), "off");
+      // The observe-only liveness threshold never arms the kill.
+      process.env.KSTACK_PI_LIVENESS_SEC = "180";
+      assert.equal(inactivityTimeoutMs(), "off");
+      process.env.KSTACK_PI_LIVENESS_KILL_SEC = "120";
+      assert.equal(inactivityTimeoutMs(), 120 * 1000);
+      process.env.KSTACK_PI_INACTIVITY_TIMEOUT_SEC = "60";
+      assert.equal(inactivityTimeoutMs(), 60 * 1000);
+      process.env.KSTACK_PI_INACTIVITY_TIMEOUT_SEC = "off";
+      assert.equal(inactivityTimeoutMs(), "off");
+    } finally {
+      for (const k of keys) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
     }
   });
 
@@ -1494,6 +1518,92 @@ describe("runSubagent real spawn path (crash regression)", () => {
     });
     assert.equal(result.ok, false);
     assert.equal(result.configError, true);
+  });
+
+  test("terminates a silent subagent when inactivity limit is reached", async () => {
+    // Script that immediately goes silent and hangs forever
+    const script = `
+      // Emit nothing, sleep forever
+      setInterval(() => {}, 10000);
+    `;
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "kstack-inact-"));
+    const scriptPath = path.join(tmp, "silent.js");
+    writeFileSync(scriptPath, script);
+    try {
+      const result = await runSubagent({
+        agent: "test-silent-agent",
+        agentDef: {
+          name: "test-silent-agent",
+          description: "silent",
+          systemPrompt: "",
+          tools: [],
+          filePath: "inline",
+        },
+        task: "do nothing",
+        cwd: tmp,
+        timeoutMs: 30_000,
+        inactivityTimeoutMs: 150,
+        scriptOverride: scriptPath,
+        execPathOverride: "node",
+      });
+      assert.equal(result.ok, false);
+      assert.equal(result.timedOut, true);
+      assert.equal(result.inactivityTimedOut, true);
+      assert.match(result.error ?? "", /no activity\/signal detected/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test("does not terminate an active subagent as long as it emits signals", async () => {
+    // Script that emits events periodically (every 40ms) for 300ms total,
+    // then outputs an assistant message and exits.
+    // Inactivity timeout is 150ms: if inactivity wasn't refreshed, it would be killed at 150ms.
+    const script = `
+      let ticks = 0;
+      const interval = setInterval(() => {
+        ticks++;
+        console.log(JSON.stringify({ type: "tool_execution_start", toolName: "mock_tool" }));
+        if (ticks >= 6) {
+          clearInterval(interval);
+          console.log(JSON.stringify({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "ACTIVE_SUCCESS" }]
+            }
+          }));
+          process.exit(0);
+        }
+      }, 40);
+    `;
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "kstack-active-"));
+    const scriptPath = path.join(tmp, "active.js");
+    writeFileSync(scriptPath, script);
+    try {
+      const result = await runSubagent({
+        agent: "test-active-agent",
+        agentDef: {
+          name: "test-active-agent",
+          description: "active",
+          systemPrompt: "",
+          tools: [],
+          filePath: "inline",
+        },
+        task: "stay active",
+        cwd: tmp,
+        timeoutMs: 30_000,
+        inactivityTimeoutMs: 150,
+        scriptOverride: scriptPath,
+        execPathOverride: "node",
+      });
+      assert.equal(result.ok, true);
+      assert.equal(result.timedOut, undefined);
+      assert.equal(result.inactivityTimedOut, undefined);
+      assert.equal(result.output, "ACTIVE_SUCCESS");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
 

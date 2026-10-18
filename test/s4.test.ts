@@ -25,7 +25,7 @@ function phase(partial: Partial<WorkflowPhase> & { id: string }): WorkflowPhase 
 function writeRecord(
   cwd: string,
   runId: string,
-  rec: { phase: string; step?: string; verdicts?: Record<string, string>; vars?: Record<string, string>; summary?: string; workflow?: string },
+  rec: { phase: string; step?: string; verdicts?: Record<string, string>; vars?: Record<string, string>; summary?: string; workflow?: string; markers?: string[] },
 ): void {
   const safe = (v: string) => v.replace(/[^\w.-]/g, "-"); // mirror kstack-report + records.ts
   const file = rec.step ? `${safe(rec.phase)}.${safe(rec.step)}.json` : `${safe(rec.phase)}.json`;
@@ -45,7 +45,7 @@ function writeRecord(
       vars: rec.vars ?? {},
       evidence: [],
       deliverables: [],
-      markers: [],
+      markers: rec.markers ?? [],
     }),
   );
 }
@@ -407,11 +407,23 @@ describe("S4 step signal observation (TASK_02)", () => {
     });
   });
 
-  test("non-flagged step whose record carries verdicts ⇒ foreign-verdict park signal", () => {
+  test("non-flagged step whose record carries verdicts ⇒ stripped + reported, never parked", () => {
     withTmp((cwd) => {
-      writeRecord(cwd, "run-1", { phase: "findings", step: "r", verdicts: { "code-review": "approved" }, workflow: "review" });
-      const c = stepCompletionStatus(st(), ph, step({ id: "r" }), cwd); // no signal declared
-      assert.equal(c.kind, "foreign-verdict");
+      writeRecord(cwd, "run-1", { phase: "findings", step: "r", verdicts: { "code-review": "approved" }, markers: ["DONE"], workflow: "review" });
+      const c = stepCompletionStatus(st(), ph, step({ id: "r", signal: { kind: "marker", value: "DONE" } }), cwd);
+      assert.equal(c.kind, "ok");
+      if (c.kind !== "ok") return;
+      assert.deepEqual(c.record?.verdicts, {}, "an unowned verdict never reaches routing");
+      assert.deepEqual(c.dropped, ["code-review==approved"]);
+    });
+  });
+
+  test("verdict values normalize on read (\"Approved.\" ⇒ approved)", () => {
+    withTmp((cwd) => {
+      writeRecord(cwd, "run-1", { phase: "findings", step: "r", verdicts: { "code-review": " Approved. " }, workflow: "review" });
+      const c = stepCompletionStatus(st(), ph, step({ id: "r", signal: { kind: "verdict", value: "code-review" } }), cwd);
+      assert.equal(c.kind, "ok");
+      if (c.kind === "ok") assert.deepEqual(c.record?.verdicts, { "code-review": "approved" });
     });
   });
 
@@ -527,9 +539,11 @@ describe("S4 record reader (TASK_02)", () => {
       writeRecord(cwd, "run-1", { phase: "devsecops-review", step: "sec", verdicts: { "security-review": "rejected", severity: "red" }, workflow: "sprint" });
       const merged = mergePhaseVerdicts(devsecops, cwd, "sprint", "run-1");
       assert.deepEqual(merged.parsed?.verdicts, { "code-review": "approved", "security-review": "rejected", severity: "red" });
-      // Contradiction: same var, different values ⇒ null
-      writeRecord(cwd, "run-1", { phase: "devsecops-review", step: "code", verdicts: { "code-review": "rejected" }, workflow: "sprint" });
-      writeRecord(cwd, "run-1", { phase: "devsecops-review", step: "sec", verdicts: { "security-review": "rejected", severity: "red", "code-review": "approved" }, workflow: "sprint" });
+      // A step cannot emit ANOTHER step's verdict: sec's code-review is dropped.
+      writeRecord(cwd, "run-1", { phase: "devsecops-review", step: "sec", verdicts: { "security-review": "rejected", severity: "red", "code-review": "rejected" }, workflow: "sprint" });
+      assert.equal(mergePhaseVerdicts(devsecops, cwd, "sprint", "run-1").parsed?.verdicts["code-review"], "approved");
+      // Contradiction on a SHARED owned var (severity) ⇒ null
+      writeRecord(cwd, "run-1", { phase: "devsecops-review", step: "code", verdicts: { "code-review": "approved", severity: "low" }, workflow: "sprint" });
       const conflict = mergePhaseVerdicts(devsecops, cwd, "sprint", "run-1");
       assert.equal(conflict.parsed, null);
     } finally {
@@ -1071,8 +1085,10 @@ describe("S4 executor — sideEffect gate + resume + ephemeral (TASK_07)", () =>
       const res = cleanupEphemeralArtifacts(cwd, ["../x.md", "ok.md"]);
       assert.deepEqual(res.failed, ["../x.md"]);
       assert.deepEqual(res.deleted, ["ok.md"]);
-      assert.deepEqual(ephemeralArtifactsFor("develop"), ["understand.md", "plan.md"]);
-      assert.ok(ephemeralArtifactsFor("sprint").includes("tasks.md"));
+      assert.deepEqual(ephemeralArtifactsFor("develop"), ["understand.md"]);
+      assert.ok(ephemeralArtifactsFor("sprint").includes("summary_BE.md"));
+      assert.ok(ephemeralArtifactsFor("sprint").includes("user-story.md"));
+      assert.equal(ephemeralArtifactsFor("sprint").includes("tasks.md"), false, "tasks.md is durable, not ephemeral");
       assert.deepEqual(ephemeralArtifactsFor("nope"), []);
     } finally {
       rmSync(cwd, { recursive: true, force: true });

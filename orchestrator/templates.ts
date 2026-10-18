@@ -1,7 +1,8 @@
 import type { WorkflowPhase, WorkflowContext, Workflow, WorkflowStep } from "./types.ts";
 import { getWorkflow } from "./workflows.ts";
 import { loadSkillFull, loadSkillGate, getSkillInfo } from "./skills.ts";
-import { reportCliPath } from "./records.ts";
+import { reportCliPath, verdictKeysFor } from "./records.ts";
+import { expectationsFor, NEGATIVE_VALUES } from "./verdicts.ts";
 import { skillsEnabled, manualGates, deterministicSubagents } from "./config.ts";
 import { replaceExact } from "./text.ts";
 import { extractHandoff } from "./handoff.ts";
@@ -773,14 +774,14 @@ Write ${qaArtifactName("{sprint}")} ending with EXACTLY ONE of these three lines
 - 'status == orange'
 Repeat the SAME line verbatim inside your ## HANDOFF — the orchestrator cross-checks both channels before routing.`,
     "commit-archive": `## DELIVERABLE
-Sprint closed: all work committed via Conventional Commits, artifacts archived to .kstack/sprints/sprint_{sprint}/, archive manifest written.
+Sprint closed: all work committed via Conventional Commits, artifacts archived to .kstack/workflows/sprint/sprint_{sprint}/, archive manifest written.
 
 ## STOP CONDITION
 Stop when: git status is clean, the archive directory contains all sprint_{sprint} artifacts, and the manifest lists them.
 
 ## CONTEXT
 Sprint {sprint} | Goal: {goal} | Branch: {branch}
-This phase runs ONLY after explicit user approval (the orchestrator entry-gates it). Steps: 1) verify suite green, 2) commit any uncommitted work (Conventional Commits), 3) move ALL sprint artifacts (user-story/capability/system-design/ADR/tasks/QA/review files) into .kstack/sprints/sprint_{sprint}/, 4) write manifest.md listing the moved files.`,
+This phase runs ONLY after explicit user approval (the orchestrator entry-gates it). Steps: 1) verify suite green, 2) commit any uncommitted work (Conventional Commits), 3) move ALL sprint artifacts (user-story/capability/system-design/ADR/tasks/QA/review files) into .kstack/workflows/sprint/sprint_{sprint}/, 4) write manifest.md listing the moved files.`,
   };
 
   // Explicit phase.task wins over the generic per-id template (same
@@ -867,7 +868,15 @@ const PHASE_BOUNDARIES: Record<string, string> = {
  * round explicitly.
  */
 export function carryOverOpenQuestions(ctx: Pick<WorkflowContext, "state">): string {
-  const summary = ctx.state.results["understand"]?.summary ?? "";
+  let summary = ctx.state.results["understand"]?.summary ?? "";
+  if (!summary || !summary.includes("OPEN QUESTIONS:")) {
+    for (const [key, res] of Object.entries(ctx.state.results)) {
+      if (key.startsWith("understand") && res?.summary?.includes("OPEN QUESTIONS:")) {
+        summary = res.summary;
+        break;
+      }
+    }
+  }
   const m = /OPEN QUESTIONS:\s*\n?((?:[ \t]*[-*•]\s*[^\n]+\n?)+)/.exec(summary);
   if (!m) return "";
   const items = m[1]
@@ -1040,12 +1049,17 @@ function buildStepSkillBlock(step: WorkflowStep, ctx: WorkflowContext): string |
  * always calls kstack_advance itself), worded at step granularity and naming
  * the persisted result key so the model's summary lands under phase.step.
  */
-function buildStepAdvancementRule(phase: WorkflowPhase, step: WorkflowStep, isLast: boolean): string {
+function buildStepAdvancementRule(phase: WorkflowPhase, step: WorkflowStep, isLast: boolean, stepGates = false): string {
   const lines = [
     "---",
     `When this step ("${step.id}") is complete, YOU call the \`kstack_advance\` tool with a 2-3 sentence summary of what was accomplished and status "completed". The orchestrator records it under "${phase.id}.${step.id}" and delivers the next step (or closes the phase on the last step).`,
+    "If this step needs the user's input (questions, choices, confirmation), ask, then END YOUR TURN and wait for the replies — never call kstack_advance in the same turn you asked something; the step is complete only once the user's answers are folded in.",
   ];
-  if (isLast && manualGates() && phase.advance === "manual") {
+  if (stepGates) {
+    lines.push(
+      "HUMAN GATE: this run is human-gated — after you call kstack_advance the workflow PAUSES until the user approves this step via /kstack. Present the step's output clearly; do not start the next step yourself.",
+    );
+  } else if (isLast && manualGates() && phase.advance === "manual") {
     lines.push(
       "This is the LAST step of a DECISION PHASE: after you call kstack_advance, the workflow will pause so the user can review the phase output before the next phase starts. Present results clearly and completely.",
     );
@@ -1137,7 +1151,7 @@ export function buildStepInstructions(phase: WorkflowPhase, step: WorkflowStep, 
 
   // Tool contract: the step ends by calling kstack_advance.
   parts.push("");
-  parts.push(buildStepAdvancementRule(phase, step, idx === steps.length - 1));
+  parts.push(buildStepAdvancementRule(phase, step, idx === steps.length - 1, ctx.state.stepGates === true));
 
   // Volatile tail — everything that may change between two deliveries of the
   // same step. Prior-step results first, then retry context, then resume.
@@ -1166,24 +1180,56 @@ export function buildStepInstructions(phase: WorkflowPhase, step: WorkflowStep, 
  * declared signal. Identity comes from the spawn env ($KSTACK_*), which the
  * executor sets verbatim; a declared signal gets its mandatory flag named.
  */
-export function buildRecordContract(step: WorkflowStep): string {
+export function buildRecordContract(step: WorkflowStep, scope?: { workflowId: string; phase: Pick<WorkflowPhase, "id" | "steps"> }): string {
   const sig = step.signal;
+  const owned = scope ? verdictKeysFor(scope.workflowId, scope.phase, step) : sig?.kind === "verdict" ? [sig.value] : [];
+  const valuesFor = (key: string): string =>
+    (scope ? verdictValuesFor(scope.workflowId, scope.phase.id, key) : []).join("|") || "value";
   const required =
     sig?.kind === "verdict"
-      ? ` Your record MUST carry \`--verdict ${sig.value}==<value>\` — the workflow parks when it is missing.`
+      ? ` Your record MUST carry \`--verdict ${sig.value}==<${valuesFor(sig.value)}>\` — the workflow parks when it is missing.`
       : sig?.kind === "marker"
         ? ` Your record MUST carry \`--marker ${sig.value}\` — the workflow parks when it is missing.`
         : sig?.kind === "artifact"
           ? ` The artifact \`${sig.value}\` must exist at the repo root when you exit — the workflow parks when it is missing.`
           : "";
+  // Only the flags this step may use are advertised: a step that owns no gate
+  // verdict is never offered --verdict (kstack-report drops unowned keys).
+  const verdictFlags = owned.map((k) => ` --verdict ${k}==<${valuesFor(k)}>`).join("");
+  const ownership = owned.length
+    ? ` This step owns ONLY these verdict keys: ${owned.join(", ")} — any other key is discarded.`
+    : " This step owns NO gate verdict: do NOT pass --verdict (it would be discarded).";
   return `## RECORD CONTRACT (canonical)
 Before exiting you MUST write your step record exactly once via the kstack-report CLI (its path is in $KSTACK_REPORT):
 \`\`\`
 "$KSTACK_REPORT" --workflow "$KSTACK_WORKFLOW" --run-id "$KSTACK_RUN_ID" --phase "$KSTACK_PHASE" --step "$KSTACK_STEP" \\
-  --summary "<2-3 sentence outcome>" [--verdict KEY==VALUE]... [--var KEY==VALUE]... [--marker <text>]... [--deliverable <path>]...
+  --summary "<2-3 sentence outcome>"${verdictFlags} [--var KEY==VALUE]... [--marker <text>]... [--deliverable <path>]...
 \`\`\`
-The orchestrator never accepts HANDOFF text as a completion signal — the record is the only channel.${required}`;
+The orchestrator never accepts HANDOFF text as a completion signal — the record is the only channel.${required}${ownership}`;
 }
+
+/**
+ * Routable values for one verdict key: the phase's expected positives plus
+ * the negatives that answer them (approved→rejected, green→red|orange, …).
+ * Feeds the record-contract hint and the manual "Set verdict" panel.
+ */
+export function verdictValuesFor(workflowId: string, phaseId: string, key: string): string[] {
+  const exp = expectationsFor(workflowId, phaseId) ?? {};
+  const allowed = exp[key] ?? exp[`${key}?`] ?? [];
+  const negs = [...NEGATIVE_VALUES].filter((n) => NEGATIVE_FOR[n]?.some((pos) => allowed.includes(pos)));
+  return [...allowed, ...negs];
+}
+
+/** Positive values each routing negative answers (record-contract hints). */
+const NEGATIVE_FOR: Record<string, string[]> = {
+  rejected: ["approved"],
+  failed: ["success"],
+  red: ["green"],
+  orange: ["green"],
+  fail: ["pass"],
+  persists: ["verified"],
+  refuted: ["verified"],
+};
 
 /**
  * Deterministic-task text for a DELEGATED step: the step's own task plus its

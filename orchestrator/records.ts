@@ -23,6 +23,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ParsedVerdict, VerdictParkCause, WorkflowPhase, WorkflowState, WorkflowStep } from "./types.ts";
+import { expectationsFor } from "./verdicts.ts";
 
 /**
  * Absolute path of the kstack-report CLI this extension ships — carried into
@@ -30,8 +31,32 @@ import type { ParsedVerdict, VerdictParkCause, WorkflowPhase, WorkflowState, Wor
  * as {kstack_report} (ADR-23: spawn→work→report→exit).
  */
 export function reportCliPath(): string {
-  return fileURLToPath(new URL("../runtime/bin/kstack-report", import.meta.url));
+  const base = fileURLToPath(new URL("../runtime/bin/kstack-report", import.meta.url));
+  // Forward slashes: agents paste this path into bash, which eats backslashes
+  // ("C:Users...: command not found" ⇒ no record ⇒ signal-missing loop).
+  const cli = process.platform === "win32" && fs.existsSync(`${base}.cmd`) ? `${base}.cmd` : base;
+  return cli.replace(/\\/g, "/");
 }
+
+/**
+ * Gate verdict keys a step OWNS (KSTACK_VERDICT_KEYS / record contract):
+ * a non-flagged step owns none; a flagged step owns its declared signal
+ * plus phase expectation vars no other flagged step declares (e.g.
+ * `severity` beside security-review). Everything else is dropped.
+ */
+export function verdictKeysFor(workflowId: string, phase: Pick<WorkflowPhase, "id" | "steps">, step: WorkflowStep): string[] {
+  if (step.signal?.kind !== "verdict") return [];
+  const otherSignals = new Set(
+    (phase.steps ?? []).filter((s) => s.id !== step.id && s.signal?.kind === "verdict").map((s) => s.signal!.value),
+  );
+  const shared = Object.keys(expectationsFor(workflowId, phase.id) ?? {})
+    .map((k) => k.replace(/\?$/, ""))
+    .filter((k) => k !== step.signal!.value && !otherSignals.has(k));
+  return [step.signal.value, ...shared];
+}
+
+/** "Approved." / " PASS " ⇒ "approved" / "pass" — same rule as kstack-report. */
+const normVerdict = (v: string): string => v.trim().toLowerCase().replace(/[\s.,;:!]+$/, "");
 
 /** Same allowlist as the kstack-report writer and ledgerPathFor (+ dot). */
 const safe = (v: string): string => v.replace(/[^\w.-]/g, "-");
@@ -108,7 +133,7 @@ export function readStepRecord(
     phase: r.phase as string,
     step: (r.step ?? null) as string | null,
     summary: typeof r.summary === "string" ? r.summary : null,
-    verdicts: strMap(r.verdicts),
+    verdicts: Object.fromEntries(Object.entries(strMap(r.verdicts)).map(([k, v]) => [k, normVerdict(v)])),
     vars: strMap(r.vars),
     evidence: strArr(r.evidence),
     deliverables: strArr(r.deliverables),
@@ -123,13 +148,13 @@ export function readStepRecord(
  * - `ok` (optionally carrying the step's record + its routing vars),
  * - `signal-missing` — the declared signal was never observed ⇒ the caller
  *   re-issues the step in resumeMode, no advance (TASK_02 unhappy path),
- * - `foreign-verdict` — a NON verdict-flagged step's record carried gate
- *   variables ⇒ park, only flagged records may carry them.
+ * Verdicts a step does not own (verdictKeysFor) never park: they are
+ * stripped from the returned record and named in `dropped` so the caller
+ * can ledger-note them — a step is never blocked for doing its work.
  */
 export type StepCompletionStatus =
-  | { kind: "ok"; record: StepRecord | null; vars: Record<string, string> }
-  | { kind: "signal-missing"; want: string }
-  | { kind: "foreign-verdict" };
+  | { kind: "ok"; record: StepRecord | null; vars: Record<string, string>; dropped: string[] }
+  | { kind: "signal-missing"; want: string };
 
 /**
  * Check the CURRENT step at kstack_advance time. The completion contract
@@ -138,21 +163,27 @@ export type StepCompletionStatus =
  * - marker → a readable record carries marker `signal.value`;
  * - artifact → the file at `signal.value` (repo-relative) exists;
  * - absent → vacuously satisfied (legacy ghost-step path).
- * ANY record written by this step is read for routing vars; a record on a
- * non-flagged step carrying verdicts is a foreign-verdict violation.
+ * ANY record written by this step is read for routing vars; verdict keys the
+ * step does not own are stripped (never routed, never parked).
  */
 export function stepCompletionStatus(
   state: Pick<WorkflowState, "workflowId" | "runId">,
-  phase: Pick<WorkflowPhase, "id">,
+  phase: Pick<WorkflowPhase, "id" | "steps">,
   step: WorkflowStep,
   cwd: string,
 ): StepCompletionStatus {
-  const record = state.runId !== undefined
+  let record = state.runId !== undefined
     ? readStepRecord(cwd, state.workflowId, state.runId, phase.id, step.id)
     : null;
-  const flagged = step.signal?.kind === "verdict";
-  if (record && !flagged && Object.keys(record.verdicts).length > 0) {
-    return { kind: "foreign-verdict" };
+  const dropped: string[] = [];
+  if (record) {
+    const owned = new Set(verdictKeysFor(state.workflowId, phase, step));
+    const kept: Record<string, string> = {};
+    for (const [k, v] of Object.entries(record.verdicts)) {
+      if (owned.has(k)) kept[k] = v;
+      else dropped.push(`${k}==${v}`);
+    }
+    record = { ...record, verdicts: kept };
   }
   if (step.signal) {
     const want = step.signal.value;
@@ -168,7 +199,7 @@ export function stepCompletionStatus(
         break;
     }
   }
-  return { kind: "ok", record, vars: record?.vars ?? {} };
+  return { kind: "ok", record, vars: record?.vars ?? {}, dropped };
 }
 
 /** Result of merging a phase's verdict-flagged step records (INV-9). */
@@ -225,7 +256,9 @@ export function mergePhaseVerdicts(
     if (rec.verdicts[want] === undefined) {
       return { parsed: null, cause: "no-verdict", excerpt: `${phase.id}.${step.id} record missing '${want}'`, vars };
     }
+    const owned = new Set(verdictKeysFor(workflowId, phase, step));
     for (const [k, v] of Object.entries(rec.verdicts)) {
+      if (!owned.has(k)) continue; // not this step's verdict — never routes
       if (verdicts[k] !== undefined && verdicts[k] !== v) {
         return { parsed: null, cause: "no-verdict", excerpt: `contradiction on '${k}'`, vars };
       }
@@ -235,3 +268,44 @@ export function mergePhaseVerdicts(
   }
   return { parsed: { verdicts }, excerpt: excerpts.join("\n").slice(0, 2000), vars };
 }
+
+/**
+ * Write a canonical step record file (.kstack/runs/<runId>/<phase>[.<step>].json).
+ */
+export function writeStepRecord(
+  cwd: string,
+  record: {
+    workflow: string;
+    runId: string;
+    phase: string;
+    step?: string | null;
+    summary: string;
+    markers?: string[];
+    verdicts?: Record<string, string>;
+    vars?: Record<string, string>;
+    evidence?: string[];
+    deliverables?: string[];
+  },
+): string {
+  const dir = path.join(cwd, ".kstack", "runs", safe(record.runId));
+  fs.mkdirSync(dir, { recursive: true });
+  const file = record.step ? `${safe(record.phase)}.${safe(record.step)}.json` : `${safe(record.phase)}.json`;
+  const target = path.join(dir, file);
+  const data = {
+    v: 1,
+    workflow: safe(record.workflow),
+    runId: safe(record.runId),
+    phase: safe(record.phase),
+    step: record.step ? safe(record.step) : null,
+    at: new Date().toISOString(),
+    summary: record.summary,
+    verdicts: record.verdicts ?? {},
+    vars: record.vars ?? {},
+    evidence: record.evidence ?? [],
+    deliverables: record.deliverables ?? [],
+    markers: record.markers ?? [],
+  };
+  fs.writeFileSync(target, JSON.stringify(data, null, 2), "utf-8");
+  return target;
+}
+

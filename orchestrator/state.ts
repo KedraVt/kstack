@@ -105,6 +105,9 @@ export function loadActiveState(ctx: ExtensionContext): WorkflowState | null {
             : [];
         }
         if (typeof normalized.resumeMode !== "boolean") delete normalized.resumeMode;
+        if (typeof normalized.stepGates !== "boolean") delete normalized.stepGates;
+        if (typeof normalized.stepGate !== "boolean") delete normalized.stepGate;
+        if (!Number.isInteger(normalized.reissues) || (normalized.reissues as number) < 0) delete normalized.reissues;
         return normalized;
       }
       return null;
@@ -267,7 +270,7 @@ export function routeVerdict(
 
 /** True when the state is parked behind a D3 security freeze. */
 export function isSecurityFrozen(state: WorkflowState): boolean {
-  return state.frozenUntilHuman === true;
+  return state.frozenUntilHuman === true || state.freezeInfo !== undefined;
 }
 
 export function advancePhase(state: WorkflowState, phaseId: string, result: PhaseResult, totalPhases: number, opts?: AdvanceOptions): WorkflowState {
@@ -488,9 +491,13 @@ export function parkForUnreadableVerdict(state: WorkflowState, phaseId: string, 
   return { ...state, status: "paused", verdictPark: phaseId, pausedReason: `verdict-unreadable:${phaseId}:${cause}` };
 }
 
-/** D4 panel choice 1: treat the parked phase as approved and continue linearly. */
+/**
+ * D4 panel choice 1 / manual "advance to next phase": treat the current
+ * (parked or running) phase as approved and continue linearly. Clears every
+ * park marker — a human decision must never leave a stale block behind.
+ */
 export function forceApproveParked(state: WorkflowState, phases?: WorkflowPhase[]): WorkflowState {
-  const phaseId = state.verdictPark!;
+  const phaseId = state.verdictPark ?? phases?.[state.phaseIndex]?.id ?? `phase-${state.phaseIndex}`;
   // Reset the loop target's attempt counter — same contract as
   // forceContinuePastGate: the human approved moving on, so the NEXT gate
   // must get a fresh ceiling rather than inheriting a burned one.
@@ -508,8 +515,14 @@ export function forceApproveParked(state: WorkflowState, phases?: WorkflowPhase[
     verdictPark: undefined,
     pendingVerdict: undefined,
     pausedReason: undefined,
+    frozenUntilHuman: false,
+    freezeInfo: undefined,
+    resumeMode: undefined,
+    reissues: undefined,
+    stepGate: undefined,
+    entryGate: undefined,
     attempts,
-    results: { ...state.results, [phaseId]: { status: "completed", summary: "Continued as approved by explicit user decision (verdict was unreadable)." } },
+    results: { ...state.results, [phaseId]: { status: "completed", summary: state.verdictPark ? "Continued as approved by explicit user decision (verdict was unreadable)." : "Advanced manually by explicit user decision." } },
   };
 }
 
@@ -519,7 +532,8 @@ export function forceApproveParked(state: WorkflowState, phases?: WorkflowPhase[
  * "Other…" escape when provided.
  */
 export function returnParkedWithContext(state: WorkflowState, phases: WorkflowPhase[], extraFeedback?: string, cwd: string = process.cwd()): WorkflowState | null {
-  const phaseId = state.verdictPark!;
+  const phaseId = state.verdictPark ?? state.freezeInfo?.phaseId;
+  if (!phaseId) return null;
   const phase = phases.find((p) => p.id === phaseId);
   if (!phase?.loopBackTo) return null;
   const targetIndex = phases.findIndex((p) => p.id === phase.loopBackTo);
@@ -535,6 +549,8 @@ export function returnParkedWithContext(state: WorkflowState, phases: WorkflowPh
     stepIndex: undefined,
     results: { ...state.results },
     verdictPark: undefined,
+    frozenUntilHuman: false,
+    freezeInfo: undefined,
     pausedReason: undefined,
     retryContext: {
       targetPhaseId: phase.loopBackTo,
@@ -583,7 +599,17 @@ export function forceContinuePastGate(state: WorkflowState, phases?: WorkflowPha
   const attempts = { ...(state.attempts ?? {}) };
   if (gate?.loopBackTo) delete attempts[gate.loopBackTo];
   // INV-01: moving phaseIndex clears stepIndex (stale cursor → skipped gates).
-  return { ...state, status: "active", phaseIndex: state.phaseIndex + 1, stepIndex: undefined, pendingVerdict: undefined, pausedReason: undefined, attempts };
+  return {
+    ...state,
+    status: "active",
+    phaseIndex: state.phaseIndex + 1,
+    stepIndex: undefined,
+    pendingVerdict: undefined,
+    pausedReason: undefined,
+    frozenUntilHuman: false,
+    freezeInfo: undefined,
+    attempts,
+  };
 }
 
 /**
@@ -599,7 +625,7 @@ export function gateForApproval(state: WorkflowState): WorkflowState {
 /** Approve a gated workflow: resume normal execution at the pending phase. */
 export function approveNext(state: WorkflowState): WorkflowState {
   if (state.status !== "awaiting_approval") return state;
-  return { ...state, status: "active" };
+  return { ...state, status: "active", stepGate: undefined };
 }
 
 // --- Optional-phase decision gate (STEP 2g v2) --------------------------------
@@ -712,7 +738,7 @@ export function recordStepResult(
     // while the step stays open (failed/interrupted paths keep it). It also
     // clears entryGate: the ⚠ approval is scoped to THIS step — a later
     // sideEffect step must re-gate (TASK_07).
-    state: { ...state, results: { ...state.results, [key]: result }, stepIndex: si + 1, resumeMode: undefined, entryGate: undefined },
+    state: { ...state, results: { ...state.results, [key]: result }, stepIndex: si + 1, resumeMode: undefined, reissues: undefined, entryGate: undefined },
     step,
     isLast: si + 1 >= steps.length,
   };
@@ -729,7 +755,7 @@ export function abortState(state: WorkflowState): WorkflowState {
 export function resumeState(state: WorkflowState): WorkflowState {
   // A resume RE-RUNS the parked phase — any stashed verdict from its previous
   // attempt must not survive to misroute the rerun.
-  return { ...state, status: "active", pausedReason: undefined, verdictPark: undefined, pendingVerdict: undefined };
+  return { ...state, status: "active", pausedReason: undefined, verdictPark: undefined, pendingVerdict: undefined, reissues: undefined };
 }
 
 /**

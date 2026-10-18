@@ -97,7 +97,9 @@ export const EXPECTATIONS: Record<string, Record<string, Record<string, readonly
     "pipeline-review": { pipeline: ["approved"] },
     // Per-lane walker vars (S4): two walkers sharing one `walkthrough` var
     // would contradiction-park on every be-fail/fe-pass. All `?` because
-    // scope:backend|frontend skips whole lanes.
+    // scope:backend|frontend skips whole lanes. No shared `walkthrough` key:
+    // each walker owns ONLY its lane var (records.verdictKeysFor), named
+    // explicitly in its record contract.
     "implement": { "be-walk?": ["pass"], "fe-walk?": ["pass"], "ui?": ["pass"] },
   },
   develop: {

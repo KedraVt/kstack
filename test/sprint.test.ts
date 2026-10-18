@@ -770,7 +770,7 @@ describe("sprint numbering discovery (E5)", () => {
       writeFileSync(path.join(arch, "user-story_05.md"), "x");
       assert.equal(computeNextSprintNumber(tmp).next, 6);
       assert.deepEqual(archivedSprintDirs(tmp).map((d) => path.basename(d)), ["sprint_05"]);
-      assert.equal(sprintArchiveDir(tmp, 6), path.join(tmp, ".kstack", "sprints", "sprint_06"));
+      assert.equal(sprintArchiveDir(tmp, 6), path.join(tmp, ".kstack", "workflows", "sprint", "sprint_06"));
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -1404,7 +1404,7 @@ describe("in-flight decision guards (2026-09 fix 4)", () => {
     // parked, never falling through to the generic resume path.
     const source = readFileSync(new URL("../orchestrator/command.ts", import.meta.url), "utf-8");
     const guardCount = (source.match(/if \(panelGuard\(ctx, state\)\) return true;/g) ?? []).length;
-    assert.equal(guardCount, 8, "all 8 mutating sprint-panel branches must be guarded");
+    assert.equal(guardCount, 10, "all 10 mutating park-panel branches must be guarded");
   });
 
   test("sprint panel refuses a mutating decision while the chain runs, allows it after (F4)", async () => {

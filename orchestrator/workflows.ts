@@ -20,7 +20,8 @@ import { join } from "node:path";
 
 /** Standard record-write line for main steps whose signal is a marker. */
 const REC = (marker: string) => `On completion, BEFORE calling kstack_advance, write your step record:
-\`{kstack_report} --workflow {workflow} --run-id {runId} --phase {phase} --step {step} --marker ${marker} --summary "<1-2 line outcome>"\``;
+\`"{kstack_report}" --workflow "{workflow}" --run-id "{runId}" --phase "{phase}" --step "{step}" --marker ${marker} --summary "<1-2 line outcome>"\`
+(Run it exactly as written, path quoted. This step owns no gate verdict — do not add --verdict.)`;
 
 const develop: Workflow = {
   id: "develop",
@@ -824,15 +825,16 @@ ${REC("RETRO-DONE")}`,
 const discover: Workflow = {
   id: "discover",
   name: "Product Discovery",
-  description: "Office-hours session: improve the product when you don't know what yet",
+  description: "Technical discovery & idea sharpening: refine raw ideas or stress-test designs into a solid direction",
   intents: [
-    { pattern: /\b(office[- ]hours|product (discovery|direction)|what should (i|we) build|improve the product)\b/i, weight: 0.85 },
-    { pattern: /\b(explore ideas|brainstorm product|find the wedge)\b/i, weight: 0.7 },
+    { pattern: /\b(office[- ]hours|product (discovery|direction)|what should (i|we) build|improve the product|discover)\b/i, weight: 0.85 },
+    { pattern: /\b(explore ideas?|brainstorm (product|feature)|refine (idea|feature)|stress[- ]test (idea|design))\b/i, weight: 0.75 },
+    { pattern: /\b(find the wedge|shape (a|this) feature)\b/i, weight: 0.7 },
   ],
   phases: [
     {
       id: "session",
-      name: "Office Hours Session",
+      name: "Discovery & Sharpening Session",
       execution: "main",
       steps: [
         {
@@ -843,10 +845,10 @@ const discover: Workflow = {
           // run — a later develop.evolve reads it instead of a raw idea.
           signal: { kind: "artifact", value: ".kstack/discover/direction.md" },
           task: `## DELIVERABLE
-\`.kstack/discover/direction.md\` — the sharpened direction from the session (durable handoff artifact, never ephemeral).
+\`.kstack/discover/direction.md\` — the sharpened direction from the discovery session (durable handoff artifact, never ephemeral).
 
 ## STOP CONDITION
-Stop when: direction.md exists and names a direction concrete enough to seed a develop run. Conversation, not code.
+Stop when: direction.md exists on disk and captures the settled direction, scope boundaries, and architectural choices. Interactive discovery and technical sharpening, not implementation code.
 
 ## CONTEXT
 Goal: {goal} | Branch: {branch}`,
@@ -1408,10 +1410,10 @@ Sprint {sprint} | Goal: {goal} | Branch: {branch}`,
           execution: "main",
           signal: { kind: "marker", value: "ARCHIVED" },
           task: `## DELIVERABLE
-Only the DURABLE artifacts moved to their archive slots under sprints/sprint_{sprint}/ — system-design_{sprint}.md and ADR-log_{sprint}.md are the survivors; ephemerals stay in place (the run's terminal cleanup deletes them).
+Move all durable sprint artifacts (capability.md, system-design_{sprint}.md, ADR-log_{sprint}.md, tasks.md, qa-artifact_{sprint}.md, and devsecops/) into their archive slot under .kstack/workflows/sprint/sprint_{sprint}/. Ephemeral scratch files (understand.md, user-story.md, summary_BE.md, summary_FE.md) remain in place for terminal cleanup.
 
 ## STOP CONDITION
-Stop when: the durables are moved and named. Mechanical step — do NOT commit, do NOT start new work.
+Stop when: the durables are moved and named under .kstack/workflows/sprint/sprint_{sprint}/. Mechanical step — do NOT commit, do NOT start new work.
 
 ## CONTEXT
 Sprint {sprint} | Goal: {goal} | Branch: {branch}
@@ -1431,7 +1433,7 @@ ${REC("ARCHIVED")}`,
           skill: "kstack-retro",
           signal: { kind: "marker", value: "RETRO-DONE" },
           task: `## DELIVERABLE
-A sprint retro: pipeline quality, gate signal value, missed classes — one improvement worth making.
+A sprint retro: pipeline quality, gate signal value, missed classes — write retro.md under .kstack/workflows/sprint/sprint_{sprint}/retro.md.
 
 ## STOP CONDITION
 Stop when: findings are on the record. Advisory only.

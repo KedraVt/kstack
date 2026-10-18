@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { handleKstackCommand, getCompletions } from "./command.ts";
 import { createInputRouter } from "./router.ts";
-import { loadActiveState, saveState, advancePhase, gateForApproval, createState, recordStepResult, parkForUnreadableVerdict } from "./state.ts";
+import { loadActiveState, saveState, advancePhase, gateForApproval, createState, recordStepResult } from "./state.ts";
 import { stepCompletionStatus } from "./records.ts";
 import type { AdvanceOptions } from "./state.ts";
 import { getWorkflow, getWorkflowIds } from "./workflows.ts";
@@ -18,6 +18,9 @@ import { phaseArtifactPaths } from "./artifacts.ts";
 import { appendLedger } from "./ledger.ts";
 import { feedWatchEvent, endStepWatch, stepWatchStats, type StepWatchEvent } from "./stuck.ts";
 import { SECURITY_SECTION } from "../lib/content-security.ts";
+
+/** Automatic re-deliveries of a main step whose completion signal is missing. */
+const MAX_AUTO_REISSUES = 2;
 
 export function initOrchestrator(pi: ExtensionAPI): void {
   // WP2 §4.1: teach the model what the untrusted-content envelope markers mean.
@@ -218,23 +221,26 @@ export function initOrchestrator(pi: ExtensionAPI): void {
           const si = Math.min(state.stepIndex ?? 0, phase.steps.length - 1);
           const curStep = phase.steps[si];
           const check = stepCompletionStatus(state, phase, curStep, ctx.cwd);
-          if (check.kind === "foreign-verdict") {
-            const parked = parkForUnreadableVerdict(state, phase.id, "foreign-verdict");
-            saveState(pi, parked);
-            setKstackStatus(ctx, parked, workflow);
-            return {
-              content: [{
-                type: "text" as const,
-                text: `kstack: step "${curStep.id}" emitted a gate verdict but is not verdict-flagged — the record was rejected and the workflow is parked for a human decision (/kstack). Only verdict-flagged steps may emit gate variables.`,
-              }],
-            };
+          // Verdicts the step does not own were stripped by the reader — they
+          // never route and never park; the drop is ledgered for the audit trail.
+          if (check.kind === "ok" && check.dropped.length > 0) {
+            appendLedger(
+              ctx.cwd,
+              state,
+              { kind: "step", phaseId: phase.id, stepId: curStep.id, payload: { summary: `ignored unowned verdict(s): ${check.dropped.join(", ")}` } },
+              (m) => { try { ctx.ui.notify(m, "warning"); } catch { /* stale ctx */ } },
+            );
           }
           if (check.kind === "signal-missing" && params.status !== "failed") {
             // TASK_07 unhappy path: a DELEGATED step whose worker exited
             // without producing its record cannot be re-prompted cheaply —
             // re-spawning it is a real retry and belongs to the human.
             // Park; the /kstack resume path re-dispatches the same step.
-            if (curStep.execution === "subagent" && deterministicSubagents()) {
+            // Automatic re-issues are capped: a step that cannot produce its
+            // signal (broken CLI, impossible artifact) must reach a human
+            // instead of re-delivering itself forever.
+            const reissues = (state.reissues ?? 0) + 1;
+            if ((curStep.execution === "subagent" && deterministicSubagents()) || reissues > MAX_AUTO_REISSUES) {
               const parked = { ...state, status: "paused" as const, pausedReason: `signal-missing:${phase.id}.${curStep.id}:${check.want}` };
               saveState(pi, parked);
               setKstackStatus(ctx, parked, workflow);
@@ -245,18 +251,18 @@ export function initOrchestrator(pi: ExtensionAPI): void {
                   kind: "run-interrupted",
                   phaseId: phase.id,
                   stepId: curStep.id,
-                  payload: { summary: `delegated step exited without record signal "${check.want}" — parked for a human decision` },
+                  payload: { summary: `delegated subagent produced no record with signal "${check.want}"` },
                 },
                 (m) => { try { ctx.ui.notify(m, "warning"); } catch { /* stale ctx */ } },
               );
               return {
                 content: [{
                   type: "text" as const,
-                  text: `Step "${curStep.id}" completed its delegation without producing signal "${check.want}" — the workflow is parked. Resume via /kstack to re-dispatch the step.`,
+                  text: `Step "${curStep.id}" ended without producing signal "${check.want}" — the workflow is parked. The user resolves it via /kstack (resume re-runs the step, or advance it manually). Do NOT call kstack_advance again.`,
                 }],
               };
             }
-            const reissue = { ...state, resumeMode: true };
+            const reissue = { ...state, resumeMode: true, reissues };
             saveState(pi, reissue);
             setKstackStatus(ctx, reissue, workflow);
             // TASK_04: a missing completion signal is a boundary interruption —
@@ -343,6 +349,27 @@ export function initOrchestrator(pi: ExtensionAPI): void {
             }],
           };
         }
+        if (!recorded.isLast && state.stepGates) {
+          // Human-gated run: every completed step waits for the user's /kstack approval.
+          const gated: typeof recorded.state = { ...recorded.state, status: "awaiting_approval", stepGate: true };
+          saveState(pi, gated);
+          setKstackStatus(ctx, gated, workflow);
+          appendLedger(
+            ctx.cwd, state,
+            { kind: "gate", phaseId: phase.id, stepId: recorded.step.id, payload: { gateId: `${phase.id}.${recorded.step.id}`, decision: "human" } },
+            (m) => { try { ctx.ui.notify(m, "warning"); } catch { /* stale ctx */ } },
+          );
+          const nextStep = phase.steps[gated.stepIndex!];
+          try {
+            ctx.ui.notify(`kstack: step "${recorded.step.id}" recorded — review it, then /kstack next to continue with "${nextStep?.id ?? "?"}".`, "info");
+          } catch { /* stale ctx */ }
+          return {
+            content: [{
+              type: "text" as const,
+              text: `Step "${recorded.step.id}" recorded. This run is HUMAN-GATED: the workflow is now PAUSED for the user's review. Present the step's output clearly and stop. Do NOT call kstack_advance again and do not start step "${nextStep?.id ?? "?"}" — the user continues via /kstack when satisfied (revisions they request apply to this step's output).`,
+            }],
+          };
+        }
         if (!recorded.isLast) {
           saveState(pi, recorded.state);
           setKstackStatus(ctx, recorded.state, workflow);
@@ -425,7 +452,9 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         params.status === "completed" &&
         newState.status === "active" &&
         state.entryGate !== "approved";
-      const willManualGate = manualGateApplies && gateOverride !== "auto";
+      // Human-gated runs park after EVERY completed step, the last one included.
+      const stepGateApplies = state.stepGates === true && params.status === "completed" && newState.status === "active";
+      const willManualGate = (manualGateApplies && gateOverride !== "auto") || stepGateApplies;
       if (manualGateApplies && gateOverride === "auto") {
         appendLedger(
           ctx.cwd, state,
@@ -505,7 +534,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
       // resumes execution.
       if (willManualGate) {
         // STEP 4e (opt-in): a VALIDATED validate-only diagnosis may auto-advance.
-        if (autoGateValidated() && isValidatedStrategy(params.summary)) {
+        if (!stepGateApplies && autoGateValidated() && isValidatedStrategy(params.summary)) {
           ctx.ui.notify(
             `kstack: "${phase.name}" validated — auto-advancing to "${workflow.phases[newState.phaseIndex]?.name ?? "?"}" (KSTACK_PI_AUTO_GATE_VALIDATED).`,
             "info",
@@ -518,7 +547,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
             }],
           };
         }
-        const gated = gateForApproval(newState);
+        const gated = stepGateApplies ? { ...gateForApproval(newState), stepGate: true } : gateForApproval(newState);
         saveState(pi, gated);
         setKstackStatus(ctx, gated, workflow);
         const nextPhase = workflow.phases[gated.phaseIndex];

@@ -35,8 +35,9 @@ export function winPreloadArgs(): string[] {
  */
 export function silentChildEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   if (process.platform !== "win32" || !existsSync(WIN_HIDE_PRELOAD_PATH)) return base;
-  const req = `--require "${WIN_HIDE_PRELOAD_PATH}"`;
+  const preloadPath = WIN_HIDE_PRELOAD_PATH.replace(/\\/g, "/");
+  const req = `--require "${preloadPath}"`;
   const existing = base.NODE_OPTIONS?.trim();
-  if (existing && existing.includes(WIN_HIDE_PRELOAD_PATH)) return base;
+  if (existing && (existing.includes(WIN_HIDE_PRELOAD_PATH) || existing.includes(preloadPath))) return base;
   return { ...base, NODE_OPTIONS: existing ? `${req} ${existing}` : req };
 }

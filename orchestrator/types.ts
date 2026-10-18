@@ -388,6 +388,16 @@ export interface WorkflowState {
    */
   pendingOptional?: boolean;
   /**
+   * Human step gating: set at run start when the user picks "human-gate" in
+   * the pre-flight panel. Every completed step then parks awaiting_approval
+   * (stepGate) — only /kstack advances the run, when the human is satisfied.
+   */
+  stepGates?: boolean;
+  /** Parked after a completed step (stepGates) — phaseIndex/stepIndex already point at the NEXT step. */
+  stepGate?: boolean;
+  /** Automatic signal-missing re-issues of the CURRENT step (capped; cleared when the step completes). */
+  reissues?: number;
+  /**
    * Entry gate for side-effect phases (commit-archive): `true` = parked
    * BEFORE the gated phase runs, awaiting an explicit human Run/Abort via
    * /kstack; `"approved"` = approved once — the executor proceeds and

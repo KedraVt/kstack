@@ -15,7 +15,7 @@ import { extractHandoff } from "./handoff.ts";
 import { isRefutedStrategy, isValidatedStrategy } from "./skip.ts";
 import { replaceExact } from "./text.ts";
 import { appendLedger } from "./ledger.ts";
-import { reportCliPath } from "./records.ts";
+import { reportCliPath, verdictKeysFor } from "./records.ts";
 import { newStepRun, feedStepEvent, detectStuck, checkStepBudgets, stepBudgetDefaults, beginStepWatch, endStepWatch } from "./stuck.ts";
 import { phaseArtifactPaths, cleanupEphemeralArtifacts } from "./artifacts.ts";
 import { existsSync } from "node:fs";
@@ -594,7 +594,7 @@ export async function executeCurrentPhase(
               sprintDodSuffix(state.workflowId, phase.id) +
               // ADR-23: spawn → work → report → exit — the record contract is
               // mandatory for every deterministic delegated step.
-              `\n\n${buildRecordContract(step)}` +
+              `\n\n${buildRecordContract(step, { workflowId: state.workflowId, phase })}` +
               (degradedNote ? `\n\n${degradedNote}` : "") + resumeHint,
             // Already interpolated — runSteps' own {previous} pass would
             // rewrite the literal token inside the embedded skill digest.
@@ -607,6 +607,8 @@ export async function executeCurrentPhase(
               KSTACK_PHASE: phase.id,
               KSTACK_STEP: step.id,
               KSTACK_REPORT: reportCliPath(),
+              // kstack-report drops verdict keys outside this list (empty = none owned).
+              KSTACK_VERDICT_KEYS: verdictKeysFor(state.workflowId, phase, step).join(" "),
             },
           }]
         : undefined,
@@ -1162,6 +1164,10 @@ export function activeConstraintLines(state: WorkflowState, phase?: WorkflowPhas
     lines.push(
       "CONSTRAINT: the workflow is PARKED BEFORE a human-gated side-effect phase — it has NOT run yet. Do NOT perform the phase's work and do NOT call kstack_advance; the user decides via /kstack (Run / Abort).",
     );
+  } else if (state.status === "awaiting_approval" && state.stepGate) {
+    lines.push(
+      "CONSTRAINT: this run is HUMAN-GATED and the last completed step awaits the user's approval. Do NOT start the next step and do NOT call kstack_advance; if the user asks for revisions or answers questions, apply them to the completed step's output only — the user continues via /kstack when satisfied.",
+    );
   } else if (state.status === "awaiting_approval" && !state.pendingOptional) {
     lines.push(
       "CONSTRAINT: the workflow is PARKED at a decision gate — the completed phase awaits user approval. Do NOT continue the phase, do NOT implement anything, and do NOT call kstack_advance; the user decides via /kstack next. If the user asks for revisions, apply them to the completed phase's output only.",
@@ -1192,6 +1198,9 @@ export function statusLineFor(state: WorkflowState, workflow: { name: string; ph
   if (state.status === "awaiting_approval") {
     if (state.entryGate === true) {
       return `${workflow.name}: PARKED — gated phase "${phase?.name ?? "?"}" awaits approval to RUN via /kstack`;
+    }
+    if (state.stepGate) {
+      return `${workflow.name}: PARKED — review the completed step, then /kstack next ${progress}`;
     }
     return state.pendingOptional
       ? `${workflow.name}: PARKED — optional phase "${phase?.name ?? "?"}" awaits Run/Skip/Abort via /kstack`
@@ -1290,6 +1299,14 @@ export function buildResumeContext(state: WorkflowState): string {
       parts.push(
         `The workflow is PARKED BEFORE the human-gated side-effect phase "${phase?.name ?? "the next phase"}" — it has NOT run yet.`,
         "Do NOT perform that phase's work and do NOT call kstack_advance — only the user's approval via /kstack starts it.",
+      );
+      return parts.join("\n");
+    }
+    if (state.stepGate) {
+      parts.push(
+        `The workflow is PARKED for user approval (human-gated run) BEFORE step "${step?.id ?? "the next step"}" — the previous step is complete and awaits the user's review.`,
+        "Do NOT start the next step and do NOT call kstack_advance — only the user continues via /kstack.",
+        "If the user answers questions or asks for revisions, fold them into the completed step's output, then stop and remain parked.",
       );
       return parts.join("\n");
     }

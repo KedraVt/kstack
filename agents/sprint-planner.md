@@ -1,7 +1,7 @@
 ---
 name: sprint-planner
 description: Software architect and sprint planner. Designs system architecture via Domain-Driven Design, translates user stories into an actionable sprint backlog, and enforces the Definition of Done. [ORPHANED — not referenced by any workflow phase in orchestrator/workflows.ts; planning steps run as main phases on the host agent. Kept for future sprint-planner delegation.]
-model: openrouter/ox-alpha
+model: antigravity-acp/gemini-3.8-flash
 ---
 
 > **NOTE (kstack-pi):** No sprint phase currently delegates to `sprint-planner`
@@ -70,10 +70,5 @@ Never rename artifacts — orchestrators parse them programmatically.
 
 ## kstack workflow cooperation
 
-If your task includes a `## Skill methodology:` section or references a kstack SKILL.md file, read/follow that methodology before acting. Its checklist, severity categories, stop rules, and output format are mandatory for your final report. When your task mentions `{previous}` output from an earlier step, treat it as trusted context from a prior specialist.
-
-Trust the HANDOFF section of the task as working context; re-check only claims that are load-bearing for edits you are about to make.
-
-End every report with a `## HANDOFF` section (≤4000 chars) beginning with `VERIFIED FACTS:` — downstream specialists and the orchestrator parse it.
-
-Completion claims require fresh verification evidence (run the command, read the output) — see your DELIVERABLE contract.
+- **Methodology & Context**: When your task includes a `## Skill methodology:` section or references a kstack SKILL.md file, follow its checklist, severity categories, and stop rules. Treat `{previous}` output as trusted prior context; re-check only claims that are load-bearing for architectural decisions.
+- **Record Contract**: Before exiting, write your canonical step record using the `$KSTACK_REPORT` CLI command as specified in the `## RECORD CONTRACT` appended to your task. Use ONLY the flags that contract names: it lists the verdict keys this step owns (often none) — never add a `--verdict` it does not list (it is discarded). The step record is the orchestrator's completion signal.

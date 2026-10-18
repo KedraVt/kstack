@@ -209,13 +209,30 @@ export function modelTierFor(phaseId: string): string | undefined {
 
 /**
  * Observe-only liveness threshold in ms (STEP 5b). Default 240s; "off"
- * disables the observation entirely. This NEVER terminates a process — it
- * only feeds notifications and the run-report so a future kill decision can
- * be made on real data.
+ * disables the observation entirely.
  */
 export function livenessThresholdMs(): number | "off" {
   const sec = numberEnv("KSTACK_PI_LIVENESS_SEC", 240, { allowOff: true });
   return sec === "off" ? "off" : sec * 1000;
+}
+
+/**
+ * Inactivity / liveness timeout in ms (kills unresponsive subagent).
+ * When a subagent produces no signals/events/output for this duration,
+ * it is deemed hung and terminated. Default OFF (opt-in): one long tool call
+ * (a 5-minute test suite) emits no events and would be killed as hung.
+ * Enable via KSTACK_PI_INACTIVITY_TIMEOUT_SEC or KSTACK_PI_LIVENESS_KILL_SEC.
+ */
+export function inactivityTimeoutMs(): number | "off" {
+  const custom = process.env.KSTACK_PI_INACTIVITY_TIMEOUT_SEC ?? process.env.KSTACK_PI_LIVENESS_KILL_SEC;
+  if (custom !== undefined) {
+    const varName = process.env.KSTACK_PI_INACTIVITY_TIMEOUT_SEC !== undefined
+      ? "KSTACK_PI_INACTIVITY_TIMEOUT_SEC"
+      : "KSTACK_PI_LIVENESS_KILL_SEC";
+    const sec = numberEnv(varName, 240, { allowOff: true });
+    return sec === "off" ? "off" : sec * 1000;
+  }
+  return "off";
 }
 
 /**

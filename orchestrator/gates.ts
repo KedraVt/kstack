@@ -149,7 +149,7 @@ export async function configureGates(
     {
       id: "__mode__",
       label: "Gate mode",
-      description: "human-gate pauses at every gate · selection-gate applies the per-gate choices below",
+      description: "human-gate: EVERY step pauses until you approve it via /kstack · selection-gate: only the per-gate choices below",
       currentValue: "human-gate",
       values: ["human-gate", "selection-gate"],
     },
@@ -175,7 +175,7 @@ export async function configureGates(
     };
     const header = [
       paint("accent", `kstack — gate setup: ${workflowName ?? "workflow"}`),
-      paint("dim", "Esc starts the run with human-gate defaults (pause at every gate)."),
+      paint("dim", "Esc starts the run with human-gate defaults (every step waits for your /kstack approval)."),
       "",
     ];
     return new GateConfigList(
