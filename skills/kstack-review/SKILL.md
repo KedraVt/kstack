@@ -11,7 +11,7 @@ description: >-
   browser-level QA of the running app (use kstack-qa), security threat
   modeling (use kstack-cso), or root-cause debugging (use kstack-investigate).
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 compatibility: "Optional helpers: runtime/bin/kstack-review-read (cross-review dedup) and repo script `bun run slop:diff`; both degrade gracefully when absent."
 ---
 
@@ -25,10 +25,6 @@ thoroughly across five dimensions, then report findings with calibrated
 severity and confidence. **No finding without a concrete failure scenario and
 a fix; no finding enters the report unless you can quote the line that
 motivates it.**
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-review --status start 2>/dev/null || true
-```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), emit ASK items in the report with `~assumed` resolutions and downgrade the verdict to `needs-human` — never block waiting for an answer.
 

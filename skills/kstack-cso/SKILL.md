@@ -10,7 +10,7 @@ description: >-
   safe", "threat model", "find vulnerabilities". Do NOT use for general code
   review (use kstack-review) or runtime testing (use kstack-qa).
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 compatibility: "Optional input: system-design_XX.md for attack surface; runtime/bin helpers degrade gracefully."
 ---
 
@@ -27,10 +27,6 @@ third-party webhooks that accept anything. Start there.
 
 **No finding without a fix. You never modify code — you report with
 copy-paste-ready fixes.**
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-cso --status start 2>/dev/null || true
-```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), apply fixes only inside the assigned task scope, record every unmade decision in the report, and never block waiting for an answer.
 
@@ -199,10 +195,6 @@ filter_stats, totals, trend).
 **Verdict discipline:** `approved` only with zero open critical/high findings.
 critical/high rejections freeze the pipeline for human review; medium/low loop
 back automatically.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-cso --status end 2>/dev/null || true
-```
 
 ## DoD gate (verification)
 

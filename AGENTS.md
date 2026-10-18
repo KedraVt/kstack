@@ -12,10 +12,9 @@
   `## DoD gate` section + `<!-- provenance -->` comment. The pre-S1 layered
   skill dirs, `skills-distilled/`, `source/`, `update.sh` and `scripts/` are
   deleted; `main` stays the stable baseline, work happens on `kstack`.
-- **Telemetry convention**: only session-level `kstack-*`/`plan-*` skills emit
-  `skill_run` markers via `runtime/bin/kstack-telemetry-log`. kedra ports,
-  vendored skills, and pure-methodology skills emit nothing — markers belong
-  to orchestrated runs, not reference material.
+- **Telemetry convention**: telemetry belongs to the orchestrator — every
+  step and run lands in `.kstack/ledger/` and the run report. Skill bodies
+  carry methodology only, with zero telemetry calls.
 - **Headless rule**: skills that may run inside spawned subagents
   (`pi --mode json -p --no-session`, no user on the wire) must not block on
   `ask_user_question` — each carries a "Headless run?" fallback line that

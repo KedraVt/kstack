@@ -190,6 +190,8 @@ export function sprintGateEphemerals(sprint: number): string[] {
     `devsecops/${codeReviewArtifactName(sprint)}`,
     securityReviewArtifactRel(sprint),
     `devsecops/${dockerBuildReportName(sprint)}`,
+    // Sequenced per review round — the `*` expands at cleanup time.
+    softwareArchitectArtifactName(sprint, "*"),
   ];
 }
 
@@ -218,6 +220,19 @@ export function cleanupEphemeralArtifacts(
       if (typeof p !== "string" || path.isAbsolute(rel) || rel.startsWith("..") || rel === ".") {
         failed.push(p);
         onWarn?.(`kstack: refusing to delete non-repo-relative ephemeral path "${p}"`);
+        continue;
+      }
+      const base = path.basename(rel);
+      if (base.includes("*")) {
+        // Basename-only wildcard (sequenced artifacts); never crosses directories.
+        const dir = path.dirname(rel);
+        const re = new RegExp(`^${base.split("*").map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`);
+        const absDir = path.join(cwd, dir);
+        const matches = fs.existsSync(absDir) ? fs.readdirSync(absDir).filter((f) => re.test(f)) : [];
+        for (const f of matches) {
+          fs.unlinkSync(path.join(absDir, f));
+          deleted.push(path.join(dir, f));
+        }
         continue;
       }
       const abs = path.join(cwd, rel);

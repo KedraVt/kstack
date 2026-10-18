@@ -16,7 +16,7 @@ import { handleSprintPanel, manualAdvancePanel } from "../orchestrator/command.t
 import { buildRecordContract, interpolateStepTask } from "../orchestrator/templates.ts";
 import { reportCliPath, verdictKeysFor, writeStepRecord, readStepRecord } from "../orchestrator/records.ts";
 import { invalidateRuntime, releasePhaseInFlight, executeCurrentPhase } from "../orchestrator/executor.ts";
-import { sprintGateEphemerals } from "../orchestrator/artifacts.ts";
+import { sprintGateEphemerals, cleanupEphemeralArtifacts } from "../orchestrator/artifacts.ts";
 
 // Fire-and-forget launches must never outlive this file (in-flight registry is module-level).
 const prevDeterministic = process.env.KSTACK_PI_DETERMINISTIC;
@@ -178,6 +178,19 @@ describe("workflow entry + artifact lifetime", () => {
     assert.ok(s.ephemeralArtifacts.includes("qa-artifact_01.md"));
     assert.ok(s.ephemeralArtifacts.includes("devsecops/security-review-artifact_01.md"));
     assert.ok(s.ephemeralArtifacts.includes("tasks.md"), "the base sprint ephemerals stay registered");
+  });
+});
+
+describe("architect review cleanup", () => {
+  test("every review round of THIS sprint's architect artifact is deleted, nothing else", () => {
+    const cwd = fs.mkdtempSync(path.join(TMP, "arch-"));
+    for (const f of ["software-architect-artifact_01_1.md", "software-architect-artifact_01_12.md", "software-architect-artifact_02_1.md", "system-design_01.md"]) {
+      fs.writeFileSync(path.join(cwd, f), "x");
+    }
+    const res = cleanupEphemeralArtifacts(cwd, sprintGateEphemerals(1));
+    assert.deepEqual(res.failed, []);
+    assert.deepEqual(fs.readdirSync(cwd).sort(), ["software-architect-artifact_02_1.md", "system-design_01.md"]);
+    assert.ok(res.deleted.includes("software-architect-artifact_01_12.md"));
   });
 });
 

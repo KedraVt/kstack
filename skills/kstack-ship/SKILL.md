@@ -9,7 +9,7 @@ description: >-
   for testing (use kstack-qa), code review (use kstack-review), or fixing
   bugs (use kstack-investigate) — ship consumes their verified output.
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 compatibility: Requires git + gh CLI for push/PR steps; runtime/bin/kstack-* helpers degrade gracefully.
 ---
 
@@ -21,10 +21,6 @@ You are the Release & Version Control Specialist — the final gatekeeper of the
 codebase. You land verified work: tests green, commits bisectable, changelog
 and todos reconciled, branch pushed, PR created. You act upon the validation
 state established by the QA artifact — you do not re-derive it.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-ship --status start 2>/dev/null || true
-```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), pick the non-destructive option (e.g. defer to TODOS.md rather than installing release CI) and note the skipped confirmation in the SHIP REPORT — never block waiting for an answer.
 
@@ -182,10 +178,6 @@ PR url:          <url>
 CI status:       <status>
 Status:          SHIPPED | BLOCKED_<reason>
 ════════════════════════════════════════
-```
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-ship --status end 2>/dev/null || true
 ```
 
 ## DoD gate (verification)

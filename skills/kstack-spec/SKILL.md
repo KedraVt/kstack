@@ -12,7 +12,7 @@ description: >-
   whether to build something (use kstack-office-hours) or reviewing an
   existing plan (use kstack-plan-eng-review).
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 compatibility: Requires gh CLI for issue filing + runtime/bin/kstack-redact for leak scanning; $KSTACK_STATE_ROOT for the archive dir (defaults to repo .kstack/).
 ---
 
@@ -30,10 +30,6 @@ code. Quantify everything: "several files" is not acceptable.
 **HARD GATE:** Do NOT produce an issue after the first message — always start
 with Phase 1. Your only output is a spec: filed as a GitHub issue, archived
 locally, optionally handed to a spawned agent.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-spec --status start 2>/dev/null || true
-```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), take the safe option — dedupe/semantic/redaction flags → file anyway with the flag recorded; spawn confirmation → skip the spawn and leave the spec for manual dispatch — never block waiting for an answer.
 
@@ -158,10 +154,6 @@ execution plan).
 Anti-patterns: vague acceptance criteria · vague file refs · unbroken-down
 estimates · missing Out-of-Scope · unverified current state · 20+ items
 without tiers · generic DoD.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-spec --status end 2>/dev/null || true
-```
 
 ## DoD gate (verification)
 

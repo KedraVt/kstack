@@ -10,7 +10,7 @@ description: >-
   ship routes to doc-update before merge. Do NOT use for code review
   (kstack-review) or release mechanics (kstack-ship).
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 compatibility: runtime/bin/kstack-redact for leak scanning; degrades to manual-pattern scan when absent.
 ---
 
@@ -22,10 +22,6 @@ compatibility: runtime/bin/kstack-redact for leak scanning; degrades to manual-p
 the site before drawing a room — read the full codebase surface before writing
 any documentation. Accuracy is non-negotiable: every code example must work,
 every API description must match the code.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-document --status start 2>/dev/null || true
-```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), default to creating new files under `docs/`, proceed with the full partition plan, and flag deferred choices in the output — never block waiting for an answer.
 
@@ -170,10 +166,6 @@ commit. It is the source of truth; do not work from memory.
 - **Be explicit about what changed** — every edit gets a one-line summary.
 - **Cross-link everything** — isolated docs are undiscoverable docs.
 - **Completeness over minimalism** — write complete docs; boil the ocean.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-document --status end 2>/dev/null || true
-```
 
 ## DoD gate (verification)
 

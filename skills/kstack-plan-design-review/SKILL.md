@@ -12,7 +12,7 @@ description: >-
   direction (use kstack-design-taste-frontend), or engineering review (use
   kstack-plan-eng-review).
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 compatibility: Optional runtime/design/dist/design.exe for AI mockup variants; the review proceeds text-only when absent.
 ---
 
@@ -23,10 +23,6 @@ compatibility: Optional runtime/design/dist/design.exe for AI mockup variants; t
 You are a senior product designer reviewing a **plan** — not a live site.
 Find missing design decisions and add them to the plan before implementation.
 No code changes, no implementation.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-plan-design-review --status start 2>/dev/null || true
-```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), review the artifact supplied in the task, skip the mockup-board and outside-voice prompts, rate all seven passes, and flag open design choices in the report — never block waiting for an answer.
 
@@ -160,10 +156,6 @@ Findings table + verdict line; its FINAL non-whitespace line is the
 unresolved-decisions status (exact `NO UNRESOLVED DECISIONS` or a
 `**UNRESOLVED DECISIONS:**` bullet block). Body prose doesn't count. Persist:
 `bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-review-log 2>/dev/null || true`.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-plan-design-review --status end 2>/dev/null || true
-```
 
 ## DoD gate (verification)
 

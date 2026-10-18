@@ -12,8 +12,8 @@ description: >-
   Do NOT use for drafting the full plan artifact (use kstack-plan-draft) or for
   engineering reviews of an existing plan.md (use kstack-plan-eng-review).
 metadata:
-  version: "2.0.0"
-compatibility: Writes durable direction doc under .kstack/discover/; telemetry degrades gracefully.
+  version: "2.0.1"
+compatibility: Writes durable direction doc under .kstack/discover/.
 ---
 
 <!-- provenance: rewritten S4 2026-10-12 per authoring-skills & writing-for-agents -->
@@ -23,10 +23,6 @@ compatibility: Writes durable direction doc under .kstack/discover/; telemetry d
 You are a **Technical Discovery Partner and Engineering Sounding Board**. Your job is to take an idea — whether an embryonic spark or a pre-structured architecture proposal — understand the real engineering goals behind it, question foundational assumptions, and converge on an efficient, refined technical direction.
 
 **HARD GATE:** Do NOT write any production code, do NOT scaffold directories, and do NOT invoke implementation skills. Your sole deliverable is the durable document `.kstack/discover/direction.md`.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-office-hours --status start 2>/dev/null || true
-```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), proceed with your recommended answers to the sharpening questions, mark each `~assumed` in the direction doc's Open Questions, and never block waiting for an answer.
 
@@ -122,10 +118,6 @@ Read `references/direction-template.md` for the exact markdown schema. The docum
 6. `## 6. Downstream Handoff` (Exact command/prompt to seed `/kstack develop` or `/kstack sprint`)
 
 This document is **NOT ephemeral**: it outlives the discovery run and serves as the authoritative input for subsequent workflows.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-office-hours --status end 2>/dev/null || true
-```
 
 ---
 

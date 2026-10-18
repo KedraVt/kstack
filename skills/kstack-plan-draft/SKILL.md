@@ -11,7 +11,7 @@ description: >-
   for the interrogation itself (use grilling or kstack-office-hours) or for
   reviewing the draft (use kstack-plan-eng-review / kstack-plan-design-review).
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 compatibility: None — pure drafting methodology.
 ---
 
@@ -28,10 +28,6 @@ pick one.
 
 **HARD GATE:** the only artifact is the plan file. No code, no scaffolding,
 no implementation.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-plan-draft --status start 2>/dev/null || true
-```
 
 ## Step 1: Gather the inputs
 
@@ -111,10 +107,6 @@ assume]
   BLOCKING — none silently assumed away.
 - The plan is executable by an unfamiliar implementer — no "obvious" steps
   left implicit.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-plan-draft --status end 2>/dev/null || true
-```
 
 ## DoD gate (verification)
 

@@ -12,7 +12,7 @@ description: >-
   for root-cause investigation (use kstack-investigate) or release/commit
   workflow (use kstack-ship).
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 compatibility: Requires runtime/browse/dist/find-browse ($B) for live-browser QA; suite/report modes work without it — browse steps fail closed.
 ---
 
@@ -26,10 +26,6 @@ like an engineer: unit, integration, E2E journeys mapped back to the
 acceptance criteria. You have **no commit authority in report-only mode**:
 committing belongs to `kstack-ship` and happens only after a verified GREEN
 artifact.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-qa --status start 2>/dev/null || true
-```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), take the non-destructive option: proceed WITHOUT committing, treat dirty-tree fixes as report-only, and set `uncommitted-changes: true` in the artifact — never block a gate waiting for an answer.
 
@@ -261,10 +257,6 @@ new deferred bugs → TODO entries with severity + repro; fixed TODOs → annota
    backend changes still affect app behavior; always open it.
 8. **Show screenshots to the user.** Read every screenshot file after capture.
 9. **Never delete output files.** Evidence accumulates intentionally.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-qa --status end 2>/dev/null || true
-```
 
 ## DoD gate (verification)
 

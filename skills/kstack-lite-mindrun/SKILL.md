@@ -12,8 +12,8 @@ description: >-
   known (use kstack-investigate), or for style/architecture review (use
   kstack-review).
 metadata:
-  version: "1.1.0"
-compatibility: None — read-only delegated step; runtime/bin telemetry degrades gracefully.
+  version: "1.1.1"
+compatibility: None — read-only delegated step.
 ---
 
 <!-- provenance: derived from user-stack mindrun — lite variant for orchestrated delegated steps: plan-doc DoD, no artifacts, verdict output · S4 · reviewed per authoring-skills -->
@@ -28,10 +28,6 @@ paste-ready remedy. Read-only, artifact-free — the report body is the output.
 
 > **Headless always.** This step only ever runs delegated — no user on the
 > wire: never ask, never wait; ambiguity is `~assumed` or itself a finding.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-lite-mindrun --status start 2>/dev/null || true
-```
 
 **The contract:** in = `{plan_file}` + `{previous}` (`build` summary) · grid =
 the plan's `Done when` column + `## Edge cases & risks` · out = five-field
@@ -113,10 +109,6 @@ Emitted via `kstack-report` (the step task carries the exact invocation):
 
 ❌ `--verdict walkthrough==pass` in a sprint `be-walk` step (discarded → park)
 ✅ `--verdict be-walk==pass` — the key the RECORD CONTRACT names
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-lite-mindrun --status end 2>/dev/null || true
-```
 
 **Central rules, again:** read the real execution path, never the memory of
 what the code "should" do — including the build summary's claims. A claim is

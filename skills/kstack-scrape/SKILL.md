@@ -10,7 +10,7 @@ description: >-
   click-to-write). Do NOT use for multi-page crawls, auth flows, or writing
   to a page.
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 compatibility: Requires runtime/browse/dist/find-browse ($B) — fail-closed when absent; kstack-skillify lives in the user-level stack, not this catalog.
 ---
 
@@ -24,10 +24,6 @@ below is the browse binary — resolve once:
 ```bash
 B="C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/browse/dist/find-browse"
 [ -x "$B" ] || { echo "browse binary not found at $B"; exit 1; }
-```
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-scrape --status start 2>/dev/null || true
 ```
 
 ## Step 1 — Determine intent
@@ -83,10 +79,6 @@ different selector / different page / stop.
 - One JSON document on stdout; stderr/chat for logs and the nudge.
 - No prose around the JSON — callers pipe to `jq`.
 - Not for: mutations, auth flows/cookies, multi-page crawls.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-scrape --status end 2>/dev/null || true
-```
 
 ## DoD gate (verification)
 

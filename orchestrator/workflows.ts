@@ -1412,7 +1412,7 @@ Sprint {sprint} | Goal: {goal} | Branch: {branch}`,
           execution: "main",
           signal: { kind: "marker", value: "ARCHIVED" },
           task: `## DELIVERABLE
-Only the DURABLE artifacts moved into their archive slot under .kstack/workflows/sprint/sprint_{sprint}/ — system-design_{sprint}.md and ADR-log_{sprint}.md are the survivors. Ephemerals (understand.md, user-story.md, capability.md, tasks.md, summary_BE.md, summary_FE.md, qa-artifact_{sprint}.md and the devsecops/ review reports — problems this sprint resolved through its loops) stay in place: the run's terminal cleanup deletes them — never move or archive them.
+Only the DURABLE artifacts moved into their archive slot under .kstack/workflows/sprint/sprint_{sprint}/ — system-design_{sprint}.md and ADR-log_{sprint}.md are the survivors. Ephemerals (understand.md, user-story.md, capability.md, tasks.md, summary_BE.md, summary_FE.md, qa-artifact_{sprint}.md, the software-architect-artifact_{sprint}_N.md reviews and the devsecops/ review reports — problems this sprint resolved through its loops) stay in place: the run's terminal cleanup deletes them — never move or archive them.
 
 ## STOP CONDITION
 Stop when: the durables are moved and named under .kstack/workflows/sprint/sprint_{sprint}/. Mechanical step — do NOT commit, do NOT start new work.

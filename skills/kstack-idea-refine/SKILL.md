@@ -14,8 +14,8 @@ description: >-
   stress-testing an already-drafted plan (use kstack-plan-eng-review), or
   for drafting the full plan artifact (use kstack-plan-draft).
 metadata:
-  version: "1.0.0"
-compatibility: Writes the embryonic plan doc under .kstack/plans/; runtime/bin telemetry degrades gracefully.
+  version: "1.0.1"
+compatibility: Writes the embryonic plan doc under .kstack/plans/.
 ---
 
 <!-- provenance: ported from addyosmani/agent-skills idea-refine (MIT) — adapted S4: ephemeral living plan doc, scout-fed grounding, kstack conventions · reviewed per authoring-skills -->
@@ -37,10 +37,6 @@ Philosophy:
 
 **HARD GATE:** the only artifact is the plan document. No code, no
 scaffolding, no implementation.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-idea-refine --status start 2>/dev/null || true
-```
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), proceed with your recommended answers to the sharpening questions, mark each `~assumed` in the one-pager's Open Questions, and never block waiting for an answer.
 
@@ -120,10 +116,6 @@ edit this file — they never create a new one.
 
 Summarize the direction briefly and name the file's path; in a workflow,
 end per the advancement contract (`kstack_advance`) carrying that path.
-
-```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-telemetry-log --event-type skill_run --skill kstack-idea-refine --status end 2>/dev/null || true
-```
 
 ## DoD gate (verification)
 
