@@ -12,7 +12,7 @@ description: >-
   direction (use kstack-design-taste-frontend), or engineering review (use
   kstack-plan-eng-review).
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
 compatibility: Optional runtime/design/dist/design.exe for AI mockup variants; the review proceeds text-only when absent.
 ---
 
@@ -58,11 +58,11 @@ applicable." and exit early.
 _ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 D=""
 [ -n "$_ROOT" ] && [ -x "$_ROOT/runtime/design/dist/design" ] && D="$_ROOT/runtime/design/dist/design"
-[ -z "$D" ] && D="C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/design/dist/design"
+[ -z "$D" ] && D="$KSTACK_EXTENSION_DIR/runtime/design/dist/design"
 if [ -x "$D" ]; then echo "DESIGN_READY: $D"; else echo "DESIGN_NOT_AVAILABLE"; fi
 B=""
-[ -n "$_ROOT" ] && [ -x "$_ROOT/runtime/browse/dist/find-browse" ] && B="$_ROOT/runtime/browse/dist/find-browse"
-[ -z "$B" ] && B="C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/browse/dist/find-browse"
+[ -n "$_ROOT" ] && [ -x "$_ROOT/runtime/browse/dist/browse" ] && B="$_ROOT/runtime/browse/dist/browse"
+[ -z "$B" ] && B="$KSTACK_EXTENSION_DIR/runtime/browse/dist/browse"
 [ -x "$B" ] && echo "BROWSE_READY: $B" || echo "BROWSE_NOT_AVAILABLE (use 'open' to view boards)"
 ```
 
@@ -90,7 +90,7 @@ zero UI scope, or an explicit "text only". Mockups ARE the plan for design
 work; text descriptions are opinion.
 
 ```bash
-eval "$(C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-slug 2>/dev/null)"
+eval "$("$KSTACK_EXTENSION_DIR/runtime/bin/kstack-slug" 2>/dev/null)"
 _DESIGN_DIR="$HOME/.kstack/projects/$SLUG/designs/<screen-name>-$(date +%Y%m%d)"
 mkdir -p "$_DESIGN_DIR"
 $D variants --brief "<assembled from plan + DESIGN.md>" --count 3 --output-dir "$_DESIGN_DIR/"
@@ -122,7 +122,7 @@ states, emotional arc, specificity, haunting ambiguities). Present both
 verbatim, then the litmus scorecard (Claude/Codex/Consensus per check:
 CONFIRMED | DISAGREE | NOT SPEC'D). Hard rejections become the FIRST items of
 Pass 1 tagged `[HARD REJECTION]`; DISAGREE/CONFIRMED-failure items pre-load
-their relevant pass. Log via `kstack-review-log`.
+their relevant pass. Log via `kstack-review-log` (payload: see Output contract).
 
 ## The 0-10 rating method
 
@@ -154,8 +154,10 @@ broken principle.
 The plan file must end with `## REVIEW REPORT` carrying the Runs/Status/
 Findings table + verdict line; its FINAL non-whitespace line is the
 unresolved-decisions status (exact `NO UNRESOLVED DECISIONS` or a
-`**UNRESOLVED DECISIONS:**` bullet block). Body prose doesn't count. Persist:
-`bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-review-log 2>/dev/null || true`.
+`**UNRESOLVED DECISIONS:**` bullet block). Body prose doesn't count. Persist
+(one JSON argument — fill every `<…>`; `clean` = the report ends with
+`NO UNRESOLVED DECISIONS`):
+`bash "$KSTACK_EXTENSION_DIR/runtime/bin/kstack-review-log" '{"skill":"kstack-plan-design-review","timestamp":"<ISO-8601 UTC>","status":"<clean|issues_open>","commit":"<git rev-parse --short HEAD>"}' 2>/dev/null || true`.
 
 ## DoD gate (verification)
 

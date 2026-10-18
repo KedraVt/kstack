@@ -181,6 +181,29 @@ describe("workflow entry + artifact lifetime", () => {
   });
 });
 
+describe("skill runtime paths", () => {
+  const root = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+  const skills = fs.readdirSync(path.join(root, "skills")).map((d) => path.join(root, "skills", d, "SKILL.md")).filter((f) => fs.existsSync(f));
+
+  test("the extension exports KSTACK_EXTENSION_DIR (forward slashes) for skills", () => {
+    initOrchestrator({ registerTool() {}, registerCommand() {}, on() {} } as any);
+    const dir = process.env.KSTACK_EXTENSION_DIR!;
+    assert.ok(dir && !dir.includes("\\"), dir);
+    assert.ok(fs.existsSync(path.join(dir, "runtime", "bin")));
+  });
+
+  test("every $KSTACK_EXTENSION_DIR/runtime path a skill names exists; no per-user absolute paths", () => {
+    for (const f of skills) {
+      const text = fs.readFileSync(f, "utf-8");
+      assert.doesNotMatch(text, /[A-Za-z]:\/Users\//, `${f} hard-codes a per-user absolute path`);
+      for (const m of text.matchAll(/\$KSTACK_EXTENSION_DIR\/(runtime\/[\w./-]+)/g)) {
+        const p = path.join(root, m[1]);
+        assert.ok(fs.existsSync(p) || fs.existsSync(`${p}.exe`), `${path.basename(path.dirname(f))}: ${m[1]} does not exist`);
+      }
+    }
+  });
+});
+
 describe("architect review cleanup", () => {
   test("every review round of THIS sprint's architect artifact is deleted, nothing else", () => {
     const cwd = fs.mkdtempSync(path.join(TMP, "arch-"));

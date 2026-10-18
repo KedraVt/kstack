@@ -18,11 +18,18 @@ import { phaseArtifactPaths } from "./artifacts.ts";
 import { appendLedger } from "./ledger.ts";
 import { feedWatchEvent, endStepWatch, stepWatchStats, type StepWatchEvent } from "./stuck.ts";
 import { SECURITY_SECTION } from "../lib/content-security.ts";
+import { EXTENSION_ROOT } from "./skills.ts";
 
 /** Automatic re-deliveries of a main step whose completion signal is missing. */
 const MAX_AUTO_REISSUES = 2;
 
 export function initOrchestrator(pi: ExtensionAPI): void {
+  // Skills reach runtime helpers as "$KSTACK_EXTENSION_DIR/runtime/..." — one
+  // portable root for the main session's bash, spawned subagents (inherited
+  // env) and manual /skill: runs. Its own name: KSTACK_ROOT already means a
+  // browse checkout root in lib/browse.ts. Forward slashes: bash eats backslashes.
+  process.env.KSTACK_EXTENSION_DIR = EXTENSION_ROOT.replace(/\\/g, "/");
+
   // WP2 §4.1: teach the model what the untrusted-content envelope markers mean.
   // The try/catch stays: older pi versions without before_agent_start throw
   // at registration and simply skip the injection.

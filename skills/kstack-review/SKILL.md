@@ -11,7 +11,7 @@ description: >-
   browser-level QA of the running app (use kstack-qa), security threat
   modeling (use kstack-cso), or root-cause debugging (use kstack-investigate).
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
 compatibility: "Optional helpers: runtime/bin/kstack-review-read (cross-review dedup) and repo script `bun run slop:diff`; both degrade gracefully when absent."
 ---
 
@@ -175,7 +175,7 @@ symbol", not "I grep'd and didn't find it."
 CRITICALs) · HIGH (should fix) · MEDIUM (quality gap worth fixing now) ·
 LOW/Suggestion.
 
-**Cross-review dedup:** run `bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-review-read 2>/dev/null` —
+**Cross-review dedup:** run `bash "$KSTACK_EXTENSION_DIR/runtime/bin/kstack-review-read" 2>/dev/null` —
 suppress findings whose fingerprint was previously `skipped` by the user AND
 whose file is unchanged since that review. Never suppress `fixed`/`auto-fixed`
 (those may regress). No prior reviews → skip silently.
@@ -217,7 +217,8 @@ problems-code: none | <summary of critical/high issues for developers>
 **Verdict discipline:** `approved` only with zero open CRITICALs (and no
 unaddressed HIGH-impact plan discrepancies). `rejected` requires the problems
 list so developers can act without re-deriving the analysis. Persist the
-verdict: `bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-review-log 2>/dev/null || true`
+verdict (one JSON argument — fill every `<…>`):
+`bash "$KSTACK_EXTENSION_DIR/runtime/bin/kstack-review-log" '{"skill":"kstack-review","timestamp":"<ISO-8601 UTC>","status":"<approved|rejected>","commit":"<git rev-parse --short HEAD>"}' 2>/dev/null || true`
 (enables cross-review dedup on the next run).
 
 ## Fix-first mode

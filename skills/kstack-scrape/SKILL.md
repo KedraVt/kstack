@@ -10,8 +10,8 @@ description: >-
   click-to-write). Do NOT use for multi-page crawls, auth flows, or writing
   to a page.
 metadata:
-  version: "1.0.1"
-compatibility: Requires runtime/browse/dist/find-browse ($B) — fail-closed when absent; kstack-skillify lives in the user-level stack, not this catalog.
+  version: "1.0.2"
+compatibility: Requires runtime/browse/dist/browse ($B) — fail-closed when absent; kstack-skillify lives in the user-level stack, not this catalog.
 ---
 
 <!-- provenance: gstack/gstack-scrape (match/prototype paths) — boilerplate stripped: learnings-log, eureka, preamble · rewritten S1 2026-02-11 -->
@@ -22,7 +22,7 @@ One entry point for getting data off the web. **Read-only by contract.** `$B`
 below is the browse binary — resolve once:
 
 ```bash
-B="C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/browse/dist/find-browse"
+B="$KSTACK_EXTENSION_DIR/runtime/browse/dist/browse"
 [ -x "$B" ] || { echo "browse binary not found at $B"; exit 1; }
 ```
 

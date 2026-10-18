@@ -12,8 +12,8 @@ description: >-
   for root-cause investigation (use kstack-investigate) or release/commit
   workflow (use kstack-ship).
 metadata:
-  version: "1.0.1"
-compatibility: Requires runtime/browse/dist/find-browse ($B) for live-browser QA; suite/report modes work without it — browse steps fail closed.
+  version: "1.0.2"
+compatibility: Requires runtime/browse/dist/browse ($B) for live-browser QA; suite/report modes work without it — browse steps fail closed.
 ---
 
 <!-- provenance: sprint-beta/beta-qa (merged base — modes, triage, artifact contract) + gstack/gstack-qa (browse workflow, diff-aware, fix loop, health rubric) + gstack/gstack-qa-only (report-only mode) + kedra/qa-git (save-point) · merged S1 2026-02-11 -->
@@ -47,7 +47,7 @@ scope (full app or diff-scoped) · auth (credentials or cookie file).
 
 ## Setup
 
-**Browse binary.** `B` = `C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/browse/dist/browse`.
+**Browse binary.** `B` = `"$KSTACK_EXTENSION_DIR/runtime/browse/dist/browse"`.
 If not executable → tell the user browse needs a one-time build and stop until
 approved. **CDP mode:** `$B status | grep "Mode: cdp"` — if connected to the
 user's real browser, skip cookie import, user-agent overrides, and headless

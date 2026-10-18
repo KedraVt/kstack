@@ -10,7 +10,7 @@ description: >-
   ship routes to doc-update before merge. Do NOT use for code review
   (kstack-review) or release mechanics (kstack-ship).
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
 compatibility: runtime/bin/kstack-redact for leak scanning; degrades to manual-pattern scan when absent.
 ---
 
@@ -103,7 +103,7 @@ writing; it is the source of truth for format.
    credentials; a live-format secret in committed docs is a leak:
    ```bash
    git diff --cached --no-color | grep '^+' | sed 's/^+//' | \
-     bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-redact --json
+     bun "$KSTACK_EXTENSION_DIR/runtime/bin/kstack-redact" --json
    # exit 3 (HIGH) → unstage, remove the secret, re-stage. Do NOT commit.
    ```
 3. `git commit -m "docs: generate [scope] documentation (Diataxis)"`, push to

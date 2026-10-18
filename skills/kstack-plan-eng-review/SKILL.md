@@ -11,7 +11,7 @@ description: >-
   discovery (use kstack-office-hours), code-diff review (use kstack-review),
   or UX/design review (use kstack-plan-design-review).
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
 compatibility: Runtime/bin helpers degrade gracefully; pure review methodology otherwise.
 ---
 
@@ -51,7 +51,7 @@ Recommend A when a branch diff exists, otherwise B.
 ## Design Doc Check
 
 ```bash
-eval "$(C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-slug 2>/dev/null)"
+eval "$("$KSTACK_EXTENSION_DIR/runtime/bin/kstack-slug" 2>/dev/null)"
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr '/' '-' || echo 'no-branch')
 DESIGN=$(ls -t ~/.kstack/projects/$SLUG/*-$BRANCH-design-*.md 2>/dev/null | head -1)
 [ -z "$DESIGN" ] && DESIGN=$(ls -t ~/.kstack/projects/$SLUG/*-design-*.md 2>/dev/null | head -1)
@@ -131,8 +131,9 @@ carrying the Runs/Status/Findings table + verdict line, and its FINAL
 non-whitespace line must be the unresolved-decisions status: exact
 `NO UNRESOLVED DECISIONS` or a `**UNRESOLVED DECISIONS:**` bullet block. The
 report is a structured terminal section — in-body review prose does not
-count. Persist the result:
-`bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-review-log 2>/dev/null || true`.
+count. Persist the result (one JSON argument — fill every `<…>`; `clean` =
+the report ends with `NO UNRESOLVED DECISIONS`):
+`bash "$KSTACK_EXTENSION_DIR/runtime/bin/kstack-review-log" '{"skill":"kstack-plan-eng-review","timestamp":"<ISO-8601 UTC>","status":"<clean|issues_open>","commit":"<git rev-parse --short HEAD>"}' 2>/dev/null || true`.
 
 ## DoD gate (verification)
 

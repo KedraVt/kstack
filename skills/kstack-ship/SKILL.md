@@ -9,7 +9,7 @@ description: >-
   for testing (use kstack-qa), code review (use kstack-review), or fixing
   bugs (use kstack-investigate) — ship consumes their verified output.
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
 compatibility: Requires git + gh CLI for push/PR steps; runtime/bin/kstack-* helpers degrade gracefully.
 ---
 
@@ -68,7 +68,7 @@ skip when already done (bump, push, PR create→update).
 ### Step 2: Review readiness
 
 ```bash
-bash C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-review-read 2>/dev/null
+bash "$KSTACK_EXTENSION_DIR/runtime/bin/kstack-review-read" 2>/dev/null
 ```
 
 Display the readiness dashboard: most recent entry per review skill within 7
@@ -116,7 +116,7 @@ Deterministic state logic via `kstack-version-bump`; level decision stays
 agent judgment; slot pick via `kstack-next-version` (both in `runtime/bin/`).
 
 1. **Classify:**
-   `bun run C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-version-bump classify --base <base>`
+   `bun run "$KSTACK_EXTENSION_DIR/runtime/bin/kstack-version-bump" classify --base <base>`
    - `FRESH` → bump (steps 2–4). `ALREADY_BUMPED` → skip bump, run queue-drift
      check; if the queue moved → ask: rebump vs keep.
    - `DRIFT_STALE_PKG` → `kstack-version-bump repair`. `DRIFT_UNEXPECTED` →

@@ -12,7 +12,7 @@ description: >-
   whether to build something (use kstack-office-hours) or reviewing an
   existing plan (use kstack-plan-eng-review).
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
 compatibility: Requires gh CLI for issue filing + runtime/bin/kstack-redact for leak scanning; $KSTACK_STATE_ROOT for the archive dir (defaults to repo .kstack/).
 ---
 
@@ -97,7 +97,7 @@ a temp file, scan THAT file, pass the same file downstream:
 REDACT_FILE=$(mktemp); cat > "$REDACT_FILE" <<'EOF'
 <exact spec body>
 EOF
-C:/Users/Mattia/.pi/agent/extensions/kstack-pi/runtime/bin/kstack-redact --from-file "$REDACT_FILE" --repo-visibility "$REDACT_VIS" --json
+bun "$KSTACK_EXTENSION_DIR/runtime/bin/kstack-redact" --from-file "$REDACT_FILE" --repo-visibility "$REDACT_VIS" --json
 ```
 
 Exit 3 (HIGH: credentials) → stop, no dispatch, no skip. Exit 2 (MEDIUM) →
