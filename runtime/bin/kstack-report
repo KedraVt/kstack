@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# kstack-report — write a step completion record to
+#   .kstack/runs/<runId>/<phase>[.<step>].json and append the matching
+#   ledger event. This is the delegation completion protocol (S4/ADR-1):
+#   records are the canonical source for step summaries, verdicts and
+#   routing vars; HANDOFF text survives only as a migration redundancy.
+#
+# Usage:
+#   kstack-report --workflow <id> --run-id <id> --phase <id> [--step <id>] \
+#     [--attempt <n>] \
+#     [--verdict KEY==VALUE]... [--var KEY==VALUE]... \
+#     [--evidence <text>]... [--deliverable <path>]... \
+#     [--marker <text>]... [--summary <text>]
+#
+# The agent learns workflow/runId/phase/step from its task contract — the
+# orchestrator interpolates {runId}/{phase}/{step} into step tasks.
+# Records are UNTRUSTED input: routing re-validates verdict values against
+# the (workflow, phase) expectation map before acting on them.
+#
+# Exit codes: 0 written · 1 usage error · 2 write failure.
+
+set -uo pipefail
+
+WORKFLOW=""
+RUN_ID=""
+PHASE=""
+STEP=""
+ATTEMPT=""
+SUMMARY=""
+declare -a VERDICTS=()
+declare -a VARS=()
+declare -a EVIDENCE=()
+declare -a DELIVERABLES=()
+declare -a MARKERS=()
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --workflow)    WORKFLOW="$2"; shift 2 ;;
+    --run-id)      RUN_ID="$2"; shift 2 ;;
+    --phase)       PHASE="$2"; shift 2 ;;
+    --step)        STEP="$2"; shift 2 ;;
+    --attempt)     ATTEMPT="$2"; shift 2 ;;
+    --verdict)     VERDICTS+=("$2"); shift 2 ;;
+    --var)         VARS+=("$2"); shift 2 ;;
+    --evidence)    EVIDENCE+=("$2"); shift 2 ;;
+    --deliverable) DELIVERABLES+=("$2"); shift 2 ;;
+    --marker)      MARKERS+=("$2"); shift 2 ;;
+    --summary)     SUMMARY="$2"; shift 2 ;;
+    *) echo "kstack-report: unknown flag '$1'" >&2; exit 1 ;;
+  esac
+done
+
+if [ -z "$WORKFLOW" ] || [ -z "$RUN_ID" ] || [ -z "$PHASE" ]; then
+  echo "kstack-report: --workflow, --run-id and --phase are required" >&2
+  exit 1
+fi
+
+# Verdict ownership: when the orchestrator sets KSTACK_VERDICT_KEYS (space-
+# separated; empty = this step owns no gate verdict), verdict keys outside it
+# are DROPPED with a warning — the record is still written, so a step is never
+# blocked for doing its work, but it cannot produce a verdict it does not own.
+# Values are lowercased and stripped of trailing punctuation ("Approved.").
+if [ ${#VERDICTS[@]} -gt 0 ]; then
+  declare -a KEPT=()
+  for pair in "${VERDICTS[@]}"; do
+    case "$pair" in *==*) ;; *) KEPT+=("$pair"); continue ;; esac
+    key="${pair%%==*}"
+    val="$(printf '%s' "${pair#*==}" | tr '[:upper:]' '[:lower:]' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:].,;:!]*$//')"
+    if [ -n "${KSTACK_VERDICT_KEYS+x}" ] && ! printf ' %s ' "$KSTACK_VERDICT_KEYS" | grep -qF " $key "; then
+      echo "kstack-report: ignoring --verdict '$key' — this step owns ${KSTACK_VERDICT_KEYS:-no gate verdict}" >&2
+      continue
+    fi
+    KEPT+=("$key==$val")
+  done
+  VERDICTS=("${KEPT[@]+"${KEPT[@]}"}")
+fi
+
+# Sanitize path segments — record/ledger filenames must never escape
+# .kstack/ (same allowlist as ledgerPathFor: word chars + hyphen + dot).
+safe() { printf '%s' "$1" | tr -c '[:alnum:]_.-' '-'; }
+# Sanitize a JSON string value (strip quotes, backslashes, control chars).
+js() { printf '%s' "$1" | tr -d '"\\\n\r\t' | head -c 4000; }
+# Sanitize a map key.
+jk() { printf '%s' "$1" | tr -c '[:alnum:]_.-' '-' | head -c 80; }
+
+SAFE_RUN="$(safe "$RUN_ID")"
+SAFE_PHASE="$(safe "$PHASE")"
+SAFE_STEP="$(safe "$STEP")"
+SAFE_WF="$(safe "$WORKFLOW")"
+
+RECORD_DIR=".kstack/runs/$SAFE_RUN"
+if [ -n "$SAFE_STEP" ]; then
+  RECORD_FILE="$RECORD_DIR/$SAFE_PHASE.$SAFE_STEP.json"
+else
+  RECORD_FILE="$RECORD_DIR/$SAFE_PHASE.json"
+fi
+LEDGER_DIR=".kstack/ledger"
+# The ledger filename uses ledger.ts's allowlist (no dot): with the record
+# allowlist, ISO runIds ("...52.631Z...") split every run into two files.
+lsafe() { printf '%s' "$1" | tr -c '[:alnum:]_-' '-'; }
+LEDGER_FILE="$LEDGER_DIR/$(lsafe "$WORKFLOW")-$(lsafe "$RUN_ID").jsonl"
+
+TS="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+# Build a JSON object body from KEY==VALUE pairs (first == splits; a pair
+# without == is dropped as malformed).
+map_json() {
+  local out="{" first=1 pair key val
+  for pair in "$@"; do
+    case "$pair" in
+      *==*) ;;
+      *) continue ;;
+    esac
+    key="${pair%%==*}"
+    val="${pair#*==}"
+    [ $first -eq 0 ] && out+=","
+    out+="\"$(jk "$key")\":\"$(js "$val")\""
+    first=0
+  done
+  out+="}"
+  printf '%s' "$out"
+}
+
+# Build a JSON array body from raw strings.
+arr_json() {
+  local out="[" first=1 item
+  for item in "$@"; do
+    [ $first -eq 0 ] && out+=","
+    out+="\"$(js "$item")\""
+    first=0
+  done
+  out+="]"
+  printf '%s' "$out"
+}
+
+VERDICTS_JSON="$(map_json "${VERDICTS[@]+"${VERDICTS[@]}"}")"
+VARS_JSON="$(map_json "${VARS[@]+"${VARS[@]}"}")"
+EVIDENCE_JSON="$(arr_json "${EVIDENCE[@]+"${EVIDENCE[@]}"}")"
+DELIVERABLES_JSON="$(arr_json "${DELIVERABLES[@]+"${DELIVERABLES[@]}"}")"
+MARKERS_JSON="$(arr_json "${MARKERS[@]+"${MARKERS[@]}"}")"
+SUMMARY_JSON="\"$(js "$SUMMARY")\""
+[ -z "$SUMMARY" ] && SUMMARY_JSON="null"
+STEP_JSON="null"
+[ -n "$SAFE_STEP" ] && STEP_JSON="\"$SAFE_STEP\""
+
+mkdir -p "$RECORD_DIR" "$LEDGER_DIR" 2>/dev/null || {
+  echo "kstack-report: cannot create .kstack dirs" >&2
+  exit 2
+}
+
+printf '{"v":1,"workflow":"%s","runId":"%s","phase":"%s","step":%s,"at":"%s","summary":%s,"verdicts":%s,"vars":%s,"evidence":%s,"deliverables":%s,"markers":%s}\n' \
+  "$SAFE_WF" "$SAFE_RUN" "$SAFE_PHASE" "$STEP_JSON" "$TS" \
+  "$SUMMARY_JSON" "$VERDICTS_JSON" "$VARS_JSON" "$EVIDENCE_JSON" \
+  "$DELIVERABLES_JSON" "$MARKERS_JSON" > "$RECORD_FILE" || {
+  echo "kstack-report: failed writing $RECORD_FILE" >&2
+  exit 2
+}
+
+# Ledger event — same JSONL schema as orchestrator/ledger.ts. `record`
+# points at the full record file so the ledger line stays small.
+ATTEMPT_JSON="null"
+[ -n "$ATTEMPT" ] && ATTEMPT_JSON="$ATTEMPT"
+printf '{"at":"%s","kind":"report","workflowId":"%s","phaseId":"%s","stepId":%s,"attempt":%s,"payload":{"summary":%s,"verdicts":%s,"vars":%s,"record":"%s"}}\n' \
+  "$TS" "$SAFE_WF" "$SAFE_PHASE" "$STEP_JSON" "$ATTEMPT_JSON" \
+  "$SUMMARY_JSON" "$VERDICTS_JSON" "$VARS_JSON" "$RECORD_FILE" >> "$LEDGER_FILE" || {
+  echo "kstack-report: record written but ledger append failed" >&2
+  exit 2
+}
+
+printf '%s\n' "$RECORD_FILE"
+exit 0

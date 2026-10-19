@@ -13,7 +13,8 @@
     "lib/",
     "orchestrator/",
     "skills/",
-    "agents/"
+    "agents/",
+    "runtime/bin/"
   ],
   "pi": {
     "extensions": [

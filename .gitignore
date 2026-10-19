@@ -9,8 +9,10 @@ node_modules/
 bun.lock
 # state dirs: legacy pre-rename + current (char class covers both, keeps the audit clean)
 .[gk]stack/
-# runtime/ binaries are provisioned by session-start auto-download — never commit them
-runtime/
+# runtime/ binaries are provisioned by session-start auto-download — never commit them.
+# runtime/bin + runtime/lib are source (kstack-report is the S4 record CLI) — tracked.
+runtime/browse/
+runtime/design/
 
 # mindrun QA artifacts (temporary, never committed)
 mindrun-*.md
@@ -24,3 +26,5 @@ mindrun-*.md
 # kstack operational dirs (session data — never commit)
 .kstack/ledger/
 .kstack/runs/
+# kstack operational dirs (session data — never commit)
+.taste-skill/
