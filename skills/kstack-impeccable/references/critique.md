@@ -2,6 +2,47 @@
 
 Resolve one stable target, run two independent assessments, synthesize a design critique, persist a snapshot, and ask the user what to improve next. The chat response is the primary deliverable; the snapshot is an archive/backlog for future commands.
 
+### Contents
+
+- [Hard Invariants](#hard-invariants)
+- [Setup](#setup)
+- [Assessment Orchestration](#assessment-orchestration)
+- [Assessment A: Design Review](#assessment-a-design-review)
+- [Assessment B: Detector + Browser Evidence](#assessment-b-detector-browser-evidence)
+- [Generate Combined Critique Report](#generate-combined-critique-report)
+  - [Report header provenance](#report-header-provenance)
+  - [Design Health Score](#design-health-score)
+  - [Design Specificity Verdict](#design-specificity-verdict)
+  - [Overall Impression](#overall-impression)
+  - [What's Working](#whats-working)
+  - [Priority Issues](#priority-issues)
+  - [Persona Red Flags](#persona-red-flags)
+  - [Minor Observations](#minor-observations)
+  - [Questions to Consider](#questions-to-consider)
+- [Deliver the Report](#deliver-the-report)
+- [Persist the Snapshot](#persist-the-snapshot)
+- [Ask the User](#ask-the-user)
+- [Recommended Actions](#recommended-actions)
+  - [Action Summary](#action-summary)
+- [Reference Material](#reference-material)
+- [Cognitive Load Assessment](#cognitive-load-assessment)
+  - [Three Types of Cognitive Load](#three-types-of-cognitive-load)
+  - [Cognitive Load Checklist](#cognitive-load-checklist)
+  - [The Working Memory Rule](#the-working-memory-rule)
+  - [Common Cognitive Load Violations](#common-cognitive-load-violations)
+- [Heuristics Scoring Guide](#heuristics-scoring-guide)
+  - [Nielsen's 10 Heuristics](#nielsens-10-heuristics)
+  - [Score Summary](#score-summary)
+  - [Issue Severity (P0–P3)](#issue-severity-p0p3)
+- [Persona-Based Design Testing](#persona-based-design-testing)
+  - [1. Impatient Power User: "Alex"](#1-impatient-power-user-alex)
+  - [2. Confused First-Timer: "Jordan"](#2-confused-first-timer-jordan)
+  - [3. Accessibility-Dependent User: "Sam"](#3-accessibility-dependent-user-sam)
+  - [4. Deliberate Stress Tester: "Riley"](#4-deliberate-stress-tester-riley)
+  - [5. Distracted Mobile User: "Casey"](#5-distracted-mobile-user-casey)
+  - [Selecting Personas](#selecting-personas)
+  - [Project-Specific Personas](#project-specific-personas)
+
 ### Hard Invariants
 
 - Assessment A (design review) and Assessment B (detector/browser evidence) are both required.

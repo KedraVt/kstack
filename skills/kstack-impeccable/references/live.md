@@ -4,6 +4,39 @@ Interactive live variant mode: select elements in the browser, pick a design act
 
 A running dev server with HMR (Vite, Next.js, Bun, etc.), OR a static HTML file open in the browser. If the dev server's default port is busy, the app is very likely ALREADY running; probe the default URL before spawning a second server.
 
+### Contents
+
+- [The contract (read once)](#the-contract-read-once)
+- [Poll loop](#poll-loop)
+- [Start](#start)
+- [Recovery commands](#recovery-commands)
+- [Handle `generate`](#handle-generate)
+- [Insert mode branch](#insert-mode-branch)
+- [Replace mode (default)](#replace-mode-default)
+- [1. Read the screenshot (if present)](#1-read-the-screenshot-if-present)
+- [2. Wrap the element](#2-wrap-the-element)
+- [3. Load the action's reference](#3-load-the-actions-reference)
+- [4. Plan three variants: identity first, then mode, then axes](#4-plan-three-variants-identity-first-then-mode-then-axes)
+  - [Phase A: Extract the identity (non-skippable)](#phase-a-extract-the-identity-non-skippable)
+  - [Phase B: Pick mode (default vs departure)](#phase-b-pick-mode-default-vs-departure)
+  - [Phase C: Plan three variants](#phase-c-plan-three-variants)
+  - [Phase D: Squint test](#phase-d-squint-test)
+- [5. Apply the freeform prompt (if present)](#5-apply-the-freeform-prompt-if-present)
+- [6. Deliver variants](#6-deliver-variants)
+- [7. Parameters (composition-sized, 0-4 per variant)](#7-parameters-composition-sized-0-4-per-variant)
+- [8. Signal done](#8-signal-done)
+- [Aborting an in-flight session](#aborting-an-in-flight-session)
+- [Handle fallback](#handle-fallback)
+- [Handle `accept`](#handle-accept)
+- [Required after accept (carbonize)](#required-after-accept-carbonize)
+- [Handle `discard`](#handle-discard)
+- [Handle `steer`](#handle-steer)
+- [Handle `prefetch`](#handle-prefetch)
+- [Handle `manual_edit_apply`](#handle-manualeditapply)
+- [Exit](#exit)
+- [Cleanup](#cleanup)
+- [First-time setup](#first-time-setup)
+
 ## The contract (read once)
 
 Execute in order. No step skipped, no step reordered. Every tool output in live mode may carry an `_instructions` field: it is the authoritative next step for that exact situation, with real ids and paths substituted; when it conflicts with your recollection of this document, `_instructions` wins.

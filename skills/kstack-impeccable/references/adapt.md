@@ -30,6 +30,31 @@ Understand what needs adaptation and why:
 
 **CRITICAL**: Adaptation is rethinking the experience for the new context, not scaling pixels.
 
+### Contents
+
+- [Plan Adaptation Strategy](#plan-adaptation-strategy)
+- [Mobile Adaptation (Desktop → Mobile)](#mobile-adaptation-desktop-mobile)
+- [Tablet Adaptation (Hybrid Approach)](#tablet-adaptation-hybrid-approach)
+- [Desktop Adaptation (Mobile → Desktop)](#desktop-adaptation-mobile-desktop)
+- [Print Adaptation (Screen → Print)](#print-adaptation-screen-print)
+- [Email Adaptation (Web → Email)](#email-adaptation-web-email)
+- [Implement Adaptations](#implement-adaptations)
+- [Responsive Breakpoints](#responsive-breakpoints)
+- [Layout Adaptation Techniques](#layout-adaptation-techniques)
+- [Touch Adaptation](#touch-adaptation)
+- [Content Adaptation](#content-adaptation)
+- [Navigation Adaptation](#navigation-adaptation)
+- [Verify Adaptations](#verify-adaptations)
+- [Reference Material](#reference-material)
+- [Responsive Design](#responsive-design)
+  - [Mobile-First: Write It Right](#mobile-first-write-it-right)
+  - [Breakpoints: Content-Driven](#breakpoints-content-driven)
+  - [Detect Input Method, Not Just Screen Size](#detect-input-method-not-just-screen-size)
+  - [Safe Areas: Handle the Notch](#safe-areas-handle-the-notch)
+  - [Responsive Images: Get It Right](#responsive-images-get-it-right)
+  - [Layout Adaptation Patterns](#layout-adaptation-patterns)
+  - [Testing: Don't Trust DevTools Alone](#testing-dont-trust-devtools-alone)
+
 ## Plan Adaptation Strategy
 
 Create context-appropriate strategy:

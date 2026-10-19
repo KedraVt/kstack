@@ -30,6 +30,19 @@ Identify weaknesses and edge cases:
 
 **CRITICAL**: Designs that only work with perfect data aren't production-ready. Harden against reality.
 
+### Contents
+
+- [Hardening Dimensions](#hardening-dimensions)
+- [Text Overflow & Wrapping](#text-overflow-wrapping)
+- [Internationalization (i18n)](#internationalization-i18n)
+- [Error Handling](#error-handling)
+- [Edge Cases & Boundary Conditions](#edge-cases-boundary-conditions)
+- [Input Validation & Sanitization](#input-validation-sanitization)
+- [Accessibility Resilience](#accessibility-resilience)
+- [Performance Resilience](#performance-resilience)
+- [Testing Strategies](#testing-strategies)
+- [Verify Hardening](#verify-hardening)
+
 ## Hardening Dimensions
 
 Systematically improve resilience:
