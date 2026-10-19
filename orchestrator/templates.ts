@@ -830,7 +830,10 @@ function buildTaskSkills(phase: WorkflowPhase, task: string, skillsOverride?: st
     // the deliverable; support digests are applied only as useful.
     const prefix = skillClassFor(id) === "format-critical" ? FORMAT_CRITICAL_PREFIX : SUPPORT_PREFIX;
     if (digest) {
-      blocks.push(`## Skill methodology: ${id} (${skillClassFor(id)})\n${prefix}\n\n${digest}`);
+      // Embedded text has no location of its own: without the folder, the
+      // skill's relative references/ and scripts/ paths resolve nowhere.
+      const folder = info ? `\nSkill folder — resolve every relative path in this methodology (references/, scripts/, assets/, "<skill>", "<skill-base-dir>") against: ${path.dirname(info.skillPath).replace(/\\/g, "/")}` : "";
+      blocks.push(`## Skill methodology: ${id} (${skillClassFor(id)})\n${prefix}${folder}\n\n${digest}`);
     } else if (info && existsSync(info.skillPath)) {
       blocks.push(`## Skill methodology: ${id} (${skillClassFor(id)})\n${prefix}\nBefore starting, read the file ${info.skillPath} and follow its methodology.`);
     }
@@ -1200,9 +1203,10 @@ export function buildRecordContract(step: WorkflowStep, scope?: { workflowId: st
 Before exiting you MUST write your step record exactly once via the kstack-report CLI (its path is in $KSTACK_REPORT):
 \`\`\`
 "$KSTACK_REPORT" --workflow "$KSTACK_WORKFLOW" --run-id "$KSTACK_RUN_ID" --phase "$KSTACK_PHASE" --step "$KSTACK_STEP" \\
-  --summary "<2-3 sentence outcome>"${verdictFlags} [--var KEY==VALUE]... [--marker <text>]... [--deliverable <path>]...
+  --summary '<2-3 sentence outcome>'${verdictFlags} [--var KEY==VALUE]... [--evidence '<finding @ file:line — fix>']... [--marker <text>]... [--deliverable <path>]...
 \`\`\`
-The orchestrator never accepts HANDOFF text as a completion signal — the record is the only channel.${required}${ownership}`;
+Quote every value in SINGLE quotes — inside double quotes the shell expands \`$50.00\` to \`0.00\`. An apostrophe inside a value is written \`'\\''\`.
+The orchestrator never accepts HANDOFF text as a completion signal — the record is the only channel.${required}${ownership}${owned.length ? " One --evidence per finding: on a negative verdict they are the ONLY feedback the re-run worker receives." : ""}`;
 }
 
 /**

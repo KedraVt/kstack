@@ -174,7 +174,7 @@ export function newestArchitectArtifact(cwd: string, sprintNumber?: number): str
 // NEVER listed here (independent lifetime, outside the project root).
 
 export const EPHEMERAL_ARTIFACTS: Record<string, string[]> = {
-  develop: ["understand.md", "plan.md"],
+  develop: ["plan.md"], // one living plan: born at evolve, rewritten by draft
   sprint: ["understand.md", "user-story.md", "capability.md", "tasks.md", "summary_BE.md", "summary_FE.md"],
   investigate: ["bug-report.md"],
 };
@@ -193,6 +193,39 @@ export function sprintGateEphemerals(sprint: number): string[] {
     // Sequenced per review round — the `*` expands at cleanup time.
     softwareArchitectArtifactName(sprint, "*"),
   ];
+}
+
+/**
+ * Run start (ms) from the runId's timestamp prefix — the safe form
+ * (`2026-10-19T01-28-10-524Z-ab12`) or a legacy raw ISO one; undefined if unparseable.
+ */
+export function runStartMs(runId?: string): number | undefined {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2})[:-](\d{2})[:-](\d{2})[.-](\d{3})Z/.exec(runId ?? "");
+  return m ? Date.parse(`${m[1]}T${m[2]}:${m[3]}:${m[4]}.${m[5]}Z`) : undefined;
+}
+
+/**
+ * Files satisfying an artifact signal (repo-relative `value`). A `*` in the
+ * basename names a per-run file family (`direction-<slug>.md`): only files
+ * modified since the run started count — a previous run's file must not
+ * complete this run's step. Plain names keep the existence check.
+ */
+export function artifactSignalFiles(cwd: string, value: string, sinceMs?: number): string[] {
+  const rel = path.normalize(value);
+  const base = path.basename(rel);
+  if (!base.includes("*")) return fs.existsSync(path.join(cwd, rel)) ? [path.join(cwd, rel)] : [];
+  const dir = path.join(cwd, path.dirname(rel));
+  const re = new RegExp(`^${base.split("*").map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`);
+  try {
+    return fs
+      .readdirSync(dir)
+      .filter((f) => re.test(f))
+      .map((f) => path.join(dir, f))
+      // 1s slack: coarse filesystem mtimes must not reject a file written at run start.
+      .filter((p) => sinceMs === undefined || fs.statSync(p).mtimeMs >= sinceMs - 1000);
+  } catch {
+    return [];
+  }
 }
 
 /** Ephemeral set for a workflow id — a fresh copy (state stamps it verbatim). */

@@ -2,10 +2,11 @@
 
 ## Where the agent files live
 
-Canonical, versioned copies live in this repo at `agents/*.md`. Copy them
-into `~/.pi/agent/agents/` manually (back up existing files first, never
-delete). If you hand-tuned deployed copies, re-apply your changes after a
-sync.
+Canonical, versioned copies live in this repo at `agents/*.md`. `/kstack init`
+syncs them into `~/.pi/agent/agents/` (where spawn discovers them): missing
+profiles are added, differing ones are replaced after a
+`<name>.md.bak-<timestamp>` backup. If you hand-tuned a deployed copy,
+re-apply the change from its backup — or better, make it in `agents/`.
 
 > **History:** this file previously claimed agent definitions were NOT
 > versioned here and described a mirror-test premise. That was stale: the

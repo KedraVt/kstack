@@ -4,17 +4,17 @@ import { handleKstackCommand, getCompletions } from "./command.ts";
 import { createInputRouter } from "./router.ts";
 import { loadActiveState, saveState, advancePhase, gateForApproval, recordStepResult } from "./state.ts";
 import { stepCompletionStatus } from "./records.ts";
+import { NEGATIVE_VALUES } from "./verdicts.ts";
 import type { AdvanceOptions } from "./state.ts";
 import { getWorkflow } from "./workflows.ts";
-import { launchPhase, invalidateRuntime, advanceBlockReason, setKstackStatus } from "./executor.ts";
+import { launchPhase, invalidateRuntime, advanceBlockReason, setKstackStatus, finalizeRun } from "./executor.ts";
 import { manualGates, autoGateValidated, optionalPhases, deterministicSubagents } from "./config.ts";
 import { parsePlanFileMarker, buildPhaseInstructions, buildStepInstructions, resolvePlanFilePath } from "./templates.ts";
 import { detectGitContext } from "./git.ts";
 import { isValidatedStrategy } from "./skip.ts";
 import { existsSync } from "node:fs";
 import * as path from "node:path";
-import { writeRunReport } from "./telemetry.ts";
-import { phaseArtifactPaths } from "./artifacts.ts";
+import { phaseArtifactPaths, artifactSignalFiles, runStartMs } from "./artifacts.ts";
 import { appendLedger } from "./ledger.ts";
 import { feedWatchEvent, endStepWatch, stepWatchStats, type StepWatchEvent } from "./stuck.ts";
 import { SECURITY_SECTION } from "../lib/content-security.ts";
@@ -220,6 +220,8 @@ export function initOrchestrator(pi: ExtensionAPI): void {
       // — the phase itself advances only after the LAST step, through the
       // normal phase-level advancePhase below (verdict routing included).
       if (phase.steps && phase.steps.length > 0) {
+        // Set when a failFast phase's verifier step reports a negative verdict.
+        let failFastFrom: string | undefined;
         // S4/TASK_02: the declared step signal must be OBSERVED before the
         // step may complete — a missing record/marker/artifact re-issues the
         // step in resumeMode instead of advancing; a verdict written by a
@@ -297,8 +299,17 @@ export function initOrchestrator(pi: ExtensionAPI): void {
           if (check.kind === "ok" && Object.keys(check.vars).length > 0) {
             advanceState = { ...advanceState, vars: { ...(advanceState.vars ?? {}), ...check.vars } };
           }
+          if (
+            phase.failFast &&
+            params.status === "completed" &&
+            check.kind === "ok" &&
+            curStep.signal?.kind === "verdict" &&
+            Object.values(check.record?.verdicts ?? {}).some((v) => NEGATIVE_VALUES.has(v))
+          ) {
+            failFastFrom = curStep.id;
+          }
         }
-        const recorded = recordStepResult(
+        let recorded = recordStepResult(
           advanceState,
           phase,
           { status: params.status, summary: params.summary },
@@ -311,6 +322,21 @@ export function initOrchestrator(pi: ExtensionAPI): void {
             }],
             isError: true,
           };
+        }
+        // failFast: the remaining steps would judge or build on work the
+        // loop-back is about to redo — record them skipped and close the phase.
+        if (failFastFrom && !recorded.isLast) {
+          const results = { ...recorded.state.results };
+          for (const s of phase.steps.slice(recorded.state.stepIndex)) {
+            results[`${phase.id}.${s.id}`] = { status: "skipped", summary: `Skipped: fail-fast after a negative "${failFastFrom}" verdict` };
+          }
+          recorded = { ...recorded, isLast: true, state: { ...recorded.state, results, stepIndex: phase.steps.length } };
+          appendLedger(
+            ctx.cwd,
+            state,
+            { kind: "step", phaseId: phase.id, stepId: failFastFrom, payload: { summary: `fail-fast: negative verdict — remaining steps skipped` } },
+            (m) => { try { ctx.ui.notify(m, "warning"); } catch { /* stale ctx */ } },
+          );
         }
         // S3 ledger (INV-L1/L2): every completed step lands verbatim — the
         // failed-status branch below is a step completion too. The watched
@@ -469,7 +495,8 @@ export function initOrchestrator(pi: ExtensionAPI): void {
           (m) => { try { ctx.ui.notify(m, "warning"); } catch { /* stale ctx */ } },
         );
       }
-      if (!willManualGate) saveState(pi, newState);
+      // Completion is persisted by finalizeRun below (with the ephemeral cleanup).
+      if (!willManualGate && newState.status !== "completed") saveState(pi, newState);
       setKstackStatus(ctx, newState, workflow);
 
       // D3 security freeze surfaced to both model and user.
@@ -498,8 +525,9 @@ export function initOrchestrator(pi: ExtensionAPI): void {
         // Close any watch left open by a completion path that skipped the
         // stepped branch — a stale watch would bleed into the next run.
         endStepWatch();
-        // STEP 0 telemetry: flush the structured run report for this run.
-        writeRunReport(ctx.cwd, state.workflowId);
+        // Run report + ephemeral cleanup: this is the normal last-phase exit,
+        // the executor's terminal branch only sees skipped-last-phase runs.
+        finalizeRun(pi, ctx, newState);
         const completedPhases = Object.entries(newState.results)
           .filter(([, r]) => r.status === "completed")
           .map(([id]) => id);
@@ -654,7 +682,16 @@ export function initOrchestrator(pi: ExtensionAPI): void {
       // — the section fires for a legacy subagent phase OR a delegated current
       // step; the kstack-report record (.kstack/runs/<runId>/) is the
       // canonical channel under the step model.
-      const artifactPaths = phaseArtifactPaths(phase.id, ctx.cwd, state.sprintNumber);
+      // Stepped phases: only the step's own artifact signal is a real file —
+      // the legacy per-phase paths name files the S4 verifier rule forbids.
+      const artifactPaths = currentStep
+        ? currentStep.signal?.kind === "artifact"
+          ? (() => {
+              const hits = artifactSignalFiles(ctx.cwd, currentStep.signal.value, runStartMs(state.runId));
+              return hits.length ? hits : [path.join(ctx.cwd, currentStep.signal.value)];
+            })()
+          : []
+        : phaseArtifactPaths(phase.id, ctx.cwd, state.sprintNumber);
       const delegated = phase.execution === "subagent" || currentStep?.execution === "subagent";
       const recordLines =
         delegated && deterministicSubagents()

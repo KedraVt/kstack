@@ -311,12 +311,6 @@ describe("workflows registry", () => {
     }
   });
 
-  test("all workflows have intents", () => {
-    for (const wf of getAllWorkflows()) {
-      assert.ok(wf.intents.length > 0, `${wf.id} has no intents`);
-    }
-  });
-
   test("all workflows have at least one phase", () => {
     for (const wf of getAllWorkflows()) {
       assert.ok(wf.phases.length > 0, `${wf.id} has no phases`);
@@ -671,36 +665,6 @@ describe("deterministic delegation", () => {
   });
 });
 
-
-describe("intent matching", () => {
-  test("investigate matches debug keywords", () => {
-    const wf = getWorkflow("investigate")!;
-    const text = "why is the login page broken";
-    const matched = wf.intents.some((i) => i.pattern.test(text));
-    assert.ok(matched);
-  });
-
-  test("review matches diff-review keywords", () => {
-    const wf = getWorkflow("review")!;
-    const text = "check the diff before landing";
-    const matched = wf.intents.some((i) => i.pattern.test(text));
-    assert.ok(matched);
-  });
-
-  test("develop matches feature keywords", () => {
-    const wf = getWorkflow("develop")!;
-    const text = "build a new dashboard component";
-    const matched = wf.intents.some((i) => i.pattern.test(text));
-    assert.ok(matched);
-  });
-
-  test("sprint matches agile keywords", () => {
-    const wf = getWorkflow("sprint")!;
-    const text = "run a sprint on this backlog";
-    const matched = wf.intents.some((i) => i.pattern.test(text));
-    assert.ok(matched);
-  });
-});
 
 // --- STEP 0: structured run-report telemetry --------------------------------
 
@@ -1863,9 +1827,10 @@ describe("kstack_phase tool", () => {
     const text = res.content[0].text;
     assert.ok(text.startsWith("[workflow paused: branch-violation:devsecops-review on main"), "posture header missing");
     assert.ok(text.includes("### On-disk record"), "artifact section missing");
-    assert.ok(text.includes("code-review-artifact_07.md"), "expected artifact path not listed");
+    // S4 verifier rule: devsecops writes NO artifact files — the record is the
+    // only pointer; naming code-review-artifact_07.md would invite writing it.
+    assert.ok(!text.includes("code-review-artifact_07.md"), "legacy artifact path must not be listed");
     assert.ok(text.includes("devsecops-review.code-review.json"), "step record path not listed");
-    assert.ok(text.includes("(not written yet)"), "missing-file marker absent");
   });
 
   test("active main step: instructions, no posture header, no record section", async () => {
@@ -2515,9 +2480,9 @@ describe("S3 executor — stepped dispatch (TASK_03)", () => {
     const state = { ...createState("develop", "g"), phaseIndex: 1, stepIndex: 0 };
     const h = fakeHarness(state);
     initOrchestrator(h.pi);
-    // plan.evolve declares signal {artifact: "understand.md"} — the completion
+    // plan.evolve declares signal {artifact: "plan.md"} — the completion
     // signal must be OBSERVED before the step may advance (TASK_02).
-    writeFileSync(path.join(h.ctx.cwd, "understand.md"), "# direction\n");
+    writeFileSync(path.join(h.ctx.cwd, "plan.md"), "# direction\n");
     const res = await h.tools.get("kstack_advance").execute("t", { summary: "frontier settled", status: "completed" }, undefined, undefined, h.ctx);
     assert.ok(res.content[0].text.includes("interrogate"), "the tool result must name the next step");
     const s = lastState(h);
@@ -2612,7 +2577,7 @@ describe("S3 executor — stepped dispatch (TASK_03)", () => {
 
   test("a delegated step spawns its subagent; kstack_advance is refused while it runs", async () => {
     const wf: import("../orchestrator/types.ts").Workflow = {
-      id: "s3-stepped-test", name: "Stepped Test", description: "t", intents: [],
+      id: "s3-stepped-test", name: "Stepped Test", description: "t",
       phases: [{
         id: "mix", name: "Mixed", execution: "main", optional: false,
         steps: [
@@ -2665,7 +2630,7 @@ describe("S3 executor — stepped dispatch (TASK_03)", () => {
     // kstack-plan-draft SKILL.md documents `{previous}` literally (backtick-quoted).
     // Interpolating AFTER the digest is embedded replaces that documentation too.
     const wf: import("../orchestrator/types.ts").Workflow = {
-      id: "s3-interp-test", name: "Interp", description: "t", intents: [],
+      id: "s3-interp-test", name: "Interp", description: "t",
       phases: [{
         id: "mix", name: "Mixed", execution: "main", optional: false,
         steps: [
@@ -2695,7 +2660,7 @@ describe("S3 executor — stepped dispatch (TASK_03)", () => {
     const saved = process.env.KSTACK_PI_DETERMINISTIC;
     process.env.KSTACK_PI_DETERMINISTIC = "off";
     const wf: import("../orchestrator/types.ts").Workflow = {
-      id: "s3-nodet-test", name: "NoDet", description: "t", intents: [],
+      id: "s3-nodet-test", name: "NoDet", description: "t",
       phases: [{
         id: "mix", name: "Mixed", execution: "main", optional: false,
         steps: [
@@ -2797,7 +2762,7 @@ describe("S4 pre-flight gate inventory (TASK_05)", () => {
       // defs use enabled:"auto" (engine-resolved), unaffected by that env.
       process.env.KSTACK_PI_OPTIONAL_PHASES = "skip";
       const legacyWf: import("../orchestrator/types.ts").Workflow = {
-        id: "s3-legacy-opt", name: "Legacy", description: "t", intents: [],
+        id: "s3-legacy-opt", name: "Legacy", description: "t",
         phases: [{ id: "maybe", name: "Maybe", execution: "main", optional: true }],
       };
       assert.deepEqual(gateInventory(legacyWf), [], "env-skip already decided legacy optional phases");
@@ -3033,7 +2998,7 @@ describe("S3 append-only ledger (TASK_07)", () => {
       const h = fakeHarness(state);
       h.ctx.cwd = cwd;
       initOrchestrator(h.pi);
-      writeFileSync(path.join(cwd, "understand.md"), "# direction\n"); // plan.evolve artifact signal
+      writeFileSync(path.join(cwd, "plan.md"), "# direction\n"); // plan.evolve artifact signal
       const res = await h.tools.get("kstack_advance").execute("t", { summary: "frontier settled", status: "completed" }, undefined, undefined, h.ctx);
       assert.ok(!res.isError);
       const dir = path.join(cwd, ".kstack", "ledger");
@@ -3096,7 +3061,7 @@ describe("S3 append-only ledger (TASK_07)", () => {
       // ask-mode optional park survives as LEGACY machinery on `optional:true`.
       // Fixture: optional + NOT last so skipping doesn't end the workflow.
       const wf: import("../orchestrator/types.ts").Workflow = {
-        id: "s3-opt-ledger-test", name: "OptTest", description: "t", intents: [],
+        id: "s3-opt-ledger-test", name: "OptTest", description: "t",
         phases: [
           { id: "maybe", name: "Maybe", execution: "main", optional: true },
           { id: "tail", name: "Tail", execution: "main", optional: false },
@@ -3127,16 +3092,14 @@ describe("S3 append-only ledger (TASK_07)", () => {
   test("resume-gate: re-delivering the LAST step with a missing artifact adds a note", async () => {
     const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-ledger-"));
     try {
-      // qa-browsing is a sprint phase with a real artifact contract
-      // (qaArtifactPath); give a synthetic workflow a stepped phase reusing
-      // that id so phaseArtifactPaths resolves.
+      // S4: the last step's own artifact signal is the resume-gate contract.
       const wf: import("../orchestrator/types.ts").Workflow = {
-        id: "s3-resumegate-test", name: "ResumeGate", description: "t", intents: [],
+        id: "s3-resumegate-test", name: "ResumeGate", description: "t",
         phases: [{
           id: "qa-browsing", name: "QA Browsing", execution: "main", optional: false,
           steps: [
             { id: "run", execution: "main", task: "## DELIVERABLE\nRun." },
-            { id: "report", execution: "main", task: "## DELIVERABLE\nReport." },
+            { id: "report", execution: "main", task: "## DELIVERABLE\nReport.", signal: { kind: "artifact", value: "report.md" } },
           ],
         }],
       };
@@ -3153,7 +3116,7 @@ describe("S3 append-only ledger (TASK_07)", () => {
         h.ctx.cwd = cwd;
         await executeCurrentPhase(h.pi, h.ctx, state as any);
         const last = h.sent.at(-1) ?? "";
-        assert.ok(/artifact|missing|expected/i.test(last), "missing artifact must be named in the re-delivered instruction");
+        assert.ok(/\[resume-gate\] Missing expected artifact: report\.md/.test(last), "missing artifact must be named in the re-delivered instruction");
       } finally {
         const i = getAllWorkflows().indexOf(wf);
         if (i >= 0) getAllWorkflows().splice(i, 1);
@@ -3407,7 +3370,7 @@ describe("S3 stuck detector (TASK_08)", () => {
 describe("S3 stuck/budget wiring (TASK_08)", () => {
   test("a delegated step that loops is aborted and parks with stuck:<rule>:<phase>.<step>", async () => {
     const wf: import("../orchestrator/types.ts").Workflow = {
-      id: "s3-stuck-test", name: "Stuck Test", description: "t", intents: [],
+      id: "s3-stuck-test", name: "Stuck Test", description: "t",
       phases: [{
         id: "mix", name: "Mixed", execution: "main", optional: false,
         steps: [
@@ -3466,7 +3429,7 @@ describe("S3 stuck/budget wiring (TASK_08)", () => {
     // S4: every def phase is stepped — exercise the implicit-phase guard on a
     // fixture without steps[] (legacy compat path).
     const wf: import("../orchestrator/types.ts").Workflow = {
-      id: "s3-implicit-test", name: "Implicit", description: "t", intents: [],
+      id: "s3-implicit-test", name: "Implicit", description: "t",
       phases: [{ id: "plain", name: "Plain", execution: "main", optional: false, task: "## DELIVERABLE\nx" }],
     };
     getAllWorkflows().push(wf);
@@ -3525,9 +3488,9 @@ describe("S4 acceptance — develop.plan five-step run (TASK_10)", () => {
       const mark = (stepId: string, marker: string) =>
         writeStepRecord(cwd, state, "plan", stepId, { markers: [marker] });
 
-      // Step 1 done (artifact signal: understand.md) → step 2 delivered with
+      // Step 1 done (artifact signal: plan.md) → step 2 delivered with
       // the FULL kstack-grilling skill.
-      writeFileSync(path.join(cwd, "understand.md"), "# direction\n");
+      writeFileSync(path.join(cwd, "plan.md"), "# direction\n");
       let res = await advance("idea evolved");
       assert.ok(!res.isError);
       await waitFor(() => delivered(h, "Step 2/5"));
@@ -3549,7 +3512,7 @@ describe("S4 acceptance — develop.plan five-step run (TASK_10)", () => {
       assert.ok(delivered(h, "#### Skill gate: kstack-plan-draft"), "s3 must carry its own skill");
       assert.equal(lastState(h).stepIndex, 2);
 
-      writeFileSync(path.join(cwd, "plan.md"), "# plan\n"); // draft artifact signal
+      mark("draft", "DRAFT-DONE"); // plan.md exists since evolve — draft signals by marker
       res = await advance("plan written to .kstack/plans/accept.md");
       assert.ok(!res.isError);
       await waitFor(() => delivered(h, "Step 4/5"));

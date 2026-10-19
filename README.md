@@ -65,7 +65,7 @@ Open pi in any project. Type `/kstack` — you should see the workflow menu.
 /kstack              # Interactive menu (context-aware, sorted by git state)
 /kstack ship         # Start a specific workflow directly
 /kstack investigate  # Bug debugging pipeline
-/kstack init         # Install/refresh the managed kstack rules block in AGENTS.md
+/kstack init         # Install/refresh the AGENTS.md rules block + sync agents/*.md into ~/.pi/agent/agents
 ```
 
 The menu adapts to your git context:
@@ -116,17 +116,9 @@ The workflow decides when skill knowledge applies — the model never has to gue
 one `"skills": ["./skills"]` root; invoke manually via `/skill:kstack-qa`,
 `/skill:kstack-spec`, … The orchestrator's wired phases embed the same canonical files.
 
-### Automatic routing
+### Input routing
 
-The extension monitors your input and suggests workflows when it detects intent:
-
-- "why is login broken" → suggests `investigate`
-- "let's ship this" → suggests `ship`
-- "build a new dashboard" → suggests `develop`
-- "test the site" → suggests `qa`
-- "just report the bugs, don't fix" → suggests `qa-report`
-
-Suggestions are advisory — the LLM asks before starting a workflow. Slash commands and short inputs are never intercepted.
+Workflows start only via `/kstack` — there are no keyword-based workflow suggestions. While a workflow is active, every interactive message is prefixed with the current phase/step and its binding constraints (parked, frozen, decision gate) so the model stays anchored. Slash commands and bare stop words are never intercepted.
 
 ### Starting a workflow
 
@@ -238,7 +230,7 @@ kstack-pi/
 │   ├── config.ts            Feature flags (KSTACK_PI_*)
 │   ├── command.ts           /kstack command handler (+ /kstack next, /kstack init)
 │   ├── init.ts              /kstack init — managed AGENTS.md rules block
-│   └── router.ts            Input intent detection (transform, never block)
+│   └── router.ts            Active-workflow re-anchoring of user input (transform, never block)
 ├── runtime/
 │   └── bin/                 kstack-* helper scripts (bash, memory + telemetry)
 ├── skills/kstack-*/         Flat catalog — 28 skills, recursive discovery (manual /skill: use)
@@ -262,7 +254,7 @@ input router ─────────────┘         ↑             
                       kstack_advance ←──── LLM executes/reviews ←── instructions
 ```
 
-1. User starts a workflow via `/kstack` (the router may suggest one)
+1. User starts a workflow via `/kstack`
 2. The orchestrator injects phase instructions into the LLM context (`followUp` delivery — never mid-turn)
 3. Subagent phases are executed by the orchestrator itself: specialists run in isolated `pi` processes and their output is prefixed for review
 4. The LLM calls `kstack_advance` with a summary — this is the only progression mechanism; it must never defer back to the user

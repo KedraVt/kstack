@@ -57,6 +57,17 @@ export interface WorkflowStep {
    */
   ui?: "interactive";
   /**
+   * The step interviews the user and waits for answers (grilling, triage,
+   * office-hours). Must run as a main step — a headless subagent has nobody
+   * to ask (coherenceProblems) — and its phase is never offered "auto" at
+   * the pre-flight panel: human or skip only.
+   */
+  needsUser?: true;
+  /** Delegated-step timeout (seconds) overriding the phase's class — for steps known to outlast it. */
+  timeoutSec?: number;
+  /** Extra env for a delegated step's child; values interpolate like the task ({runId}, {phase}, {step}). */
+  env?: Record<string, string>;
+  /**
    * S4: side-effect step — parks at an entry ⚠ gate BEFORE running
    * (publishing review comments, shipping). The human must approve via
    * /kstack; the model can never self-approve.
@@ -94,6 +105,10 @@ export interface GateRow {
    * Absent = skippable (legacy default).
    */
   skippable?: boolean;
+  /** The phase has a needsUser step — the panel offers no "auto". */
+  interactive?: boolean;
+  /** enabled:"auto" row — its default lets the engine detect (it never parks). */
+  detect?: boolean;
 }
 
 export interface WorkflowPhase {
@@ -198,18 +213,18 @@ export interface WorkflowPhase {
    * must name an EARLIER phase in the same workflow.
    */
   onComplete?: string;
-}
-
-export interface IntentPattern {
-  pattern: RegExp;
-  weight: number;
+  /**
+   * A verdict step emitting a NEGATIVE verdict closes the phase at once —
+   * remaining steps record "skipped" and the phase routes on what it has.
+   * For build→verify phases, where later steps judge work the loop redoes.
+   */
+  failFast?: true;
 }
 
 export interface Workflow {
   id: string;
   name: string;
   description: string;
-  intents: IntentPattern[];
   phases: WorkflowPhase[];
   /**
    * S4: questions asked ONCE at run start (the panel's sequential step) —
@@ -411,6 +426,8 @@ export interface WorkflowState {
    * and untouched runs working.
    */
   planFile?: string;
+  /** HEAD at run start — lets resolvers see commits made during the run. */
+  baseHead?: string;
 }
 
 export interface GitContext {
@@ -421,6 +438,8 @@ export interface GitContext {
   behindRemote: number;
   isMainBranch: boolean;
   recentCommitSubject: string;
+  /** Current HEAD sha (absent on an unborn branch or when git fails). */
+  head?: string;
 }
 
 export interface WorkflowContext {

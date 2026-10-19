@@ -23,7 +23,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ParsedVerdict, VerdictParkCause, WorkflowPhase, WorkflowState, WorkflowStep } from "./types.ts";
-import { expectationsFor } from "./verdicts.ts";
+import { expectationsFor, NEGATIVE_VALUES } from "./verdicts.ts";
+import { artifactSignalFiles, runStartMs } from "./artifacts.ts";
 
 /**
  * Absolute path of the kstack-report CLI this extension ships — carried into
@@ -44,6 +45,9 @@ export function reportCliPath(): string {
  * plus phase expectation vars no other flagged step declares (e.g.
  * `severity` beside security-review). Everything else is dropped.
  */
+/** Shared keys bound to one signal: severity qualifies a security rejection, never a code review. */
+const SHARED_KEY_OWNER: Record<string, string> = { severity: "security-review" };
+
 export function verdictKeysFor(workflowId: string, phase: Pick<WorkflowPhase, "id" | "steps">, step: WorkflowStep): string[] {
   if (step.signal?.kind !== "verdict") return [];
   const otherSignals = new Set(
@@ -51,7 +55,8 @@ export function verdictKeysFor(workflowId: string, phase: Pick<WorkflowPhase, "i
   );
   const shared = Object.keys(expectationsFor(workflowId, phase.id) ?? {})
     .map((k) => k.replace(/\?$/, ""))
-    .filter((k) => k !== step.signal!.value && !otherSignals.has(k));
+    .filter((k) => k !== step.signal!.value && !otherSignals.has(k))
+    .filter((k) => !SHARED_KEY_OWNER[k] || SHARED_KEY_OWNER[k] === step.signal!.value);
   return [step.signal.value, ...shared];
 }
 
@@ -195,7 +200,7 @@ export function stepCompletionStatus(
         if (!record || !record.markers.includes(want)) return { kind: "signal-missing", want };
         break;
       case "artifact":
-        if (!fs.existsSync(path.join(cwd, want))) return { kind: "signal-missing", want };
+        if (artifactSignalFiles(cwd, want, runStartMs(state.runId)).length === 0) return { kind: "signal-missing", want };
         break;
     }
   }
@@ -267,6 +272,60 @@ export function mergePhaseVerdicts(
     Object.assign(vars, rec.vars);
   }
   return { parsed: { verdicts }, excerpt: excerpts.join("\n").slice(0, 2000), vars };
+}
+
+/**
+ * Retry feedback from a gate phase's own records — under the S4 verifier rule
+ * findings ride `--evidence`, never repo files, so the legacy artifact scan
+ * (buildRetryFeedback) comes back empty. Only flagged steps that emitted a
+ * NEGATIVE verdict contribute: a passing lane's evidence is not a blocker.
+ */
+export function phaseRecordFeedback(
+  phase: Pick<WorkflowPhase, "id" | "steps">,
+  cwd: string,
+  workflowId: string,
+  runId: string | undefined,
+  results?: WorkflowState["results"],
+): string {
+  if (runId === undefined) return "";
+  const parts: string[] = [];
+  for (const step of phase.steps ?? []) {
+    if (step.signal?.kind !== "verdict" || results?.[`${phase.id}.${step.id}`]?.status === "skipped") continue;
+    const rec = readStepRecord(cwd, workflowId, runId, phase.id, step.id);
+    const negatives = Object.entries(rec?.verdicts ?? {}).filter(([, v]) => NEGATIVE_VALUES.has(v));
+    if (!rec || negatives.length === 0) continue;
+    parts.push(
+      [
+        `From ${phase.id}.${step.id} (${negatives.map(([k, v]) => `${k}==${v}`).join(", ")}):`,
+        ...(rec.summary ? [rec.summary] : []),
+        ...rec.evidence.map((e) => `- ${e}`),
+      ].join("\n"),
+    );
+  }
+  const joined = parts.join("\n\n");
+  return joined.length > 4000 ? `${joined.slice(0, 4000)}…(truncated)` : joined;
+}
+
+/**
+ * Delete a phase's step records before the phase re-runs from its first step
+ * (loop-back, unfreeze, gate re-issue). A stale record would otherwise
+ * satisfy the re-run's signal check and re-route the previous attempt's
+ * verdict. The ledger keeps the history (append-only). Symlinked run dirs are
+ * refused — same containment rule as the ledger.
+ */
+export function clearPhaseRecords(cwd: string, runId: string, phaseId: string): void {
+  try {
+    const dir = path.join(cwd, ".kstack", "runs", safe(runId));
+    if (!fs.existsSync(dir)) return;
+    const rel = path.relative(fs.realpathSync(cwd), fs.realpathSync(dir));
+    if (rel.startsWith("..") || path.isAbsolute(rel)) return;
+    const prefix = `${safe(phaseId)}.`;
+    for (const f of fs.readdirSync(dir)) {
+      if (f.startsWith(prefix) && f.endsWith(".json")) fs.unlinkSync(path.join(dir, f));
+    }
+  } catch {
+    /* best-effort — a surviving record degrades to the pre-fix behavior */
+  }
 }
 
 /**

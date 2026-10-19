@@ -102,9 +102,9 @@ describe("sprint workflow registration", () => {
     const impl = SPRINT.phases.find((p) => p.id === "implement")!;
     const steps = impl.steps!;
     // BE steps first, then FE steps — every implementation step is delegated.
-    assert.deepEqual(steps.map((s) => s.id), ["backend", "be-walk", "frontend", "fe-walk", "ui-check"]);
+    assert.deepEqual(steps.map((s) => s.id), ["backend", "be-walk", "frontend", "design", "fe-walk", "ui-check"]);
     assert.deepEqual(steps.slice(0, 2).map((s) => s.agent), ["backend-developer", "backend-developer"]);
-    assert.deepEqual(steps.slice(2).map((s) => s.agent), ["frontend-developer", "frontend-developer", "frontend-developer"]);
+    assert.deepEqual(steps.slice(2).map((s) => s.agent), ["frontend-developer", "frontend-developer", "frontend-developer", "frontend-developer"]);
     assert.ok(steps.every((s) => s.execution === "subagent"), "implementation steps are delegated");
   });
 
@@ -119,10 +119,6 @@ describe("sprint workflow registration", () => {
     assert.ok(!SPRINT.phases.some((p) => p.steps?.some((s) => s.sideEffect)), "sprint declares no sideEffect steps");
   });
 
-  test("sprint intents match", () => {
-    assert.ok(SPRINT.intents.some((i) => i.pattern.test("run a sprint for this feature")));
-    assert.ok(SPRINT.intents.some((i) => i.pattern.test("write the user story")));
-  });
 });
 
 // --- Verdict parsing (D1/D4 fail-closed) --------------------------------------
@@ -1346,11 +1342,10 @@ describe("input router (Q4): short inputs still re-anchor during an active workf
     assert.ok(out.text.endsWith("make the nav more compact"));
   });
 
-  test("intent suggestions still fire for long input without a workflow", () => {
+  test("without a workflow, input passes through untouched (no workflow suggestions)", () => {
     const handler = createInputRouter({} as any);
     const out = handler({ text: "investigate the failing login request", source: "interactive" }, fakeRouterCtx(null)) as any;
-    assert.equal(out.action, "transform");
-    assert.match(out.text, /kstack-orchestrator/);
+    assert.equal(out.action, "continue");
   });
 });
 

@@ -542,10 +542,10 @@ describe("S4 record reader (TASK_02)", () => {
       // A step cannot emit ANOTHER step's verdict: sec's code-review is dropped.
       writeRecord(cwd, "run-1", { phase: "devsecops-review", step: "sec", verdicts: { "security-review": "rejected", severity: "red", "code-review": "rejected" }, workflow: "sprint" });
       assert.equal(mergePhaseVerdicts(devsecops, cwd, "sprint", "run-1").parsed?.verdicts["code-review"], "approved");
-      // Contradiction on a SHARED owned var (severity) ⇒ null
+      // severity belongs to the security step only: a code-review severity is
+      // dropped — it can neither downgrade the security severity nor contradict it.
       writeRecord(cwd, "run-1", { phase: "devsecops-review", step: "code", verdicts: { "code-review": "approved", severity: "low" }, workflow: "sprint" });
-      const conflict = mergePhaseVerdicts(devsecops, cwd, "sprint", "run-1");
-      assert.equal(conflict.parsed, null);
+      assert.equal(mergePhaseVerdicts(devsecops, cwd, "sprint", "run-1").parsed?.verdicts.severity, "red");
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -610,7 +610,7 @@ describe("S4 enabled resolution (TASK_05)", () => {
 
 describe("S4 derived skippability (TASK_05, INV-13)", () => {
   const wf = (): Workflow => ({
-    id: "t", name: "T", description: "t", intents: [],
+    id: "t", name: "T", description: "t",
     phases: [
       phase({ id: "scan", optional: true, produces: ["scan-report"] }),
       phase({ id: "fix", needs: ["scan-report"] }),
@@ -634,12 +634,12 @@ describe("S4 derived skippability (TASK_05, INV-13)", () => {
 
   test("coherenceProblems flags unproduced needs and cycles", () => {
     const dangling: Workflow = {
-      id: "t", name: "T", description: "t", intents: [],
+      id: "t", name: "T", description: "t",
       phases: [phase({ id: "a", needs: ["nope"] })] as WorkflowPhase[],
     };
     assert.ok(coherenceProblems(dangling).some((p) => /needs "nope"/.test(p)));
     const cyclic: Workflow = {
-      id: "t", name: "T", description: "t", intents: [],
+      id: "t", name: "T", description: "t",
       phases: [
         phase({ id: "a", produces: ["x"], needs: ["y"] }),
         phase({ id: "b", produces: ["y"], needs: ["x"] }),
@@ -650,7 +650,7 @@ describe("S4 derived skippability (TASK_05, INV-13)", () => {
 
   test("gateInventory: enabled:'off' phases get no row; needed producers can't offer skip", () => {
     const w: Workflow = {
-      id: "t", name: "T", description: "t", intents: [],
+      id: "t", name: "T", description: "t",
       phases: [
         phase({ id: "scan", optional: true, produces: ["r"] }),
         phase({ id: "gone", optional: true, enabled: "off" }),
@@ -668,7 +668,7 @@ describe("S4 derived skippability (TASK_05, INV-13)", () => {
 describe("S4 asks → state.vars (TASK_05)", () => {
   test("non-tui context resolves every ask to its default", async () => {
     const w: Workflow = {
-      id: "t", name: "T", description: "t", intents: [], phases: [],
+      id: "t", name: "T", description: "t", phases: [],
       asks: [
         { var: "scope", question: "Scope?", options: ["code", "docs"] },
         { var: "depth", question: "Depth?", options: ["quick", "deep"], default: "deep" },
@@ -680,7 +680,7 @@ describe("S4 asks → state.vars (TASK_05)", () => {
 
   test("when conditions gate follow-up questions on earlier answers", async () => {
     const w: Workflow = {
-      id: "t", name: "T", description: "t", intents: [], phases: [],
+      id: "t", name: "T", description: "t", phases: [],
       asks: [
         { var: "scope", question: "Scope?", options: ["mixed", "code"] },
         { var: "parallel", question: "Parallel?", options: ["yes", "no"], when: { var: "scope", equals: "mixed" } },
@@ -722,7 +722,7 @@ const lastState = (h: any) => h.entries.filter((e: any) => e.customType === "kst
 describe("S4 executor — enabled + skipWhen at arrival (TASK_05)", () => {
   test("enabled:'off' phase is skipped at arrival (no delivery)", async () => {
     const wf: Workflow = {
-      id: "t5-off", name: "T", description: "t", intents: [],
+      id: "t5-off", name: "T", description: "t",
       phases: [
         phase({ id: "a", execution: "main", task: "do a" }),
         phase({ id: "b", execution: "main", task: "do b", enabled: "off" }),
@@ -751,7 +751,7 @@ describe("S4 executor — enabled + skipWhen at arrival (TASK_05)", () => {
 
   test("enabled:'auto' phase with a false autoWhen is skipped at arrival", async () => {
     const wf: Workflow = {
-      id: "t5-auto", name: "T", description: "t", intents: [],
+      id: "t5-auto", name: "T", description: "t",
       phases: [
         phase({ id: "a", execution: "main", task: "do a" }),
         phase({ id: "b", execution: "main", task: "do b", enabled: "auto", autoWhen: () => false }),
@@ -779,7 +779,7 @@ describe("S4 executor — enabled + skipWhen at arrival (TASK_05)", () => {
 
   test("step skipWhen auto-records a skipped step and dispatches the next", async () => {
     const wf: Workflow = {
-      id: "t5-skip", name: "T", description: "t", intents: [],
+      id: "t5-skip", name: "T", description: "t",
       phases: [
         phase({
           id: "work", execution: "main",
@@ -841,7 +841,7 @@ describe("S4 capability gates (TASK_06, ADR-16)", () => {
 
   test("a requires:[gh] step on a gh-less map skips with a ledger note (INV-16)", async () => {
     const wf: Workflow = {
-      id: "t6-req", name: "T", description: "t", intents: [],
+      id: "t6-req", name: "T", description: "t",
       phases: [
         phase({
           id: "post", execution: "main",
@@ -880,7 +880,7 @@ describe("S4 capability gates (TASK_06, ADR-16)", () => {
 
   test("a prefers:[graft] step on a graft-less map runs degraded with a ~capability note", async () => {
     const wf: Workflow = {
-      id: "t6-pref", name: "T", description: "t", intents: [],
+      id: "t6-pref", name: "T", description: "t",
       phases: [
         phase({
           id: "scan", execution: "main",
@@ -960,7 +960,7 @@ describe("S4 ambient skills (TASK_07, D25)", () => {
 describe("S4 executor — sideEffect gate + resume + ephemeral (TASK_07)", () => {
   test("a sideEffect step parks BEFORE execution (awaiting_approval, ⚠ gate)", async () => {
     const wf: Workflow = {
-      id: "t7-se", name: "T", description: "t", intents: [],
+      id: "t7-se", name: "T", description: "t",
       phases: [
         phase({
           id: "post", execution: "main",
@@ -994,7 +994,7 @@ describe("S4 executor — sideEffect gate + resume + ephemeral (TASK_07)", () =>
 
   test("an approved sideEffect step runs and the flag clears on completion", async () => {
     const wf: Workflow = {
-      id: "t7-se-ok", name: "T", description: "t", intents: [],
+      id: "t7-se-ok", name: "T", description: "t",
       phases: [
         phase({
           id: "post", execution: "main",
@@ -1024,7 +1024,7 @@ describe("S4 executor — sideEffect gate + resume + ephemeral (TASK_07)", () =>
 
   test("resumeMode stamps the continue-from-disk hint on delivered instructions", async () => {
     const wf: Workflow = {
-      id: "t7-res", name: "T", description: "t", intents: [],
+      id: "t7-res", name: "T", description: "t",
       phases: [
         phase({ id: "work", execution: "main", steps: [{ id: "s1", execution: "main", task: "keep going" }] as any }),
       ] as WorkflowPhase[],
@@ -1052,7 +1052,7 @@ describe("S4 executor — sideEffect gate + resume + ephemeral (TASK_07)", () =>
       writeFileSync(path.join(cwd, "understand.md"), "think");
       writeFileSync(path.join(cwd, "keep.md"), "durable");
       const wf: Workflow = {
-        id: "t7-eph", name: "T", description: "t", intents: [],
+        id: "t7-eph", name: "T", description: "t",
         phases: [phase({ id: "only", execution: "main" })] as WorkflowPhase[],
       };
       getAllWorkflows().push(wf);
@@ -1085,7 +1085,7 @@ describe("S4 executor — sideEffect gate + resume + ephemeral (TASK_07)", () =>
       const res = cleanupEphemeralArtifacts(cwd, ["../x.md", "ok.md"]);
       assert.deepEqual(res.failed, ["../x.md"]);
       assert.deepEqual(res.deleted, ["ok.md"]);
-      assert.deepEqual(ephemeralArtifactsFor("develop"), ["understand.md", "plan.md"]);
+      assert.deepEqual(ephemeralArtifactsFor("develop"), ["plan.md"], "one living plan file");
       for (const f of ["understand.md", "user-story.md", "capability.md", "tasks.md", "summary_BE.md", "summary_FE.md"]) {
         assert.ok(ephemeralArtifactsFor("sprint").includes(f), `${f} is a sprint ephemeral — deleted at terminal status`);
       }
@@ -1098,7 +1098,7 @@ describe("S4 executor — sideEffect gate + resume + ephemeral (TASK_07)", () =>
 
   test("a delegated step's spawn env carries workflow/run/phase/step + report CLI (ADR-23)", async () => {
     const wf: Workflow = {
-      id: "t7-env", name: "T", description: "t", intents: [],
+      id: "t7-env", name: "T", description: "t",
       phases: [
         phase({
           id: "build", execution: "main",
@@ -1137,7 +1137,7 @@ describe("S4 executor — sideEffect gate + resume + ephemeral (TASK_07)", () =>
 
   test("a DELEGATED step missing its record signal PARKS — never silently advances", async () => {
     const wf: Workflow = {
-      id: "t7-sig", name: "T", description: "t", intents: [],
+      id: "t7-sig", name: "T", description: "t",
       phases: [
         phase({
           id: "work", execution: "main",

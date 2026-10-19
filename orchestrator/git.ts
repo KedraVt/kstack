@@ -48,13 +48,15 @@ export const hiddenExec: ExecFn = (command, args, { cwd }) =>
 
 export async function detectGitContext(cwd: string, exec: ExecFn = hiddenExec): Promise<GitContext> {
   try {
-    const [branchRes, statusRes, logRes, revRes] = await Promise.all([
+    const [branchRes, statusRes, logRes, revRes, headRes] = await Promise.all([
       exec("git", ["branch", "--show-current"], { cwd }),
       exec("git", ["status", "--porcelain"], { cwd }),
       // Unborn branch (fresh repo, no commits): log fails — tolerate like rev-list.
       exec("git", ["log", "-1", "--format=%s"], { cwd }).catch(() => null),
       exec("git", ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"], { cwd }).catch(() => null),
+      exec("git", ["rev-parse", "HEAD"], { cwd }).catch(() => null),
     ]);
+    const headSha = headRes?.code === 0 ? headRes.stdout.trim() : "";
 
     const branch = branchRes.stdout?.trim() || "unknown";
     // Do NOT trim() the whole output: the porcelain XY code is positional —
@@ -88,6 +90,7 @@ export async function detectGitContext(cwd: string, exec: ExecFn = hiddenExec): 
       behindRemote: behind,
       isMainBranch: branch === "main" || branch === "master",
       recentCommitSubject: logRes?.stdout?.trim() || "",
+      ...(/^[0-9a-f]{7,64}$/.test(headSha) ? { head: headSha } : {}),
     };
   } catch {
     return DEFAULT_GIT;

@@ -1,15 +1,18 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getAllWorkflows, getWorkflow, getWorkflowIds } from "./workflows.ts";
-import { loadActiveState, createState, saveState, abortState, resumeState, reissueGate, approveNext, approveEntryGate, approveOptionalPhase, skipPendingOptional, isSecurityFrozen, unfreeze, forceApproveParked, returnParkedWithContext, forceContinuePastGate, advancePhase, recordStepResult } from "./state.ts";
+import { loadActiveState, createState, saveState, abortState, resumeState, reissueGate, approveNext, approveEntryGate, approveOptionalPhase, skipPendingOptional, isSecurityFrozen, unfreeze, forceApproveParked, returnParkedWithContext, forceContinuePastGate, advancePhase, recordStepResult, returnTargetFor } from "./state.ts";
 import { detectGitContext } from "./git.ts";
-import { initAgentsMd } from "./init.ts";
+import { initAgentsMd, syncAgents } from "./init.ts";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { EXTENSION_ROOT } from "./skills.ts";
 import { deterministicSubagents } from "./config.ts";
 import { gateInventory, configureGates } from "./gates.ts";
 import { collectAskAnswers } from "./enabled.ts";
 import { probeCapabilities } from "./capabilities.ts";
-import { cleanupEphemeralArtifacts } from "./artifacts.ts";
-import { launchPhase, executeCurrentPhase, releasePhaseInFlight, isPhaseInFlight, invalidateRuntime } from "./executor.ts";
-import { writeRunReport } from "./telemetry.ts";
+import { cleanupEphemeralArtifacts, ephemeralArtifactsFor } from "./artifacts.ts";
+import { launchPhase, executeCurrentPhase, releasePhaseInFlight, isPhaseInFlight, invalidateRuntime, finalizeRun } from "./executor.ts";
+import { existsSync } from "node:fs";
+import * as path from "node:path";
 import { appendLedger } from "./ledger.ts";
 import { endStepWatch } from "./stuck.ts";
 import { verdictKeysFor, writeStepRecord } from "./records.ts";
@@ -148,6 +151,18 @@ export async function handleKstackCommand(args: string, ctx: ExtensionCommandCon
       unchanged: `${res.file} already has the current kstack block.`,
     } as const;
     ctx.ui.notify(msgs[res.status], "info");
+    // Subagents load their profiles from pi's agents dir, not this repo — an
+    // outdated deployed copy silently runs an old prompt.
+    try {
+      const sync = syncAgents(path.join(EXTENSION_ROOT, "agents"), path.join(getAgentDir(), "agents"));
+      const parts = [
+        sync.added.length ? `added ${sync.added.join(", ")}` : "",
+        sync.updated.length ? `updated ${sync.updated.join(", ")} (backups: *.md.bak-*)` : "",
+      ].filter(Boolean);
+      ctx.ui.notify(parts.length ? `kstack agents: ${parts.join("; ")}.` : "kstack agents: all profiles current.", "info");
+    } catch (err) {
+      ctx.ui.notify(`kstack agents: sync failed (${err instanceof Error ? err.message : String(err)}) — profiles unchanged.`, "warning");
+    }
     return;
   }
 
@@ -227,12 +242,11 @@ export async function handleKstackCommand(args: string, ctx: ExtensionCommandCon
         if (decisionBlockedByInFlightChain(ctx, activeState)) return;
         const next = skipPendingOptional(activeState, wf?.phases ?? [], wf?.phases.length ?? 0);
         auditGateDecision(ctx, activeState, "skip");
-        saveState(pi, next);
         if (next.status === "completed") {
-          writeRunReport(ctx.cwd, activeState.workflowId);
-          ctx.ui.setStatus("kstack", undefined);
+          finalizeRun(pi, ctx, next);
           ctx.ui.notify(`Workflow "${activeState.workflowId}" completed (optional phase skipped).`, "info");
         } else {
+          saveState(pi, next);
           ctx.ui.notify(`Skipped "${phaseName}" — continuing workflow.`, "info");
           launchPhase(pi, ctx, next);
         }
@@ -363,6 +377,27 @@ async function startWorkflow(workflowId: string, ctx: ExtensionCommandContext, p
   // in state.vars and are visible to enabled:"auto" resolvers at panel time.
   const askVars = await collectAskAnswers(workflow, ctx);
 
+  // Ephemerals are deleted at terminal status — a same-named file that existed
+  // BEFORE the run is the user's, not scratch. Ask before touching it; with
+  // no user to ask, keep it out of the cleanup list.
+  let ephemeralArtifacts: string[] | undefined;
+  const preexisting = ephemeralArtifactsFor(workflowId).filter((p) => existsSync(path.join(ctx.cwd, p)));
+  if (preexisting.length > 0) {
+    if (ctx.mode === "tui") {
+      const ok = await ctx.ui.confirm(
+        "Scratch files already exist",
+        `This run uses ${preexisting.join(", ")} at the repo root as scratch files: they will be overwritten and DELETED when the run ends. Continue?`,
+      );
+      if (!ok) {
+        ctx.ui.notify(`Not started — move or rename ${preexisting.join(", ")} first.`, "info");
+        return;
+      }
+    } else {
+      ephemeralArtifacts = ephemeralArtifactsFor(workflowId).filter((p) => !preexisting.includes(p));
+      ctx.ui.notify(`kstack: ${preexisting.join(", ")} existed before the run — kept out of the end-of-run cleanup.`, "warning");
+    }
+  }
+
   // S3/D20 pre-flight configure (TRANSIENT — never a persisted status):
   // enumerate the gates this workflow can actually fire and, in interactive
   // mode only, let the user choose per-gate handling BEFORE the state exists.
@@ -390,7 +425,7 @@ async function startWorkflow(workflowId: string, ctx: ExtensionCommandContext, p
   // S4/TASK_06: stamp probed capabilities at run start (kstack init is the
   // primary writer — §10.8; this covers panel-started runs; the executor's
   // lazy probe covers tool-started/legacy states where {} means unprobed).
-  const state: WorkflowState = { ...createState(workflowId, goal), gateMode, gateOverrides, vars: askVars, capabilities: probeCapabilities(), ...(stepGates ? { stepGates: true } : {}) };
+  const state: WorkflowState = { ...createState(workflowId, goal), gateMode, gateOverrides, vars: askVars, capabilities: probeCapabilities(), ...(stepGates ? { stepGates: true } : {}), ...(ephemeralArtifacts ? { ephemeralArtifacts } : {}), ...(git.head ? { baseHead: git.head } : {}) };
   saveState(pi, state);
 
   ctx.ui.notify(`Starting: ${workflow.name} (${workflow.phases.length} phases)`, "info");
@@ -535,7 +570,7 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
     const options = [
       "Continue as approved",
       ...(flagged ? ["Set verdict manually…"] : []),
-      ...(phase?.loopBackTo ? ["Return phase with context"] : []),
+      ...(returnTargetFor(phase, state.pendingVerdict?.parsed) ? ["Return phase with context"] : []),
       "Re-run the step",
       "View report excerpt",
       "Abort workflow",
@@ -574,7 +609,7 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
       if (panelGuard(ctx, state)) return true;
       const next = returnParkedWithContext(state, phases, extra?.trim() || undefined, ctx.cwd);
       if (!next) {
-        ctx.ui.notify("Cannot loop back: the parked phase has no loopBackTo target.", "error");
+        ctx.ui.notify("Cannot loop back: the parked phase has no loop-back target.", "error");
         return true;
       }
       auditGateDecision(ctx, state, "return");

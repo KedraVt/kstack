@@ -122,6 +122,12 @@ export function coherenceProblems(workflow: Workflow, knownSkillIds?: ReadonlySe
       }
     }
   }
+  // A step that interviews the user cannot be delegated: a headless subagent has nobody to ask.
+  for (const p of workflow.phases) {
+    for (const s of p.steps ?? []) {
+      if (s.needsUser && s.execution !== "main") problems.push(`step "${p.id}.${s.id}" needs the user but is delegated — it must run as a main step`);
+    }
+  }
   const producedBy = new Map<string, string[]>(); // artifact -> producer phase ids
   for (const p of workflow.phases) {
     for (const art of p.produces ?? []) {

@@ -1,4 +1,4 @@
-import type { Workflow } from "./types.ts";
+import type { Workflow, WorkflowStep } from "./types.ts";
 import { sprintMaxAttempts, sprintArchMaxAttempts, sprintEnabled } from "./config.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -20,18 +20,46 @@ import { join } from "node:path";
 
 /** Standard record-write line for main steps whose signal is a marker. */
 const REC = (marker: string) => `On completion, BEFORE calling kstack_advance, write your step record:
-\`"{kstack_report}" --workflow "{workflow}" --run-id "{runId}" --phase "{phase}" --step "{step}" --marker ${marker} --summary "<1-2 line outcome>"\`
-(Run it exactly as written, path quoted. This step owns no gate verdict — do not add --verdict.)`;
+\`"{kstack_report}" --workflow "{workflow}" --run-id "{runId}" --phase "{phase}" --step "{step}" --marker ${marker} --summary '<1-2 line outcome>'\`
+(Run it exactly as written, path quoted; keep the summary in SINGLE quotes — double quotes let the shell expand \`$\` amounts. This step owns no gate verdict — do not add --verdict.)`;
+
+/**
+ * Art-direction step (taste v2) after the frontend build, before its walker:
+ * autonomous — the skill's direction choice is the agent's, reported for the
+ * human gate. Skipped on backend scope; without Node 22/Chrome it degrades
+ * to the skill's no-inspector fallback.
+ */
+const DESIGN_STEP = (agent: string, source: string): WorkflowStep => ({
+  id: "design",
+  execution: "subagent",
+  agent,
+  skill: "kstack-design-taste-frontend",
+  // A restyle with the inspector loop measured ≥29 min — over the WORK class (25). Env: KSTACK_PI_TIMEOUT_STEP_DESIGN.
+  timeoutSec: 3600,
+  // Screenshots and the direction sheet belong to the run, not the project root.
+  env: { TASTE_SKILL_WORKDIR: ".kstack/runs/{runId}/design" },
+  skipWhen: { var: "scope", equals: "backend" },
+  prefers: ["node"],
+  signal: { kind: "marker", value: "DESIGN-DONE" },
+  task: `## DELIVERABLE
+The user-facing surface the build just shipped, given an art direction and finished with the design skill's run: direction dealt, built with full content, inspector at 0 FAIL (or its fallback stated), last critique round written down. Behavior, data and contracts from ${source} stay exactly as built.
+
+## STOP CONDITION
+Stop when: the skill's report conditions hold for every page/screen the build touched. Restyle and complete the surface — do NOT change behavior, add features, or touch backend code.
+New copy may only restate facts from ${source} or the existing UI: no invented prices, policies, promises or codes (a visible coupon code gives the discount away). Any filler text is listed as sample content in your summary.
+
+## CONTEXT
+Goal: {goal} | Branch: {branch}
+${source} names what was built; the build step's outcome: {previous}
+This is a restyle of a just-built surface: follow the "Redesign, restyle or review" case in the skill's references/special-cases.md (record the before first).
+Look-and-fix budget: ONE round (inspect → critique → fix → inspect once more), not the skill's three — the walkthrough and ui-check steps judge the result after you.
+In your summary: the direction (name + seed), the inspector result, and every ~assumed choice.`,
+});
 
 const develop: Workflow = {
   id: "develop",
   name: "Full Development Cycle",
   description: "Lean intent→merge path: understand, plan, implement, QA, review, document, ship",
-  intents: [
-    { pattern: /\b(build|implement|develop|create|add)\b.*\b(feature|component|module|page|api|endpoint)\b/i, weight: 0.85 },
-    { pattern: /\b(new feature|feature request|let's build|i want to add)\b/i, weight: 0.8 },
-    { pattern: /\b(from scratch|greenfield|start a new)\b/i, weight: 0.7 },
-  ],
   asks: [
     { var: "scope", question: "Scope of this change?", options: ["mixed", "frontend", "backend"], default: "mixed" },
   ],
@@ -73,14 +101,15 @@ Probe graft-first when available; fall back to ripgrep/ls. Report entry points, 
       steps: [
         {
           id: "evolve",
+          needsUser: true, // interviews the user
           execution: "main",
           skill: "kstack-idea-refine",
-          signal: { kind: "artifact", value: "understand.md" },
+          signal: { kind: "artifact", value: "plan.md" },
           task: `## DELIVERABLE
-\`understand.md\` at the repo root — a one-pager: direction, actors, options. This is the "what we decided" doc the rest of the plan builds on.
+\`plan.md\` at the repo root — the one-pager (direction, actors, options) that is born here as the LIVING plan: interrogate appends to it, draft rewrites it in place, the reviews annotate it.
 
 ## STOP CONDITION
-Stop when: understand.md exists and captures the raw direction. Do NOT write the plan; do NOT implement.
+Stop when: plan.md exists and captures the raw direction as a one-pager. Do NOT draft the full plan yet; do NOT implement.
 End your kstack_advance summary with a section \`OPEN QUESTIONS:\` — one bullet (\`- …\`) per question still unresolved (or exactly \`OPEN QUESTIONS: none\`); the interrogate step receives them verbatim.
 
 ## CONTEXT
@@ -90,14 +119,15 @@ Exploration notes:
         },
         {
           id: "interrogate",
+          needsUser: true, // interviews the user
           execution: "main",
           skill: "kstack-grilling",
           signal: { kind: "marker", value: "INTERROGATE-DONE" },
           task: `## DELIVERABLE
-A settled decision frontier appended to understand.md: every open question answered by the user or explicitly folded into a design decision.
+A settled decision frontier appended to plan.md: every open question answered by the user or explicitly folded into a design decision.
 
 ## STOP CONDITION
-Stop when: the frontier is empty — nothing remains silently assumed. Do NOT write plan.md; drafting is the next step.
+Stop when: the frontier is empty — nothing remains silently assumed. Do NOT rewrite plan.md into the full plan; drafting is the next step.
 
 ## CONTEXT
 Goal: {goal} | Branch: {branch}
@@ -111,20 +141,23 @@ ${REC("INTERROGATE-DONE")}`,
           id: "draft",
           execution: "main",
           skill: "kstack-plan-draft",
-          signal: { kind: "artifact", value: "plan.md" },
+          // plan.md already exists (born at evolve) — an artifact signal would
+          // pass before the rewrite happens.
+          signal: { kind: "marker", value: "DRAFT-DONE" },
           task: `## DELIVERABLE
-\`plan.md\` at the repo root — the engineered plan (8 sections incl. \`## Implementation tasks\` with falsifiable Done-when and \`## Scope\`), built on understand.md. "how we build it".
+\`plan.md\` rewritten IN PLACE into the engineered plan (8 sections incl. \`## Implementation tasks\` with falsifiable Done-when and \`## Scope\`) — every settled decision from the one-pager and the interview carried forward. "how we build it".
 
 ## STOP CONDITION
-Stop when: plan.md exists on disk and covers every settled decision. Do NOT start implementing.
+Stop when: plan.md on disk is the full plan and covers every settled decision. Do NOT create a second file; do NOT start implementing.
 
 ## CONTEXT
 Goal: {goal} | Branch: {branch}
 Interview outcome:
 {previous}
 
-Write the plan to plan.md at the repo root (the ephemeral THINK doc — deleted at run end).
-End your kstack_advance summary with the line \`PLAN FILE: plan.md\`.`,
+plan.md is the ephemeral THINK doc — deleted at run end.
+
+${REC("DRAFT-DONE")}`,
         },
         {
           id: "eng-review",
@@ -172,15 +205,16 @@ ${REC("DESIGN-REVIEW-DONE")}`,
       loopBackTo: "implement",
       maxAttempts: sprintMaxAttempts(),
       feedbackFrom: "implement",
+      failFast: true, // walkthrough==fail → ui-check would judge code about to change
       steps: [
         {
           id: "build",
           execution: "subagent",
           agent: "worker",
           skill: "kstack-test-driven-development",
-          // T09: ambientSkills [ponytail, AC(scope-bank), taste-when-frontend]
-          // land when the ports ship (INV-6 — nonexistent ids can't be wired).
-          ambientSkills: ["kstack-design-taste-frontend"],
+          // T09: ambientSkills [ponytail, AC(scope-bank)] land when the ports
+          // ship (INV-6 — nonexistent ids can't be wired). Taste is its own
+          // design step below — never a digest riding on every build.
           signal: { kind: "marker", value: "BUILD-DONE" },
           task: `## DELIVERABLE
 The plan implemented: code + tests green, matching the plan's Implementation tasks exactly — nothing more, nothing less.
@@ -195,6 +229,7 @@ Read plan.md FIRST — it contains the agreed architecture, files to change, edg
 
 TDD: failing test first, minimal diff, no opportunistic refactoring.`,
         },
+        DESIGN_STEP("worker", "plan.md"),
         {
           id: "walkthrough",
           execution: "subagent",
@@ -209,7 +244,7 @@ Stop when: every Done-when in plan.md has been traced once. Do NOT fix — judge
 
 ## CONTEXT
 Goal: {goal} | Branch: {branch}
-The build step just ran ({previous}). Walk the diff as the oracle.`,
+The build and design steps just ran (last: {previous}). Walk the diff as the oracle.`,
         },
         {
           id: "ui-check",
@@ -247,7 +282,7 @@ Walkthrough outcome:
         {
           id: "test",
           execution: "subagent",
-          agent: "worker",
+          agent: "qa-engineer",
           skill: "kstack-qa",
           requires: ["browse"],
           // T09: ambient AC(scope-bank) when the ports land.
@@ -260,6 +295,7 @@ Stop when: every user-facing flow the feature touches has been exercised once. R
 
 ## CONTEXT
 Goal: {goal} | Branch: {branch}
+Output mode: record
 plan.md describes intended behavior; the diff is the oracle for what shipped.`,
         },
       ],
@@ -375,12 +411,6 @@ const investigate: Workflow = {
   id: "investigate",
   name: "Bug Investigation",
   description: "Production hotfix: reproduce, confirm root cause, minimal fix, verify",
-  intents: [
-    { pattern: /\b(debug|fix\s+(this|the)\s+bug|why\s+is\s+.+\s+broken|root\s+cause|investigate)\b/i, weight: 0.9 },
-    { pattern: /\b(error|500|stack\s*trace|exception|crash|panic)\b/i, weight: 0.7 },
-    { pattern: /\b(it\s+was\s+working|stopped\s+working|broke|regression)\b/i, weight: 0.65 },
-    { pattern: /\b(something's wrong|not working|doesn't work|wtf)\b/i, weight: 0.6 },
-  ],
   phases: [
     {
       id: "explore",
@@ -416,6 +446,7 @@ Probe graft-first when available; fall back to ripgrep.`,
       steps: [
         {
           id: "triage",
+          needsUser: true, // interviews the user
           execution: "main",
           skill: "kstack-triage",
           signal: { kind: "artifact", value: "bug-report.md" },
@@ -556,8 +587,12 @@ bug-report.md names the cause; the patch diff is the claim under test.`,
       name: "Regression QA",
       execution: "main",
       needs: ["fix"],
-      enabled: "auto", // browse if the fix touched UI; suite coverage may auto-skip
-      autoWhen: (ctx) => ctx.git.hasUncommittedChanges,
+      enabled: "auto", // the fix changed something since the run started
+      // A fix the worker already committed leaves a clean tree — HEAD moving
+      // past the run-start commit counts too.
+      autoWhen: (ctx) =>
+        ctx.git.hasUncommittedChanges ||
+        (!!ctx.state.baseHead && !!ctx.git.head && ctx.git.head !== ctx.state.baseHead),
       loopBackTo: "fix",
       maxAttempts: sprintMaxAttempts(),
       feedbackFrom: "regression-qa",
@@ -565,18 +600,19 @@ bug-report.md names the cause; the patch diff is the claim under test.`,
         {
           id: "test",
           execution: "subagent",
-          agent: "worker",
+          agent: "qa-engineer",
           skill: "kstack-qa",
           requires: ["browse"],
           signal: { kind: "verdict", value: "status" },
           task: `## DELIVERABLE
-A browser regression pass around the fix's blast radius: adjacent flows exercised, emit \`--verdict status==green\` / \`==orange\` / \`==red\` in your step record plus \`--evidence\` per finding.
+A browser regression pass around the fix's blast radius: adjacent flows exercised, emit \`--verdict status==green\` / \`==orange\` / \`==red\` in your step record plus \`--evidence\` per finding, and append the \`## Regression QA\` section to bug-report.md.
 
 ## STOP CONDITION
 Stop when: the flows the fix could have touched are exercised once. Report, do NOT fix.
 
 ## CONTEXT
 Bug: {goal} | Branch: {branch}
+Output mode: case-file
 The fix diff is the blast radius; bug-report.md names the original symptom.`,
         },
       ],
@@ -614,10 +650,6 @@ const review: Workflow = {
   id: "review",
   name: "Code Review",
   description: "Evaluate code not produced by a run — external PRs, own diffs, dirty worktree",
-  intents: [
-    { pattern: /\b(review|check my code|look at (my|the) changes|diff check|pre-landing)\b/i, weight: 0.85 },
-    { pattern: /\b(code review|pr review|check the diff)\b/i, weight: 0.8 },
-  ],
   asks: [
     { var: "target", question: "What is being reviewed?", options: ["external", "own"], default: "external" },
   ],
@@ -712,7 +744,7 @@ The resolved diff from the previous step is the subject.`,
         {
           id: "test",
           execution: "subagent",
-          agent: "worker",
+          agent: "qa-engineer",
           skill: "kstack-qa",
           requires: ["browse"],
           signal: { kind: "verdict", value: "status" },
@@ -724,6 +756,7 @@ Stop when: the changed flows have been exercised once. Report, do NOT fix.
 
 ## CONTEXT
 Goal: {goal} | Branch: {branch}
+Output mode: record
 The resolved diff names what changed.`,
         },
       ],
@@ -827,11 +860,6 @@ const discover: Workflow = {
   id: "discover",
   name: "Product Discovery",
   description: "Technical discovery & idea sharpening: refine raw ideas or stress-test designs into a solid direction",
-  intents: [
-    { pattern: /\b(office[- ]hours|product (discovery|direction)|what should (i|we) build|improve the product|discover)\b/i, weight: 0.85 },
-    { pattern: /\b(explore ideas?|brainstorm (product|feature)|refine (idea|feature)|stress[- ]test (idea|design))\b/i, weight: 0.75 },
-    { pattern: /\b(find the wedge|shape (a|this) feature)\b/i, weight: 0.7 },
-  ],
   phases: [
     {
       id: "session",
@@ -840,16 +868,19 @@ const discover: Workflow = {
       steps: [
         {
           id: "session",
+          needsUser: true, // interviews the user
           execution: "main",
           skill: "kstack-office-hours",
           // Cross-run handoff (NOT ephemeral): .kstack/discover/ outlives the
           // run — a later develop.evolve reads it instead of a raw idea.
-          signal: { kind: "artifact", value: ".kstack/discover/direction.md" },
+          // One file per session, named after its content: a previous run's
+          // file can never satisfy this run's signal (mtime ≥ run start).
+          signal: { kind: "artifact", value: ".kstack/discover/direction-*.md" },
           task: `## DELIVERABLE
-\`.kstack/discover/direction.md\` — the sharpened direction from the discovery session (durable handoff artifact, never ephemeral).
+\`.kstack/discover/direction-<slug>.md\` — a NEW file for this session, <slug> = 3-6 kebab-case words naming the direction's essence (e.g. \`direction-offline-first-sync.md\`). The sharpened direction from the discovery session (durable handoff artifact, never ephemeral). Earlier direction files stay untouched.
 
 ## STOP CONDITION
-Stop when: direction.md exists on disk and captures the settled direction, scope boundaries, and architectural choices. Interactive discovery and technical sharpening, not implementation code.
+Stop when: the new direction file exists on disk and captures the settled direction, scope boundaries, and architectural choices. Interactive discovery and technical sharpening, not implementation code.
 
 ## CONTEXT
 Goal: {goal} | Branch: {branch}`,
@@ -863,10 +894,6 @@ const audit: Workflow = {
   id: "audit",
   name: "Codebase Audit",
   description: "Structured codebase re-read: incremental findings file, resume-safe, hands off to investigate",
-  intents: [
-    { pattern: /\b(audit|code audit|re-?read the codebase|architecture audit|review the whole (repo|codebase))\b/i, weight: 0.85 },
-    { pattern: /\b(technical debt|health check|code quality scan)\b/i, weight: 0.7 },
-  ],
   phases: [
     {
       id: "walk",
@@ -879,16 +906,16 @@ const audit: Workflow = {
           skill: "kstack-mindrun",
           // Cross-run handoff: each finding can become an investigate run;
           // written incrementally = real resume on a long walk.
-          signal: { kind: "artifact", value: ".kstack/audit/findings.md" },
+          signal: { kind: "artifact", value: ".kstack/audit/findings-*.md" },
           task: `## DELIVERABLE
-\`.kstack/audit/findings.md\` written INCREMENTALLY during the walk — every finding appended as discovered (progress checkpoint + handoff queue).
+\`.kstack/audit/findings-<slug>.md\` — a NEW file for this audit, <slug> = 3-6 kebab-case words naming the audited scope (e.g. \`findings-orchestrator-verdict-routing.md\`), written INCREMENTALLY during the walk — every finding appended as discovered (progress checkpoint + handoff queue). Earlier findings files stay untouched.
 
 ## STOP CONDITION
-Stop when: the structured walk is complete and findings.md holds the full set. Detect, do NOT fix.
+Stop when: the structured walk is complete and the findings file holds the full set. Detect, do NOT fix.
 
 ## CONTEXT
 Goal: {goal} | Branch: {branch}
-Interrupted walks resume from findings.md — dedup-check before appending.`,
+Interrupted walks resume from the findings file THIS run created (the newest findings-*.md) — dedup-check before appending.`,
         },
       ],
     },
@@ -905,14 +932,10 @@ const sprint: Workflow = {
   id: "sprint",
   name: "Sprint (Agile Pipeline)",
   description: "Agile sprint: story, capability, design, architect gate, backlog, implement, QA + devsecops gates, archive",
-  intents: [
-    { pattern: /\b(sprint|scrum)\b/i, weight: 0.9 },
-    { pattern: /\b(user stor(y|ies)|product backlog|sprint backlog)\b/i, weight: 0.85 },
-    { pattern: /\b(agile pipeline|domain-driven design sprint)\b/i, weight: 0.8 },
-  ],
   asks: [
     { var: "scope", question: "Sprint scope?", options: ["mixed", "frontend", "backend"], default: "mixed" },
-    { var: "parallel", question: "Run BE and FE lanes in parallel?", options: ["no", "yes"], default: "no", when: { var: "scope", equals: "mixed" } },
+    // `parallel` (BE∥FE lanes) returns with the lane dispatcher — asking it
+    // before then changed nothing.
   ],
   phases: [
     {
@@ -950,6 +973,7 @@ Probe graft-first when available; fall back to ripgrep.`,
       steps: [
         {
           id: "evolve",
+          needsUser: true, // interviews the user
           execution: "main",
           skill: "kstack-idea-refine",
           signal: { kind: "artifact", value: "understand.md" },
@@ -967,6 +991,7 @@ Exploration notes:
         },
         {
           id: "interrogate",
+          needsUser: true, // interviews the user
           execution: "main",
           skill: "kstack-grilling",
           signal: { kind: "marker", value: "INTERROGATE-DONE" },
@@ -1171,6 +1196,7 @@ ${REC("TASKS-DONE")}`,
       loopBackTo: "implement",
       maxAttempts: sprintMaxAttempts(),
       feedbackFrom: "implement",
+      failFast: true, // a failed walker loops now — later lanes would build on rejected work
       steps: [
         {
           id: "backend",
@@ -1215,8 +1241,7 @@ The backend step just ran ({previous}); the diff is the oracle.`,
           agent: "frontend-developer",
           skill: "kstack-test-driven-development",
           skipWhen: { var: "scope", equals: "backend" },
-          // T09: ambient [ponytail, AC-FE, design-taste] when the ports land.
-          ambientSkills: ["kstack-design-taste-frontend"],
+          // T09: ambient [ponytail, AC-FE] when the ports land.
           signal: { kind: "marker", value: "FRONTEND-DONE" },
           task: `## DELIVERABLE
 Frontend implementation consuming the backend interfaces from tasks.md: code + tests green + UI wired to the agreed contracts. Emits summary_FE.md.
@@ -1228,6 +1253,7 @@ Stop when: every assigned frontend task's success condition is demonstrably met 
 Sprint {sprint} | Goal: {goal} | Branch: {branch}
 The backend handoff ({previous}) carries contracts — consume, do not re-implement. Glossary synonyms are review-blocking defects.`,
         },
+        DESIGN_STEP("frontend-developer", "tasks.md"),
         {
           id: "fe-walk",
           execution: "subagent",
@@ -1243,7 +1269,7 @@ Stop when: every frontend task in tasks.md has been traced once. Judge, do NOT f
 
 ## CONTEXT
 Sprint {sprint} | Goal: {goal} | Branch: {branch}
-The frontend step just ran ({previous}); the diff is the oracle.`,
+The frontend and design steps just ran (last: {previous}); the diff is the oracle.`,
         },
         {
           id: "ui-check",
@@ -1293,6 +1319,7 @@ Stop when: every user-facing AC from user-story.md has been exercised once. Repo
 
 ## CONTEXT
 Sprint {sprint} | Goal: {goal} | Branch: {branch}
+Output mode: record
 tasks.md names what shipped; user-story.md names what was promised.`,
         },
       ],

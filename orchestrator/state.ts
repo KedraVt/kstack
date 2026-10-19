@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { WorkflowState, PhaseResult, WorkflowPhase, WorkflowStep, ParsedVerdict, VerdictParkCause } from "./types.ts";
 import { sprintMaxAttempts, sprintArchMaxAttempts, loopbacksEnabled, verdictsEnabled } from "./config.ts";
 import { buildRetryFeedback, EXPECTATIONS, NEGATIVE_VALUES, isVerdictBearing } from "./verdicts.ts";
-import { mergePhaseVerdicts } from "./records.ts";
+import { mergePhaseVerdicts, phaseRecordFeedback } from "./records.ts";
 import { securityReviewArtifactRel, SPRINT_PLACEHOLDER, ephemeralArtifactsFor } from "./artifacts.ts";
 
 const ENTRY_TYPE = "kstack-wf-state";
@@ -105,6 +105,7 @@ export function loadActiveState(ctx: ExtensionContext): WorkflowState | null {
             : [];
         }
         if (typeof normalized.resumeMode !== "boolean") delete normalized.resumeMode;
+        if (typeof normalized.baseHead !== "string") delete normalized.baseHead;
         if (typeof normalized.stepGates !== "boolean") delete normalized.stepGates;
         if (typeof normalized.stepGate !== "boolean") delete normalized.stepGate;
         if (!Number.isInteger(normalized.reissues) || (normalized.reissues as number) < 0) delete normalized.reissues;
@@ -137,7 +138,10 @@ export function createState(workflowId: string, goal: string): WorkflowState {
     // deleted at terminal status (TASK_07).
     ephemeralArtifacts: ephemeralArtifactsFor(workflowId),
     // S3 ledger run id — a restart/resume appends to the same JSONL file.
-    runId: `${new Date().toISOString()}-${Math.random().toString(36).slice(2, 6)}`,
+    // Filesystem-safe from birth: agents paste $KSTACK_RUN_ID into paths, and a
+    // raw ':' on Windows becomes a different (private-use) character than the
+    // sanitized record dir — screenshots and records then split into two dirs.
+    runId: `${new Date().toISOString().replace(/[:.]/g, "-")}-${Math.random().toString(36).slice(2, 6)}`,
   };
 }
 
@@ -158,6 +162,35 @@ export interface AdvanceOptions {
 function ceilingFor(targetPhaseId: string, declared?: number): number {
   if (typeof declared === "number") return declared;
   return targetPhaseId === "system-design" ? sprintArchMaxAttempts() : sprintMaxAttempts();
+}
+
+/** Every phase a gate's routing can charge attempts to: loopBackTo, loopBackOn targets, onComplete. */
+export function loopEdges(phase: WorkflowPhase | undefined): string[] {
+  if (!phase) return [];
+  const edges = [phase.loopBackTo, ...Object.values(phase.loopBackOn ?? {}), phase.onComplete];
+  return [...new Set(edges.filter((e): e is string => !!e))];
+}
+
+/**
+ * Loop-back target for a human "return" decision: the loopBackOn edge of the
+ * first emitted negative value, else loopBackTo, else the first loopBackOn
+ * edge (investigate.verify declares only loopBackOn).
+ */
+export function returnTargetFor(phase: WorkflowPhase | undefined, parsed?: ParsedVerdict | null): string | undefined {
+  if (!phase) return undefined;
+  for (const value of Object.values(parsed?.verdicts ?? {})) {
+    const target = phase.loopBackOn?.[value];
+    if (target) return target;
+  }
+  return phase.loopBackTo ?? Object.values(phase.loopBackOn ?? {})[0];
+}
+
+/** Gate feedback for a looped-back phase: the gate's records first (S4), legacy artifacts as fallback. */
+function loopFeedback(state: WorkflowState, phase: WorkflowPhase, parsed: ParsedVerdict | null | undefined, cwd: string): string {
+  return (
+    phaseRecordFeedback(phase, cwd, state.workflowId, state.runId, state.results) ||
+    (parsed ? buildRetryFeedback(parsed, phase.feedbackFrom ?? phase.id, cwd, state.sprintNumber) : "")
+  );
 }
 
 export interface RouteAction {
@@ -370,8 +403,6 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
       return parkForUnreadableVerdict({ ...state, pendingVerdict: pvStash }, phase!.id, action.cause ?? "unroutable");
     }
 
-    const sprintNumber = next.sprintNumber;
-
     if (action.kind === "freeze") {
       // D3: park WITHOUT advancing or burning attempts; only an explicit
       // human re-issue (unfreeze panel) resumes.
@@ -428,7 +459,7 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
         targetPhaseId: action.target!,
         attempt: runsDone + 1,
         maxAttempts: ceiling,
-        feedback: buildRetryFeedback(parsed, phase!.feedbackFrom ?? phase!.id, cwd, sprintNumber),
+        feedback: loopFeedback(state, phase!, parsed, cwd),
       };
       return next;
     }
@@ -453,7 +484,9 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
     }
     purgeStepResults(next.results, opts!.phases!, targetIndex, state.phaseIndex);
     const target = opts!.phases![targetIndex];
-    const ceiling = ceilingFor(phase.onComplete, target.maxAttempts);
+    // Same ceiling rule as verdict loop-backs (and reissueGate): the gate's
+    // declared maxAttempts wins over the target's.
+    const ceiling = ceilingFor(phase.onComplete, phase.maxAttempts ?? target.maxAttempts);
     const runsDone = (next.attempts[phase.onComplete] ?? 0) + 1;
     next.attempts[phase.onComplete] = runsDone;
     if (runsDone >= ceiling) {
@@ -503,7 +536,7 @@ export function forceApproveParked(state: WorkflowState, phases?: WorkflowPhase[
   // must get a fresh ceiling rather than inheriting a burned one.
   const gate = phases?.[state.phaseIndex];
   const attempts = { ...(state.attempts ?? {}) };
-  if (gate?.loopBackTo) delete attempts[gate.loopBackTo];
+  for (const edge of loopEdges(gate)) delete attempts[edge];
   return {
     ...state,
     status: "active",
@@ -535,10 +568,11 @@ export function returnParkedWithContext(state: WorkflowState, phases: WorkflowPh
   const phaseId = state.verdictPark ?? state.freezeInfo?.phaseId;
   if (!phaseId) return null;
   const phase = phases.find((p) => p.id === phaseId);
-  if (!phase?.loopBackTo) return null;
-  const targetIndex = phases.findIndex((p) => p.id === phase.loopBackTo);
-  if (targetIndex < 0) return null;
   const prior = state.pendingVerdict?.parsed;
+  const loopTarget = returnTargetFor(phase, prior);
+  if (!phase || !loopTarget) return null;
+  const targetIndex = phases.findIndex((p) => p.id === loopTarget);
+  if (targetIndex < 0) return null;
   const next: WorkflowState = {
     ...state,
     status: "active",
@@ -553,14 +587,11 @@ export function returnParkedWithContext(state: WorkflowState, phases: WorkflowPh
     freezeInfo: undefined,
     pausedReason: undefined,
     retryContext: {
-      targetPhaseId: phase.loopBackTo,
-      attempt: (state.attempts?.[phase.loopBackTo] ?? 0) + 1,
-      maxAttempts: ceilingFor(phase.loopBackTo, phase.maxAttempts),
+      targetPhaseId: loopTarget,
+      attempt: (state.attempts?.[loopTarget] ?? 0) + 1,
+      maxAttempts: ceilingFor(loopTarget, phase.maxAttempts),
       feedback:
-        [
-          prior ? buildRetryFeedback(prior, phase.feedbackFrom ?? phase.id, cwd, state.sprintNumber) : "",
-          extraFeedback,
-        ]
+        [loopFeedback(state, phase, prior, cwd), extraFeedback]
           .filter(Boolean)
           .join("\n\n") || "(no structured blockers extracted — see the phase report above)",
     },
@@ -597,7 +628,7 @@ export function unfreeze(state: WorkflowState, phases?: WorkflowPhase[]): Workfl
 export function forceContinuePastGate(state: WorkflowState, phases?: WorkflowPhase[]): WorkflowState {
   const gate = phases?.[state.phaseIndex];
   const attempts = { ...(state.attempts ?? {}) };
-  if (gate?.loopBackTo) delete attempts[gate.loopBackTo];
+  for (const edge of loopEdges(gate)) delete attempts[edge];
   // INV-01: moving phaseIndex clears stepIndex (stale cursor → skipped gates).
   return {
     ...state,
@@ -788,12 +819,16 @@ export function reissueGate(state: WorkflowState, phases: WorkflowPhase[]): Work
   if (!reason.startsWith("loop-exhausted:")) return resumeState(state);
   const gatePhase = phases[state.phaseIndex];
   const attempts = { ...(state.attempts ?? {}) };
-  if (gatePhase?.loopBackTo) {
-    const ceiling = ceilingFor(gatePhase.loopBackTo, gatePhase.maxAttempts);
+  // The exhausted edge is named in the reason ("loop-exhausted:<target> after N
+  // runs") — loopBackOn/onComplete gates have no loopBackTo to fall back on.
+  const target = reason.slice("loop-exhausted:".length).split(" ")[0];
+  const targetPhase = phases.find((p) => p.id === target);
+  if (targetPhase) {
+    const ceiling = ceilingFor(target, gatePhase?.maxAttempts ?? targetPhase.maxAttempts);
     // ceiling - 2, deliberately unclamped: a ceiling of 1 or 2 must still
     // grant the promised ONE verified run (negative counters make the next
     // rejection's runsDone = attempts + 1 < ceiling).
-    attempts[gatePhase.loopBackTo] = ceiling - 2;
+    attempts[target] = ceiling - 2;
   }
   // Re-running the gate phase restarts it — INV-01: a stale step cursor must
   // not carry into the re-run (harmless today: no stepped phase is a gate).

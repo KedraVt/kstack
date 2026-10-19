@@ -44,6 +44,13 @@ export function gateInventory(workflow: Workflow, wfCtx?: WorkflowContext): Gate
   // keep the pre-S4 row set.
   const enabled = wfCtx ? enabledPhaseIds(workflow, wfCtx) : null;
   workflow.phases.forEach((phase, index) => {
+    const before = rows.length;
+    collectRow(phase, index);
+    if (rows.length > before && phase.steps?.some((s) => s.needsUser)) rows[rows.length - 1].interactive = true;
+  });
+  return rows;
+
+  function collectRow(phase: Workflow["phases"][number], index: number): void {
     if (phase.id === "push-pr") return; // never a pre-flight row
     const name = `${index + 1}. ${phase.name}`;
     // S4: enabled:"auto" phases are the panel's "engine detects, user forces"
@@ -51,9 +58,10 @@ export function gateInventory(workflow: Workflow, wfCtx?: WorkflowContext): Gate
     // resolution is "off", because an "auto" override force-runs them.
     if (phase.enabled === "auto") {
       const skippable = enabled ? derivedSkippable(workflow, enabled, phase.id) : undefined;
+      const sideEffect = phase.steps?.some((s) => s.sideEffect) ? { warning: true } : {};
       rows.push(skippable === false
-        ? { phaseId: phase.id, name, kind: "optional", skippable: false }
-        : { phaseId: phase.id, name, kind: "optional" });
+        ? { phaseId: phase.id, name, kind: "optional", skippable: false, detect: true, ...sideEffect }
+        : { phaseId: phase.id, name, kind: "optional", detect: true, ...sideEffect });
       return;
     }
     if (wfCtx && resolvePhaseEnabled(phase, wfCtx).enabled === "off") return;
@@ -91,8 +99,7 @@ export function gateInventory(workflow: Workflow, wfCtx?: WorkflowContext): Gate
     if (manual && phase.advance === "manual") {
       rows.push({ phaseId: phase.id, name, kind: "manual" });
     }
-  });
-  return rows;
+  }
 }
 
 /** getSettingsListTheme throws when the interactive theme isn't initialized. */
@@ -107,8 +114,25 @@ function settingsTheme(): SettingsListTheme {
 const DESCRIPTIONS: Record<GateRow["kind"], string> = {
   optional: "human: pause for your decision · auto: always run · skip: never run",
   entry: "side-effect phase — human: approve before it runs · auto: run unattended",
-  manual: "human: pause for approval · auto: continue without pausing",
+  manual: "human: pause for approval after its last step · auto: continue without pausing",
 };
+const DETECT_DESCRIPTION = "detect: the engine decides from the repo/run · run: always run · skip: never run";
+const DETECT_SIDE_EFFECT_DESCRIPTION = "⚠ side effect — detect: engine decides, asks you before the side effect · run: always run, side effect UNATTENDED · skip: never run";
+const INTERACTIVE_DESCRIPTION = "interactive — it interviews you, so it cannot run unattended: human or skip only";
+
+/** Panel values for a row — display labels; `toOverride` maps them back to gateOverrides. */
+function rowValues(row: GateRow): { values: string[]; initial: string; description: string } {
+  const skip = row.kind === "optional" && row.skippable !== false;
+  if (row.interactive) return { values: skip ? ["human", "skip"] : ["human"], initial: "human", description: INTERACTIVE_DESCRIPTION };
+  if (row.detect) return { values: skip ? ["detect", "run", "skip"] : ["detect", "run"], initial: "detect", description: row.warning ? DETECT_SIDE_EFFECT_DESCRIPTION : DETECT_DESCRIPTION };
+  // INV-05: "skip" is only selectable on optional rows; INV-13 further removes
+  // it from optional producers an enabled phase still needs.
+  return { values: skip ? ["human", "auto", "skip"] : ["human", "auto"], initial: "human", description: DESCRIPTIONS[row.kind] };
+}
+
+function toOverride(label: string | undefined): "auto" | "skip" | undefined {
+  return label === "auto" || label === "run" ? "auto" : label === "skip" ? "skip" : undefined;
+}
 
 /**
  * SettingsList with a title header — ctx.ui.custom renders the component with
@@ -153,15 +177,10 @@ export async function configureGates(
       currentValue: "human-gate",
       values: ["human-gate", "selection-gate"],
     },
-    ...rows.map<SettingItem>((row) => ({
-      id: row.phaseId,
-      label: `${row.warning ? "⚠ " : ""}${row.name}`,
-      description: DESCRIPTIONS[row.kind],
-      currentValue: "human",
-      // INV-05: "skip" is only selectable on optional rows; INV-13 further
-      // removes it from optional producers an enabled phase still needs.
-      values: row.kind === "optional" && row.skippable !== false ? ["human", "auto", "skip"] : ["human", "auto"],
-    })),
+    ...rows.map<SettingItem>((row) => {
+      const { values, initial, description } = rowValues(row);
+      return { id: row.phaseId, label: `${row.warning ? "⚠ " : ""}${row.name}`, description, currentValue: initial, values };
+    }),
     { id: "__done__", label: "▶ Start workflow", currentValue: "", values: ["start"] },
   ];
   const values: Record<string, string> = {};
@@ -189,8 +208,9 @@ export async function configureGates(
           const gateOverrides: GateConfiguration["gateOverrides"] = {};
           if (gateMode === "selection-gate") {
             for (const row of rows) {
-              const v = values[row.phaseId];
-              if (v === "auto" || v === "skip") gateOverrides[row.phaseId] = v;
+              const v = toOverride(values[row.phaseId]);
+              if (v === "auto" && row.interactive) continue; // never offered; refuse anyway
+              if (v) gateOverrides[row.phaseId] = v;
             }
           }
           done({ gateMode, gateOverrides });

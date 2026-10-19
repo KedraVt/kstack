@@ -28,7 +28,8 @@ export function ensureOperationalDirsIgnored(cwd: string): void {
     const gi = path.join(cwd, ".gitignore");
     const existing = fs.existsSync(gi) ? fs.readFileSync(gi, "utf-8") : "";
     const have = new Set(existing.split(/\r?\n/).map((l) => l.trim()));
-    const missing = [".kstack/ledger/", ".kstack/runs/"].filter((l) => !have.has(l));
+    // .taste-skill/ = the design skill's working files when run outside a kstack step.
+    const missing = [".kstack/ledger/", ".kstack/runs/", ".taste-skill/"].filter((l) => !have.has(l));
     if (!missing.length) return;
     const prefix = existing && !existing.endsWith("\n") ? "\n" : "";
     fs.appendFileSync(gi, `${prefix}# kstack operational dirs (session data — never commit)\n${missing.join("\n")}\n`, "utf-8");

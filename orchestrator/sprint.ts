@@ -23,13 +23,16 @@ export interface SprintDiscovery {
   anomaly: string | null;
 }
 
-const USER_STORY_RE = /^user-story_(\d+)\.md$/;
+// S4: user-story.md is a flat ephemeral and only system-design_XX/ADR-log_XX
+// survive into the archive — scanning user-story_XX alone numbered every
+// sprint 01. Legacy user-story_XX still counts.
+const SPRINT_DOC_RE = /^(?:user-story|system-design|ADR-log)_(\d+)\.md$/;
 
 function scanDir(dir: string): Map<number, string[]> {
   const found = new Map<number, string[]>();
   try {
     for (const entry of fs.readdirSync(dir)) {
-      const match = USER_STORY_RE.exec(entry);
+      const match = SPRINT_DOC_RE.exec(entry);
       if (!match) continue;
       const n = Number(match[1]);
       if (!Number.isInteger(n)) continue;
@@ -98,7 +101,12 @@ export function computeNextSprintNumber(cwd: string): SprintDiscovery {
     };
   }
 
-  const allNumbers = new Set<number>([...root.keys(), ...archived.keys()]);
+  // Archive slot names (sprint_NN) count toward the max even when the slot's
+  // files were renamed/removed — they never feed the collision guard above.
+  const slotNumbers = archiveDirs
+    .map((d) => Number(/^sprint_(\d+)$/.exec(path.basename(d))?.[1]))
+    .filter((n) => Number.isInteger(n));
+  const allNumbers = new Set<number>([...root.keys(), ...archived.keys(), ...slotNumbers]);
 
   // Anomaly 2: more than one plausible CURRENT sprint in root (>1 distinct
   // un-archived user-story numbers) — cannot tell which one is live.

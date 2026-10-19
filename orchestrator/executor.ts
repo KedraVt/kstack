@@ -4,21 +4,20 @@ import { getWorkflow } from "./workflows.ts";
 import { saveState, advancePhase, gateOptionalPhase, gateEntry, parkForUnreadableVerdict, loadActiveState, recordStepResult, type AdvanceOptions } from "./state.ts";
 import { resolvePhaseEnabled, stepSkippedByVars } from "./enabled.ts";
 import { probeCapabilities, capabilitiesUnprobed, missingRequires, missingPrefers } from "./capabilities.ts";
-import { buildPhaseInstructions, buildDeterministicPlan, mainContractFor, buildStepInstructions, buildStepTask, interpolateStepTask, resolvePlanFilePath, buildRecordContract, sprintDodSuffix } from "./templates.ts";
+import { buildPhaseInstructions, buildDeterministicPlan, mainContractFor, buildStepInstructions, buildStepTask, interpolateStepTask, buildRecordContract, sprintDodSuffix, retryContextBlock } from "./templates.ts";
 import { detectGitContext, type ExecFn } from "./git.ts";
 import { runSubagent, type SpawnRequest, type SpawnResult, resolveTimeoutMs } from "./spawn.ts";
 import { parseHandoffVerdicts, verifyArtifactVerdicts, mergeParseOutcomes } from "./verdicts.ts";
 import { computeNextSprintNumber } from "./sprint.ts";
-import { deterministicSubagents, skillsEnabled, optionalPhases, maxRunTokens, delegationBudgetMs, modelTierFor, verdictsEnabled, timeoutClassFor, manualGates } from "./config.ts";
+import { deterministicSubagents, skillsEnabled, optionalPhases, maxRunTokens, delegationBudgetMs, modelTierFor, verdictsEnabled, timeoutClassFor, manualGates, numberEnv } from "./config.ts";
 import { ensureRun, recordDelegatedStep, writeRunReport, recordLiveness, recordTokens, totalTokensUsed } from "./telemetry.ts";
 import { extractHandoff } from "./handoff.ts";
 import { isRefutedStrategy, isValidatedStrategy } from "./skip.ts";
 import { replaceExact } from "./text.ts";
 import { appendLedger } from "./ledger.ts";
-import { reportCliPath, verdictKeysFor } from "./records.ts";
+import { reportCliPath, verdictKeysFor, clearPhaseRecords } from "./records.ts";
 import { newStepRun, feedStepEvent, detectStuck, checkStepBudgets, stepBudgetDefaults, beginStepWatch, endStepWatch } from "./stuck.ts";
-import { phaseArtifactPaths, cleanupEphemeralArtifacts, sprintGateEphemerals } from "./artifacts.ts";
-import { existsSync } from "node:fs";
+import { cleanupEphemeralArtifacts, sprintGateEphemerals, artifactSignalFiles, runStartMs } from "./artifacts.ts";
 
 // --- Sequential-chain resilience (STEP 2f) -----------------------------------
 
@@ -231,6 +230,39 @@ export function advanceBlockReason(state: WorkflowState): string | null {
   return null;
 }
 
+/**
+ * Terminal bookkeeping shared by EVERY completion path (executor recursion,
+ * kstack_advance on the last phase, the optional-skip panel): flush the run
+ * report, delete the run's ephemerals (S4/§10.5 — every failure is
+ * ledger-noted, cleanup never crashes the finish), persist "completed".
+ */
+export function finalizeRun(pi: ExtensionAPI, ctx: ExtensionContext, state: WorkflowState): WorkflowState {
+  const warn = (m: string) => {
+    try {
+      ctx.ui.notify(m, "warning");
+    } catch {
+      /* stale ctx */
+    }
+  };
+  writeRunReport(ctx.cwd, state.workflowId);
+  if ((state.ephemeralArtifacts ?? []).length > 0) {
+    const { deleted, failed } = cleanupEphemeralArtifacts(ctx.cwd, state.ephemeralArtifacts!, warn);
+    appendLedger(ctx.cwd, state, {
+      kind: "phase",
+      phaseId: state.workflowId,
+      payload: { summary: `ephemeral cleanup: ${deleted.length} deleted${failed.length ? `, ${failed.length} failed` : ""}`, artifacts: deleted },
+    }, () => {});
+  }
+  const done: WorkflowState = { ...state, status: "completed", ephemeralArtifacts: [] };
+  saveState(pi, done);
+  try {
+    ctx.ui.setStatus("kstack", undefined);
+  } catch {
+    /* stale ctx */
+  }
+  return done;
+}
+
 export function launchPhase(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -300,25 +332,7 @@ export async function executeCurrentPhase(
   // it, so without this check the skipWhen/optional recursion re-entered the
   // same phase and skipped forever.
   if (!phase || state.status === "completed") {
-    // Workflow completed: flush the structured run report (STEP 0 telemetry).
-    writeRunReport(ctx.cwd, state.workflowId);
-    // S4/§10.5: ephemeral THINK docs die with the run — delete at terminal
-    // status, ledger-note every failure (cleanup never crashes the finish).
-    if ((state.ephemeralArtifacts ?? []).length > 0) {
-      const { deleted, failed } = cleanupEphemeralArtifacts(ctx.cwd, state.ephemeralArtifacts!, (m) => notify(m, "warning"));
-      appendLedger(ctx.cwd, state, {
-        kind: "phase",
-        phaseId: state.workflowId,
-        payload: { summary: `ephemeral cleanup: ${deleted.length} deleted${failed.length ? `, ${failed.length} failed` : ""}`, artifacts: deleted },
-      }, () => {});
-      state = { ...state, ephemeralArtifacts: [] };
-    }
-    saveState(pi, { ...state, status: "completed" });
-    try {
-      ctx.ui.setStatus("kstack", undefined);
-    } catch {
-      /* stale ctx */
-    }
+    finalizeRun(pi, ctx, state);
     notify(`Workflow "${workflow.name}" completed!`, "info");
     return;
   }
@@ -355,7 +369,9 @@ export async function executeCurrentPhase(
   // it loops to system-design and reviews documents — main is legitimate
   // there. Fail closed like every other park: the /kstack panel's Resume
   // re-runs this function, which re-detects the branch.
-  if (state.workflowId === "sprint" && phase.loopBackTo === "implement" && git.isMainBranch) {
+  // implement itself is excluded: its S4 self-loop (loopBackTo:"implement")
+  // is not a diff audit, and its backend step is what creates the task branch.
+  if (state.workflowId === "sprint" && phase.loopBackTo === "implement" && phase.id !== "implement" && git.isMainBranch) {
     const parked = { ...state, status: "paused" as const, pausedReason: `branch-violation:${phase.id} on ${git.branch}` };
     saveState(pi, parked);
     setKstackStatus(ctx, parked, workflow);
@@ -479,6 +495,9 @@ export async function executeCurrentPhase(
   // on, the step runner dispatches on phase.steps[stepIndex] — main steps get
   // instructions; delegated steps spawn through the same chain machinery.
   if (stepped && state.stepIndex === undefined) {
+    // Entering from the first step means every step re-runs — a previous
+    // attempt's records must not satisfy this attempt's signals or verdicts.
+    if (state.runId) clearPhaseRecords(ctx.cwd, state.runId, phase.id);
     state = { ...state, stepIndex: 0 };
     saveState(pi, state);
     wfCtx.state = state;
@@ -565,6 +584,7 @@ export async function executeCurrentPhase(
   // Delegation no longer depends on the model choosing to call the
   // `subagent` tool — it happens by construction.
   let delegationPrefix = "";
+  const retryBlock = retryContextBlock(wfCtx, phase.id);
   const delegatedStep = step !== undefined && deterministicSubagents() && step.execution === "subagent";
   const delegatedPhase = !stepped && deterministicSubagents() && phase.execution === "subagent";
   if (delegatedStep || delegatedPhase) {
@@ -599,10 +619,14 @@ export async function executeCurrentPhase(
               // ADR-23: spawn → work → report → exit — the record contract is
               // mandatory for every deterministic delegated step.
               `\n\n${buildRecordContract(step, { workflowId: state.workflowId, phase })}` +
-              (degradedNote ? `\n\n${degradedNote}` : "") + resumeHint,
+              (degradedNote ? `\n\n${degradedNote}` : "") + resumeHint +
+              // The worker that must address a gate's blockers is THIS child —
+              // the retry block reaching only the orchestrator came too late.
+              (retryBlock ? `\n\n${retryBlock}` : ""),
             // Already interpolated — runSteps' own {previous} pass would
             // rewrite the literal token inside the embedded skill digest.
             interpolated: true,
+            ...(step.timeoutSec ? { timeoutMs: numberEnv(`KSTACK_PI_TIMEOUT_STEP_${step.id.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`, step.timeoutSec) as number * 1000 } : {}),
             // ADR-23: the child learns run/phase/step ids + the report CLI
             // path from env — it can emit its own canonical record.
             env: {
@@ -613,6 +637,8 @@ export async function executeCurrentPhase(
               KSTACK_REPORT: reportCliPath(),
               // kstack-report drops verdict keys outside this list (empty = none owned).
               KSTACK_VERDICT_KEYS: verdictKeysFor(state.workflowId, phase, step).join(" "),
+              // Step-declared env (e.g. a skill's working dir under the run folder).
+              ...Object.fromEntries(Object.entries(step.env ?? {}).map(([k, v]) => [k, interpolateStepTask(v, phase, stepIndex!, wfCtx)])),
             },
           }]
         : undefined,
@@ -753,12 +779,11 @@ export async function executeCurrentPhase(
 
   // S3 resume-gate (D28): re-delivering a phase's LAST step whose declared
   // artifact is missing keeps the step open — the note rides the volatile
-  // tail so the stable instruction prefix stays byte-identical.
-  if (step && insidePhase && stepIndex === steps!.length - 1) {
-    const missing = phaseArtifactPaths(phase.id, ctx.cwd, state.sprintNumber, resolvePlanFilePath({ state })).filter((p) => !existsSync(p));
-    if (missing.length > 0) {
-      instructions += `\n\n[resume-gate] Missing expected artifact(s): ${missing.join(", ")} — this step stays OPEN. Produce the artifact first, then call kstack_advance.`;
-    }
+  // tail so the stable instruction prefix stays byte-identical. S4: the
+  // step's own artifact signal is the contract (the legacy per-phase paths
+  // named files the verifier rule now forbids).
+  if (step && insidePhase && stepIndex === steps!.length - 1 && step.signal?.kind === "artifact" && artifactSignalFiles(ctx.cwd, step.signal.value, runStartMs(state.runId)).length === 0) {
+    instructions += `\n\n[resume-gate] Missing expected artifact: ${step.signal.value} — this step stays OPEN. Produce the artifact first, then call kstack_advance.`;
   }
 
   // S3/D28: the main-step watch begins at instruction delivery; any other
@@ -807,7 +832,7 @@ export async function runDeterministicDelegation(
   // S3 delegated step: a prebuilt one-entry plan built from buildStepTask
   // (steps never route through buildDeterministicPlan). S4/ADR-23: `env`
   // carries run/phase/step ids + the kstack-report CLI path into the child.
-  planOverride?: Array<{ agent: string; task: string; interpolated?: boolean; env?: Record<string, string> }>,
+  planOverride?: Array<{ agent: string; task: string; interpolated?: boolean; env?: Record<string, string>; timeoutMs?: number }>,
   // S3/D28 out-param: when set (delegated-step runs only) a StepRun watches the
   // child event stream; a detector trip lands in .trip and aborts the spawn.
   stepGuard?: { stepId: string; trip?: string },
@@ -830,7 +855,7 @@ export async function runDeterministicDelegation(
   const delegationStart = Date.now();
 
   const runSteps = async (
-    steps: Array<{ agent: string; task: string; interpolated?: boolean; env?: Record<string, string> }>,
+    steps: Array<{ agent: string; task: string; interpolated?: boolean; env?: Record<string, string>; timeoutMs?: number }>,
   ): Promise<Array<{ agent: string; result: SpawnResult }>> => {
     const out: Array<{ agent: string; result: SpawnResult }> = [];
     let previous = "";
@@ -914,6 +939,8 @@ export async function runDeterministicDelegation(
         cwd: wfCtx.cwd,
         // S4/ADR-23: run/phase/step ids + kstack-report path for step records.
         env: step.env,
+        // Per-step override (WorkflowStep.timeoutSec) beats the phase class.
+        ...(step.timeoutMs ? { timeoutMs: step.timeoutMs } : {}),
         // STEP 5a: per-class timeout resolved from the phase id.
         phaseId: phase.id,
         // E4/D10 model tiers: inert unless KSTACK_PI_MODEL_FAST/_STRONG are set.
