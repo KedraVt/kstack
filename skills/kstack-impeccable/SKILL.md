@@ -1,6 +1,16 @@
 ---
 name: kstack-impeccable
-description: Audit-and-polish skill for existing frontend interfaces — UX review, visual hierarchy, accessibility, theming, typography, spacing, motion, micro-interactions, error states. Use when the user wants to critique, improve, harden, or delight an existing UI — "audit this page", "polish this component", "this feels bland/loud", dashboards, app shells, forms, onboarding, empty states. Do NOT use for giving a page or app screen a new art direction, restyle or redesign (use kstack-design-taste-frontend) or for backend-only, non-UI work.
+description: >-
+  Audits and polishes an existing UI without changing its art direction: UX
+  review, visual hierarchy, accessibility, typography, spacing, empty and
+  error states, focus and validation states, motion and micro-interactions.
+  Use when the user wants an existing screen, page or component critiqued or
+  improved — "audit this page for UX problems", "polish the empty states",
+  "critique the visual hierarchy", "this modal feels loud, tone it down",
+  "this feels bland", "harden the forms" — even if no skill is named. Do NOT
+  use for a new art direction, restyle or redesign (use
+  kstack-design-taste-frontend), for checking whether features work (use
+  kstack-qa), or for backend-only work.
 license: Apache 2.0
 allowed-tools: Bash(npx impeccable *) Bash(node $KSTACK_EXTENSION_DIR/skills/kstack-impeccable/scripts/*)
 metadata:

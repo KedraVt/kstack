@@ -1,16 +1,15 @@
 ---
 name: kstack-qa
 description: >-
-  Unified QA gate: test a web app like a real user through the browser AND
-  through the test suite, triage GREEN/RED/ORANGE with
-  repro-steps-or-it-doesn't-count, Testability Blockers, zero-flakiness
-  policy. Modes: report-only
-  (findings loop back to developers), fix (atomic-commit bug fixing, requires
-  clean tree), diff-aware (feature-branch verification), regression
-  (baseline.json diff). Use for "test this", "QA this", "does it work",
-  verifying a branch before merge, or validating a fix end-to-end. Do NOT use
-  for root-cause investigation (use kstack-investigate) or release/commit
-  workflow (use kstack-ship).
+  Checks whether a web app actually works: drives it like a real user in the
+  browser and runs the test suite, then reports every bug with severity, repro
+  steps and evidence. Use whenever the user wants a feature, flow, form,
+  branch or fix verified — "test this", "QA this", "click through the signup
+  and checkout like a real user", "does the password reset work? check it in
+  the browser", "run the e2e suite", "verify the fix end to end" — even if no
+  skill is named. Do NOT use for root-cause analysis of a known failure (use
+  kstack-investigate), for UI polish (use kstack-impeccable), or for shipping
+  (use kstack-ship).
 metadata:
   version: "1.1.0"
 compatibility: Requires runtime/browse/dist/browse ($B) for live-browser QA; suite/report modes work without it — browse steps fail closed.

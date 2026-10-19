@@ -1,18 +1,18 @@
 ---
 name: kstack-idea-refine
 description: >-
-  Refines a raw but concrete idea into one chosen direction — diverge
-  through ideation lenses, converge by stress-testing assumptions — written
-  as the one-pager that births the living plan document. Use when the user
-  brings an idea to shape before planning — "refine this idea", "ideate",
-  "explore this idea", "what could this become", "give me options", "poke
-  holes in this" — or an orchestrated run reaches the evolve step
-  (develop's plan phase, sprint's understand phase). Do NOT use for
-  problem discovery when there is no concrete idea yet
-  (use kstack-office-hours), for the requirements interrogation that settles
-  the chosen direction's open decisions (use kstack-grilling), for
-  stress-testing an already-drafted plan (use kstack-plan-eng-review), or
-  for drafting the full plan artifact (use kstack-plan-draft).
+  Shapes a concrete product or feature idea into one chosen direction:
+  generates variations, tests the assumptions that could kill it, cuts it to
+  the smallest buildable version and writes the one-pager that becomes the
+  living plan. Use when the user has an idea and asks to refine, sharpen,
+  expand, vary or judge whether it is worth building — "refine this idea",
+  "give me a few directions", "poke holes in this idea", "what could this
+  become", "turn my vague idea into a one-pager with an MVP scope", "what's
+  the simplest version that still works" — or an orchestrated run reaches the
+  evolve step. Do NOT use for architecture or what-to-build-next discovery
+  (use kstack-office-hours), the requirements interview on a chosen direction
+  (use kstack-grilling), reviewing a drafted plan (use kstack-plan-eng-review)
+  or drafting the plan (use kstack-plan-draft).
 metadata:
   version: "1.0.2"
 compatibility: Writes the embryonic plan doc under .kstack/plans/.

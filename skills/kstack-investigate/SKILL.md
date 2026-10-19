@@ -1,16 +1,16 @@
 ---
 name: kstack-investigate
 description: >-
-  Systematic debugging for any bug, test failure, or unexpected behavior.
-  Iron Law: no fixes without root-cause investigation — five gated phases
-  ending in a structured DEBUG REPORT (DONE / DONE_WITH_CONCERNS / BLOCKED).
-  Use when a test fails, a bug reproduces, a stack trace appears, performance
-  regresses, a build breaks, or the user says "it's broken", "fix this", "why
-  does X fail" — even before proposing a fix, and especially under time
-  pressure when guessing is tempting. Do NOT use for verifying an
-  already-applied fix end-to-end (use kstack-qa), choosing between fix and
-  refactor (use kstack-fix-strategy), or writing tests from scratch (use
-  test-driven-development).
+  Finds the root cause of a bug, crash, failing or flaky test or regression,
+  then fixes it with a regression test. Use when something in the code is
+  broken, wrong, intermittent or slower than before — "debug this: TypeError
+  ...", "why is login broken since yesterday's deploy", "find the root cause,
+  don't just patch it", "the test passes alone but fails in the full suite",
+  "it was working last week", "the API returns 500 sometimes" — even before
+  any fix is proposed, and especially under time pressure. Do NOT use for a
+  bug nobody has reproduced yet (use kstack-triage), for checking that a fix
+  works end to end (use kstack-qa), or for writing new tests (use
+  kstack-test-driven-development).
 metadata:
   version: "1.0.1"
 compatibility: Runtime helpers under runtime/ (skills/kstack-investigate/scripts/find-polluter.sh, browse binary); all degrade gracefully when absent.

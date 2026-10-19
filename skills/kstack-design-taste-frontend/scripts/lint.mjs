@@ -10,15 +10,18 @@ import { join, extname, relative, resolve } from 'node:path';
 
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');
+// The working files live in .taste-skill/ by default; a kstack design step points
+// TASTE_SKILL_WORKDIR at the run folder so the artifacts stay inside the run.
+const WORKDIR = process.env.TASTE_SKILL_WORKDIR || '.taste-skill';
 // App screens (references/app-screens.md) keep quiet table and panel lines, faint shadows, data labels
 // and their own typefaces; a sheet dealt with draw.mjs --app switches this on by itself.
 let appMode = args.includes('--app');
-try { if (JSON.parse(readFileSync('.taste-skill/direction.json', 'utf8')).kind === 'app') appMode = true; } catch {}
+try { if (JSON.parse(readFileSync(join(WORKDIR, 'direction.json'), 'utf8')).kind === 'app') appMode = true; } catch {}
 const APP_LEVEL = { hairline: null, 'outlined-box': null, 'default-font': null, numbering: 'WARN', mono: 'WARN', shadow: 'WARN', eyebrow: 'WARN', 'cta-copy': null, 'h-screen': null };
 const roots = args.filter((a) => !a.startsWith('--'));
 if (!roots.length) roots.push('.');
 const EXT = new Set(['.html', '.htm', '.css', '.scss', '.less', '.js', '.jsx', '.ts', '.tsx', '.vue', '.svelte', '.astro', '.mdx']);
-const SKIP = new Set(['node_modules', '.git', '.next', '.nuxt', '.svelte-kit', 'dist', 'build', 'out', '.vercel', '.taste-skill', 'coverage', '.turbo', 'vendor']);
+const SKIP = new Set(['node_modules', '.git', '.next', '.nuxt', '.svelte-kit', 'dist', 'build', 'out', '.vercel', '.taste-skill', 'coverage', '.turbo', 'vendor', WORKDIR.split(/[\\/]/)[0]]);
 
 const files = []; const tooBig = [];
 const walk = (p) => {
