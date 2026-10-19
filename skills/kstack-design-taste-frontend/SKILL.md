@@ -1,627 +1,492 @@
 ---
 name: kstack-design-taste-frontend
-description: Anti-slop frontend skill for landing pages, portfolios, and redesigns. The agent reads the brief, infers the right design direction, and ships interfaces that do not look templated. Real design systems when applicable, audit-first on redesigns, strict pre-flight check. Use when building or redesigning a landing page, portfolio, marketing site, or any interface whose visual identity is the deliverable. Do NOT use for auditing/improving an existing UI's UX, accessibility, or polish (use kstack-impeccable) — this skill sets the direction, impeccable audits the result.
+description: >-
+  Art direction and build for public web pages and app screens (tasteskill
+  v2): inventories what only the client has, deals one of three researched
+  directions from a library, builds with full content, then passes a
+  real-browser inspector and a screenshot look-and-fix loop. Use when building,
+  redesigning or restyling a landing page, marketing or product site,
+  portfolio, one-pager, hero, or a dashboard/admin/settings/inbox screen —
+  or when a page "looks generic", templated or AI-made. Do NOT use for
+  auditing or polishing an existing UI without changing its direction (use
+  kstack-impeccable) or for backend-only work.
+license: MIT (upstream Leonxlnx/taste-skill, see LICENSE)
+compatibility: Scripts need Node 22+ and an installed Chrome/Edge/Chromium; assets.mjs needs network. Without them the skill degrades (see Special cases).
+metadata:
+  version: "2.1.1-kstack.1"
 ---
 
-<!-- provenance: user-stack design-taste verbatim · polished S1-ff (Use-when/NOT clauses, H1) 2026-02-11 · +DoD gate 2026-10-10 -->
+<!-- provenance: vendored upstream Leonxlnx/taste-skill skills/taste-skill v2.1.1 (MIT, a9c73c3, 2026-10-19) · kstack: catalog name/description, headless line, DoD gate; folder README dropped 2026-10-19 -->
 
-# design-taste-frontend: Anti-Slop Frontend Skill
+> **Headless run?** If no user can answer (spawned step), never stop to ask: take the brief from the task and the repo, state your reading in one line as step 1 says, choose the direction yourself, and list every `~assumed` choice (direction, imagery, sample content) in the report.
 
-> Landing pages, portfolios, and redesigns. Not dashboards, not data tables, not multi-step product UI.
-> Every rule below is **contextual**. None of it fires automatically. First read the brief, then pull only what fits.
 
----
+# tasteskill v2
 
-## 0. BRIEF INFERENCE (Read the Room Before Anything Else)
+A page built by a model usually looks like the average of every page the model has seen: a centred
+headline over three lines, a little label above it, a row of icon cards, a soft gradient, a few thin
+rules and a monospace caption. Nothing in it is wrong and nothing in it was decided.
 
-Before touching code or tweaking dials, **infer what the user actually wants**. Most LLM design output is bad because the model jumps to a default aesthetic instead of reading the room.
+This skill replaces those defaults with decisions, in four ways:
 
-### 0.A Read these signals first
-1. **Page kind** - landing (SaaS / consumer / agency / event), portfolio (dev / designer / creative studio), redesign (preserve vs overhaul), editorial / blog.
-2. **Vibe words** the user used - "minimalist", "calm", "Linear-style", "Awwwards", "brutalist", "premium consumer", "Apple-y", "playful", "serious B2B", "editorial", "agency-y", "glassy", "dark tech".
-3. **Reference signals** - URLs they linked, screenshots they pasted, products they named, brands they're competing with.
-4. **Audience** - B2B procurement panel vs. design-conscious consumer vs. recruiter scanning a portfolio. The audience picks the aesthetic, not your taste.
-5. **Brand assets that already exist** - logo, color, type, photography. For redesigns, these are starting material, not optional input (see Section 11).
-6. **Quiet constraints** - accessibility-first audiences, public-sector, regulated industries, trust-first commerce, kids' products. These constraints OVERRIDE aesthetic preference.
+1. **A script deals the directions, you choose among them.** Asked to invent a look, a model picks
+   the category default every time. `scripts/draw.mjs` deals three of twenty researched directions;
+   you choose the one that carries the subject's idea, and the script then deals its type system,
+   palette, hero and section compositions from a library distilled from 247 real sites.
+2. **The idea comes from the subject.** In the study, what separated the best sites from the forgettable
+   ones was a concept taken from the thing itself, not the styling.
+3. **A house style with no ornaments,** measured in a real browser by `scripts/inspect.mjs`, so the
+   rules are checked rather than hoped for.
+4. **You look at what you made.** Screenshots at three widths, a juror's rubric, fix, look again.
 
-### 0.B Output a one-line "Design Read" before generating
-Before any code, state in one line: **"Reading this as: \<page kind> for \<audience>, with a \<vibe> language, leaning toward \<design system or aesthetic family>."**
+One warning learned in testing. Taking the ornaments away is only half the job; a page that has lost its
+labels, rules and cards and gained nothing in their place reads as thin, and blind jurors rightly prefer
+a richer page with tells over an empty page without them. The other half is substance: type set
+larger, whole fields of colour, real pictures of this subject's world (found or drawn), and every
+section carrying its full content. The skill is built to give you that; do not trade it for restraint.
 
-Example reads:
-- *"Reading this as: B2B SaaS landing for technical buyers, with a Linear-style minimalist language, leaning toward Tailwind utilities + Geist + restrained motion."*
-- *"Reading this as: solo designer portfolio for hiring managers, with an editorial / kinetic-type language, leaning toward native CSS + scroll-driven animation + custom typography."*
-- *"Reading this as: redesign of a public-sector service site, with a trust-first language, leaning toward GOV.UK Frontend or USWDS."*
+Run the commands below from the project's root, so the
+working files land in `.taste-skill/` there (when `$TASTE_SKILL_WORKDIR` is set, the scripts write
+there instead, and every `.taste-skill/` path in this skill means that folder). The scripts need Node 22+ and an installed Chrome, Edge
+or Chromium, and install nothing. `assets.mjs` also needs network access; it uses no API keys.
 
-### 0.C If the brief is ambiguous, ask one question, do not guess
-Ask exactly **one** clarifying question - never a multi-question dump - and only when the design read genuinely diverges. Example: *"Should this feel closer to Linear-clean or Awwwards-experimental?"*
+## Page or app screen
 
-If you can confidently infer from context, **do not ask**. Just declare the design read and proceed.
+Decide first which of two kinds of work this is.
 
-### 0.D Anti-Default Discipline
-Do not default to: AI-purple gradients, centered hero over dark mesh, three equal feature cards, generic glassmorphism on everything, infinite-loop micro-animations everywhere, Inter + slate-900. These are the LLM defaults. Reach past them deliberately based on the design read.
+- **A page** is read and scrolled: a landing page, a marketing or product site, a portfolio, an
+  event, a restaurant, a one-pager. It follows **the run** below.
+- **An app screen** is worked in: a dashboard, an admin or analytics view, settings, billing, an inbox
+  or queue to work through, a wallet, a list with filters, an editor or builder. It follows
+  **`references/app-screens.md`**: its own run, its own draw (`draw.mjs --app`), its own house rules
+  (quiet borders, small labels and repeated panels are normal there; gradients, glows, icons in tinted
+  squares, rainbow charts and invented vanity numbers are not) and `inspect.mjs --app`. Read that file
+  whole before you start; the page run below does not apply.
 
----
+Read `references/special-cases.md` before step 1 when the job is any of: a product page that shows
+its app; an existing brand or design system; a redesign, restyle or review of an existing page or
+screen (a kstack design step restyling a just-built surface is this case); a single component or
+section; no checkout or form backend; no Chrome or Node 22; no network.
 
-## 1. THE THREE DIALS (Core Configuration)
+## The run
 
-After the design read, set three dials. Every layout, motion, and density decision below is gated by these.
+Do these in order. Steps 1–5 take a few minutes and decide whether the page is any good.
 
-* **`DESIGN_VARIANCE: 8`** - 1 = Perfect Symmetry, 10 = Artsy Chaos
-* **`MOTION_INTENSITY: 6`** - 1 = Static, 10 = Cinematic / Physics
-* **`VISUAL_DENSITY: 4`** - 1 = Art Gallery / Airy, 10 = Cockpit / Packed Data
+### 1. Read the brief and the project
 
-**Baseline:** `8 / 6 / 4`. Use these unless the design read overrides them. Do not ask the user to edit this file - overrides happen conversationally.
+Find out what is real: the subject, the audience, the one thing the page must get someone to do, the
+stack, any existing brand (colours, fonts, logo), and above all **what imagery truly exists**: the
+project's own photographs or product shots, a real interface that can be shown, an image generation
+tool you can call, or nothing. Do not plan around pictures you do not have. Nothing of its own is
+rarely nothing at all: the subject's city, street, materials and history are in open archives and
+museums, free to use with a credit (step 6, `scripts/assets.mjs`).
 
-### 1.A Dial Inference (design read → dial values)
-| Signal | VARIANCE | MOTION | DENSITY |
-|---|---|---|---|
-| "minimalist / clean / calm / editorial / Linear-style" | 5-6 | 3-4 | 2-3 |
-| "premium consumer / Apple-y / luxury / brand" | 7-8 | 5-7 | 3-4 |
-| "playful / wild / Dribbble / Awwwards / experimental / agency" | 9-10 | 8-10 | 3-4 |
-| "landing page / portfolio / marketing site (default)" | 7-9 | 6-8 | 3-5 |
-| "trust-first / public-sector / regulated / accessibility-critical" | 3-4 | 2-3 | 4-5 |
-| "redesign - preserve" | match existing | +1 | match existing |
-| "redesign - overhaul" | +2 | +2 | match existing |
+If the request is vague, decide and state your reading in one line instead of asking. Ask only when a
+missing fact blocks the work (for example, no product name).
 
-### 1.B Use-Case Presets
-| Use case | VARIANCE | MOTION | DENSITY |
-|---|---|---|---|
-| Landing (SaaS, mainstream) | 7 | 6 | 4 |
-| Landing (Agency / creative) | 9 | 8 | 3 |
-| Landing (Premium consumer) | 7 | 6 | 3 |
-| Portfolio (Designer / studio) | 8 | 7 | 3 |
-| Portfolio (Developer) | 6 | 5 | 4 |
-| Editorial / Blog | 6 | 4 | 3 |
-| Public-sector service | 3 | 2 | 5 |
-| Redesign - preserve | match | match+1 | match |
-| Redesign - overhaul | +2 | +2 | match |
+Then **inventory the subject** in your notes: eight to twelve things that belong to this client and to
+no competitor. Look for its name and what the name means; its address, door number, street and
+neighbourhood, and what that place looks like (its tiles, signs, paint colours, typefaces on its shop
+fronts, its light, its weather); the numbers in the brief (seats, rooms, minutes to the sea, the
+price, the year); the constraint it lives with (only one batch a month, closed in winter, by
+appointment); its materials and colours; its rituals and hours (the oven lit at five, the ferry at
+seven); the printed things of its world (a timetable, a label, a ticket, a sign). This list is where
+the idea comes from in step 4. In blind tests, the page that won each brief was built from an item on
+such a list (the client's name and what it means, the street it stands in, the one constraint that
+makes it what it is), and the pages that lost had a good composition with a category idea. The list
+is also your picture search: each place, material and printed thing on it is a query for step 6.
 
-### 1.C How the Dials Drive Output
-Use these (or user-overridden values) as global variables. Cross-references throughout this document refer to these exact variable names - never invent aliases like `LAYOUT_VARIANCE` or `ANIM_LEVEL`.
+### 2. Write the argument
 
----
+Before any design, list the page as claims with their proof, one line per section, the way
+`references/copy.md` §1 shows. The claims decide which sections exist and in what order. Delete any
+section that has no claim. This is how you avoid the stock sequence of hero, logos, three features,
+testimonial, pricing, call to action.
 
-## 2. BRIEF → DESIGN SYSTEM MAP
+### 3. Draw the direction
 
-Once you have the design read (Section 0) and dials (Section 1), pick the right foundation. Do not invent CSS for things that have an official package. Do not pretend an aesthetic trend is an official system.
-
-### 2.A When to reach for a real design system (use official packages)
-| Brief reads as… | Reach for | Why |
-|---|---|---|
-| Microsoft / enterprise SaaS / dashboards | `@fluentui/react-components` or `@fluentui/web-components` | Official Fluent UI, Microsoft tokens, accessibility done |
-| Google-ish UI, Material-flavored product | `@material/web` + Material 3 tokens | Official, theme-able via Material Theming |
-| IBM-style B2B / enterprise analytics | `@carbon/react` + `@carbon/styles` | Official Carbon, mature data-density patterns |
-| Shopify app surfaces | `polaris.js` web components / Polaris React | Required for Shopify admin UI |
-| Atlassian / Jira-style product | `@atlaskit/*` + `@atlaskit/tokens` | Official Atlassian DS |
-| GitHub-style devtool / community page | `@primer/css` or `@primer/react-brand` | Official Primer; Brand variant for marketing |
-| Public-sector UK service | `govuk-frontend` | Legally / regulatorily expected |
-| US public-sector / trust-first | `uswds` | Same |
-| Fast local-business / agency MVP | Bootstrap 5.3 | Boring, fast, works |
-| Modern accessible React foundation | `@radix-ui/themes` | Primitives + polished theme |
-| Modern SaaS where you own the components | shadcn/ui (`npx shadcn@latest add ...`) | You own the code, easy to customise; never ship default state |
-| Tailwind-based modern SaaS / AI marketing | Tailwind v4 utilities + `dark:` variant | Default for indie + small team builds |
-
-**Honesty rule:** if the brief reads as one of the systems above, install and use the **official** package. Do not recreate its CSS by hand. Do not import a system's tokens but then override 90% of them.
-
-**One system per project.** Do not mix Fluent React with Carbon in the same tree. Do not import shadcn/ui components into a Material 3 app.
-
-### 2.B When the brief is an aesthetic, not a system
-For these directions, there is **no single official package**. Build with native CSS + Tailwind + a maintained component library. Be honest in code comments about what is borrowed inspiration vs. official material.
-
-| Aesthetic | Honest implementation |
-|---|---|
-| Glassmorphism / "frosted glass" | `backdrop-filter`, layered borders, highlight overlays. Provide solid-fill fallback for `prefers-reduced-transparency`. |
-| Bento (Apple-style tile grids) | CSS Grid with mixed cell sizes. No single library owns this. |
-| Brutalism | Native CSS, monospace, raw borders. No library. |
-| Editorial / magazine | Serif type, asymmetric grid, generous whitespace. No library. |
-| Dark tech / hacker | Mono + accent neon, terminal motifs. No library. |
-| Aurora / mesh gradients | SVG or layered radial gradients. No library. |
-| Kinetic typography | Native CSS animations, scroll-driven animations, GSAP for hijacks. No library. |
-| **Apple Liquid Glass** | Apple documents this for Apple platforms only. **There is no official `liquid-glass.css`.** Web implementations are approximations using `backdrop-filter` + layered borders + highlights. Label clearly as approximation. |
-
----
-
-## 3. DEFAULT ARCHITECTURE & CONVENTIONS
-
-Unless the design read picks a real design system (Section 2.A), these are the defaults:
-
-### 3.A Stack
-* **Framework:** React or Next.js. Default to Server Components (RSC).
-  * **RSC SAFETY:** Global state works ONLY in Client Components. In Next.js, wrap providers in a `"use client"` component.
-  * **INTERACTIVITY ISOLATION:** Any component using Motion, scroll listeners, or pointer physics MUST be an isolated leaf with `'use client'` at the top. Server Components render static layouts only.
-* **Styling:** **Tailwind v4** (default). Tailwind v3 only if the existing project demands it.
-  * For v4: do NOT use `tailwindcss` plugin in `postcss.config.js`. Use `@tailwindcss/postcss` or the Vite plugin.
-* **Animation:** **Motion** (the library formerly known as Framer Motion). Import from `motion/react` (`import { motion } from "motion/react"`). The `framer-motion` package still works as a legacy alias - prefer `motion/react` in new code.
-* **Fonts:** Always use `next/font` (Next.js) or self-host with `@font-face` + `font-display: swap`. Never link Google Fonts via `<link>` in production.
-
-### 3.B State
-* Local `useState` / `useReducer` for isolated UI.
-* Global state ONLY for deep prop-drilling avoidance - Zustand, Jotai, or React context.
-* **NEVER** use `useState` to track continuous values driven by user input (mouse position, scroll progress, pointer physics, magnetic hover). Use Motion's `useMotionValue` / `useTransform` / `useScroll`. `useState` re-renders the React tree on every change and collapses on mobile.
-
-### 3.C Icons
-* **Allowed libraries (priority order):** `@phosphor-icons/react`, `hugeicons-react`, `@radix-ui/react-icons`, `@tabler/icons-react`.
-* **Discouraged:** `lucide-react`. Acceptable only when the user explicitly asks for it or the project already depends on it.
-* **NEVER hand-roll SVG icons.** If a glyph is missing, install a second library or compose from primitives - do not draw icon paths from scratch.
-* **One family per project.** Do not mix Phosphor with Lucide in the same component tree.
-* **Standardize `strokeWidth` globally** (e.g. `1.5` or `2.0`).
-
-### 3.D Emoji Policy
-Discouraged by default in code, markup, and visible text. Replace symbols with icon-library glyphs. **Override:** allow emojis only when the user explicitly asks for a playful / chat-style / social-native vibe - and even then use them sparingly with intent.
-
-### 3.E Responsiveness & Layout Mechanics
-* Standardize breakpoints (`sm 640`, `md 768`, `lg 1024`, `xl 1280`, `2xl 1536`).
-* Contain page layouts using `max-w-[1400px] mx-auto` or `max-w-7xl`.
-* **Viewport Stability:** NEVER use `h-screen` for full-height Hero sections. ALWAYS use `min-h-[100dvh]` to prevent layout jumping on mobile (iOS Safari address bar).
-* **Grid over Flex-Math:** NEVER use complex flexbox percentage math (`w-[calc(33%-1rem)]`). ALWAYS use CSS Grid (`grid grid-cols-1 md:grid-cols-3 gap-6`).
-
-### 3.F Dependency Verification (mandatory)
-Before importing ANY 3rd-party library, check `package.json`. If the package is missing, output the install command first. **Never** assume a library exists.
-
----
-
-## 4. DESIGN ENGINEERING DIRECTIVES (Bias Correction)
-
-**→ `references/design-directives.md`** — typography, color, layout, spacing, texture, motion and copy directives that override LLM defaults. Load it once the brief's dials are set and before writing any component code.
-
-## 5. CONTEXT-AWARE PROACTIVITY
-
-These are tools, not defaults. Use them when the design read calls for them. **None of these fire automatically.**
-
-* **Liquid Glass / Glassmorphism:** Appropriate for premium consumer, Apple-adjacent, luxury brand, or media-overlay vibes. Inappropriate for dashboards, public-sector, or "boring B2B." When used, go beyond `backdrop-blur`: add a 1px inner border (`border-white/10`) and a subtle inner shadow (`shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]`) for physical edge refraction. Provide a solid-fill fallback under `prefers-reduced-transparency`.
-* **Magnetic Micro-physics:** Use when `MOTION_INTENSITY > 5` AND the brief reads premium / playful / agency. Implement EXCLUSIVELY with Motion's `useMotionValue` / `useTransform` outside the React render cycle. Never `useState`. See Section 3.B.
-* **Perpetual Micro-Interactions** (Pulse, Typewriter, Float, Shimmer, Carousel): Use when `MOTION_INTENSITY > 5` AND the section actively benefits from motion (status indicators, live feeds, AI-feel). **Not every card needs an infinite loop.** If a section is informational, leave it still. Apply Spring Physics (`type: "spring", stiffness: 100, damping: 20`) - no linear easing.
-* **"Motion claimed, motion shown."** If `MOTION_INTENSITY > 4`, the page must actually move: entry transitions on hero, scroll-reveal on key sections, hover physics on CTAs, at minimum. A static page that claims `MOTION_INTENSITY: 7` is broken. Conversely, if you cannot ship working motion in the available scope, drop the dial to 3 and ship a clean static page. Never half-build motion that breaks (cut-off ScrollTriggers, jumpy enters, missing cleanups).
-* **MOTION MUST BE MOTIVATED (mandatory).** Before adding any animation, ask: "what does this animation communicate?" Valid answers: hierarchy (drawing attention to the right thing), storytelling (revealing content in sequence that matches a narrative), feedback (acknowledging a user action), state transition (showing something changed). Invalid answer: "it looked cool". GSAP everywhere because GSAP is available is amateur. Each ScrollTrigger, each marquee, each pinned section needs a reason. If you cannot articulate the reason in one sentence, drop the animation.
-* **MARQUEE MAX-ONE-PER-PAGE (mandatory).** Horizontal scrolling text marquees ("logos endlessly scrolling", "manifesto scrolling sideways", "kinetic word strip") are appropriate at most ONCE per page. Two or more marquees on the same page reads as lazy filler. Pick the one section where the marquee actually serves the content; the others get a different layout.
-* **GSAP Sticky-Stack Pattern (when scroll-stack is used).** A "card stack on scroll" must be a REAL sticky-stack, not a sequential reveal list. See Section 5.A below for the canonical code skeleton. Common failure: trigger fires halfway through scroll instead of pinning at viewport top. Fix: `start: "top top"` not `start: "top center"` or `"top 80%"`.
-* **GSAP Horizontal-Pan Pattern (when horizontal scroll-hijack is used).** See Section 5.B below for the canonical skeleton. Common failure: animation starts before the section is pinned, so the user sees half a slide. Same fix: `start: "top top"`, pin the wrapper, scrub the inner track.
-
-### 5.A Sticky-Stack - Canonical Skeleton
-
-```tsx
-"use client";
-import { useRef, useEffect } from "react";
-import { gsap } from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { useReducedMotion } from "motion/react";
-
-gsap.registerPlugin(ScrollTrigger);
-
-export function StickyStack({ cards }: { cards: React.ReactNode[] }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const reduce = useReducedMotion();
-
-  useEffect(() => {
-    if (reduce || !ref.current) return;
-    const ctx = gsap.context(() => {
-      const cardEls = gsap.utils.toArray<HTMLElement>(".stack-card");
-      cardEls.forEach((card, i) => {
-        if (i === cardEls.length - 1) return;
-        ScrollTrigger.create({
-          trigger: card,
-          start: "top top",                              // pin at viewport top
-          endTrigger: cardEls[cardEls.length - 1],
-          end: "top top",
-          pin: true,
-          pinSpacing: false,
-        });
-        gsap.to(card, {
-          scale: 0.92,
-          opacity: 0.55,
-          ease: "none",
-          scrollTrigger: {
-            trigger: cardEls[i + 1],
-            start: "top bottom",
-            end: "top top",
-            scrub: true,
-          },
-        });
-      });
-    }, ref);
-    return () => ctx.revert();
-  }, [reduce]);
-
-  return (
-    <div ref={ref} className="relative">
-      {cards.map((card, i) => (
-        <div
-          key={i}
-          className="stack-card sticky top-0 min-h-[100dvh] flex items-center justify-center"
-        >
-          {card}
-        </div>
-      ))}
-    </div>
-  );
-}
+```bash
+node $KSTACK_EXTENSION_DIR/skills/kstack-design-taste-frontend/scripts/draw.mjs --sector <sector> --brief "<one line about the subject>" \
+  --sections <roles in the order of your argument> [--tone <tone>] [--have <assets>] [--keep palette,type] \
+  --options 3
 ```
 
-Critical points: `start: "top top"`, `pin: true`, every card except the last is pinned, the scale/opacity transform is driven by the NEXT card's scroll trigger (so previous card shrinks as next one arrives).
+This deals three directions and prints a short summary of each. Hold each one against your inventory:
+which way of composing can carry something only this client has? Choose that one, not the most
+familiar, and write one line in your notes on why. In testing, a single random direction that did not
+suit the subject was the commonest cause of a weak page. Then deal the full sheet:
 
-### 5.B Horizontal-Pan - Canonical Skeleton
-
-```tsx
-"use client";
-import { useRef, useEffect } from "react";
-import { gsap } from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { useReducedMotion } from "motion/react";
-
-gsap.registerPlugin(ScrollTrigger);
-
-export function HorizontalPan({ children }: { children: React.ReactNode }) {
-  const wrap = useRef<HTMLDivElement>(null);
-  const track = useRef<HTMLDivElement>(null);
-  const reduce = useReducedMotion();
-
-  useEffect(() => {
-    if (reduce || !wrap.current || !track.current) return;
-    const ctx = gsap.context(() => {
-      const distance = track.current!.scrollWidth - window.innerWidth;
-      gsap.to(track.current, {
-        x: -distance,
-        ease: "none",
-        scrollTrigger: {
-          trigger: wrap.current,
-          start: "top top",                              // pin starts when section top hits viewport top
-          end: () => `+=${distance}`,                    // scroll distance = track width minus viewport
-          pin: true,
-          scrub: 1,
-          invalidateOnRefresh: true,
-        },
-      });
-    }, wrap);
-    return () => ctx.revert();
-  }, [reduce]);
-
-  return (
-    <section ref={wrap} className="relative overflow-hidden">
-      <div ref={track} className="flex h-[100dvh] items-center">
-        {children}
-      </div>
-    </section>
-  );
-}
+```bash
+node $KSTACK_EXTENSION_DIR/skills/kstack-design-taste-frontend/scripts/draw.mjs <the same arguments, without --options> --direction <chosen id>
 ```
 
-Critical points: `start: "top top"`, `pin: true`, `end: "+=${distance}"` (scroll length = horizontal travel needed), `scrub: 1`. The wrapper is pinned, the inner track slides horizontally as the user scrolls vertically.
+- `--sector`: `node $KSTACK_EXTENSION_DIR/skills/kstack-design-taste-frontend/scripts/draw.mjs --list sectors`. Pick the closest.
+- `--sections`: roles from `--list roles` (features, showcase, how-it-works, testimonial, proof, stats,
+  pricing, faq, cta, footer, intro, about, work, gallery, list, contact). The hero is implied.
+- `--tone` (optional): quiet, bold, warm, technical, playful, luxury, editorial. Only pass it when the
+  brief clearly asks for one.
+- `--have`: assets that really exist, comma-separated: `photography` (the project's own photographs of
+  the place, people or work), `product-photo` (photographs of the specific product, or an image tool
+  that can make them), `product-ui` (real screenshots), `illustration`, `video`. Leave it out if you
+  have none: the draw then avoids compositions that depend on them and the sheet says how to fill
+  picture slots honestly (software shows its own interface built in HTML; a product with no photographs
+  is drawn and set among real pictures of its world, never a fake product shot). Pictures you will
+  find in the open collections are not the project's own; leave them out of `--have`.
+- `--keep palette,type`: when the brand already fixes colours or typefaces. The draw then deals only
+  the composition, and you map the brand's values onto the roles.
 
-### 5.C Scroll-Reveal Stagger - Canonical Skeleton (lighter alternative)
+The command prints a **direction sheet**. It is the art direction for this build:
 
-For simple "items appear as they enter viewport" (no pinning), prefer Motion's `whileInView` over GSAP - lighter, no ScrollTrigger needed:
+- **Adopt it.** Do not blend it with the layout you would have made anyway. If it feels unfamiliar,
+  good: the familiar layout is the one this skill exists to prevent.
+- Redraw one slot (`--redraw hero | type | palette | photos | scenes | section:<role> | direction`) only for a
+  reason you can state: it contradicts a stated brand constraint, or needs an asset that does not
+  exist. Never redraw to get something more comfortable. Record every redraw in your report.
+- When a dealt section cannot hold the real content (it compares three plans and there is one price;
+  it wants five quotations and there are none), do not bend the content to fit. List the others with
+  `--alternatives <role>`, pick the one whose assumptions match the content, and take it with
+  `--redraw section:<role>=<id>`.
+- **Check the palette against the subject.** A dealt palette is a set of proportions (one ground, one
+  ink, one accent, fields) as much as a set of colours. If its colours fight the subject's own material
+  (candy pastels for a peat whisky, neon for a mountain hut), redraw the palette once; if the subject
+  has unmistakable colours of its own (its material, the paint of its street, the landscape outside
+  its windows), keep the dealt proportions and take the colours from the subject instead, and say so
+  in the report.
+- Reprint it any time with `node $KSTACK_EXTENSION_DIR/skills/kstack-design-taste-frontend/scripts/draw.mjs --show`. In a long session, re-read it before each
+  section you build.
 
-```tsx
-"use client";
-import { motion, useReducedMotion } from "motion/react";
+### 4. Find the idea
 
-export function RevealStagger({ items }: { items: string[] }) {
-  const reduce = useReducedMotion();
-  return (
-    <ul className="grid gap-6">
-      {items.map((item, i) => (
-        <motion.li
-          key={item}
-          initial={reduce ? false : { opacity: 0, y: 24 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, amount: 0.3 }}
-          transition={{
-            duration: 0.6,
-            delay: i * 0.06,
-            ease: [0.16, 1, 0.3, 1],
-          }}
-        >
-          {item}
-        </motion.li>
-      ))}
-    </ul>
-  );
-}
+The direction is a way of composing. The idea is what makes the page belong to this subject and no
+other. Write this sentence in your notes and do not start building until both blanks are filled from
+the subject itself:
+
+> On this page, **[something that belongs to the subject]** becomes **[the device the direction calls for]**.
+
+Places to look for the first blank:
+
+- **Its output.** What does the thing produce? Put the real output on the page as material. (A camera
+  that prints poems delivered its copy as paper slips.)
+- **Its object or shape.** What does it physically look like, in cross-section, in silhouette?
+  Enlarge it, crop it, make it the frame or the one motif.
+- **Its name.** Can the letters hold a photograph, stack into a wall, split to two corners?
+- **Its place.** Is there one view that makes someone want to be there?
+- **Its ritual.** Is there a sequence the page can perform as it scrolls?
+- **Its artefact.** What printed thing already exists in its world: ticket, menu, label, receipt,
+  invitation, folder, manual?
+- **Its opposite.** Which other category owns the feeling this one lacks?
+
+Fill the first blank from your inventory (step 1), not from the category. **The competitor test:** put
+the nearest real competitor in the sentence (the bakery two streets away, another oak furniture maker,
+another hut on the same mountain). If the sentence still works, the idea belongs to the category: a
+loaf of bread is every bakery; the seven doors of the street this one is named after are only this one.
+"Clean and modern" is not an idea. The sites the study's panel scored lowest were the ones whose idea
+was recorded as "none beyond the standard formula".
+
+**One live thing.** Give the page one thing the visitor can do, or that is different for each visit,
+made from the idea: pick a wood and see the chair in it; type your name and see it cut in the
+foundry's letters; set the loan and read the real monthly figure; see whether the hut's stove is lit
+right now and how long until the last ferry; choose a size and see it against the room. In blind tests every winning page had one and the jurors named it first. Rules: it uses the subject's real content, it works on a phone with a thumb, it has a plain
+fallback without script, it never blocks reading, and it is one thing, not a playground. It is
+built in step 6 as part of the page, not added as motion in step 9.
+
+**The scenes carry the idea too.** The scroll scenes on the sheet are devices waiting for a subject.
+Decide what each one shows from your inventory before building: the fly-through passes through this
+studio's own title cards, the route is the road this shipment really takes, the picture that opens to
+the whole screen is the room the guest will wake up in. A scene filled with pictures that could belong
+to anyone is a screensaver.
+
+### 5. Write the words
+
+Write the whole page as a copy deck (plain text) before markup, following `references/copy.md`:
+
+- **Every headline fits in two lines or fewer at every width.** Do the arithmetic in copy.md §2 before
+  committing to a sentence: about 32 characters is safe everywhere at a confident size. The studied
+  gallery heroes have a median of 5 words and 32 characters.
+- One supporting sentence, directly under the headline (32–48px below it) and shown with it, never
+  docked at the foot of the first screen or held back by an animation. When the headline is a name or
+  a figure of speech, this sentence says plainly what the thing is. One primary action, named for what
+  it does, as a real button on the first screen.
+- **The first screen answers the visitor's first question in large type.** For an event: what it is,
+  when and where (the dates belong in the headline or at the second size, never only in small text).
+  For a product: what it is and what it costs or does. For a person: who and what they do. Every
+  section the visitor came for (the line-up, the menu, the rooms, the price) has its own heading and
+  its own place in the navigation.
+- **Write the full content.** Every section the brief asks for delivers its information completely:
+  the whole menu with prices, each room with its own details, every speaker and talk, the price with
+  what it includes, an answer for each real question. Thin sections are the commonest reason a clean
+  page loses to a busier one.
+- Sample details are expected where the brief leaves gaps (dish names, room names and rates, project
+  titles) so the design is seen at full density; list them in the report for the client to confirm.
+  Proof is never invented: no customers, quotes, reviews, press, logos or business statistics.
+
+### 6. Build it, still
+
+Build the page with motion switched off in your head; a page that needs animation to look finished is
+not finished. Order of work:
+
+1. **Tokens.** Colour and type roles from the sheet as CSS custom properties. Everything downstream
+   references tokens only. `$KSTACK_EXTENSION_DIR/skills/kstack-design-taste-frontend/assets/base.css` is a neutral foundation you may start from (reset, token
+   names, fluid type steps, grid, focus and selection styles, the motion helpers); it has no look of
+   its own.
+2. **The hero, exactly as the blueprint describes it,** at desktop and at phone width. Get the big
+   thing big and the small things small before anything else exists.
+3. **Each section from its blueprint,** with this project's content. Keep the geometry, change the
+   subject. Neighbouring sections must not share a layout. **Carry the idea into every section,**
+   pricing, FAQ and footer included: the commonest failure in the study, even among good sites, is a
+   distinctive first screen followed by stock blocks.
+4. **Imagery,** in this order of preference:
+   1. the project's own;
+   2. generated, if you have an image tool;
+   3. **real pictures of the subject's world from the open collections,** whenever an honest one
+      exists. Search them with `node $KSTACK_EXTENSION_DIR/skills/kstack-design-taste-frontend/scripts/assets.mjs "<query>"` (Openverse, Wikimedia
+      Commons, the Art Institute of Chicago and the Met; only licences that allow commercial use, by
+      default). Search the inventory, not the category: its street in old postcards, an old map of the
+      neighbourhood, its material up close, its trade in engravings, a museum object of its kind, a
+      botanical plate, a star chart. Use them large and with intent: one archival photograph as the
+      hero, an engraving enlarged into the page's motif, the real map of the street as the contact
+      section. Look at each before choosing; `--get <ref>` downloads it into `assets/` and records
+      its source and licence, and `--credits` prints the credit line for the footer. A found picture
+      shows the world around the client and is never presented as the client's own product, room,
+      dish, person or team;
+   4. **drawn in code from the subject itself,** for what no honest picture exists of (its objects,
+      its tiles, its windows, its product's interface, made as one consistent flat graphic language in
+      the palette's real colours);
+   5. the photographs dealt on the sheet, only where an honestly generic picture fits (the sea for a
+      sea house), never as a stand-in for the subject;
+   6. type and colour alone.
+
+   When the project has footage or a real picture of its own process or product, the first screen
+   shows it, large (about 40% of the screen or more). Never write a sentence on the page about where
+   the pictures come from or what they are not ("none of these shows our bar"): a caption says what
+   the picture is, and the credit line sits small in the footer. A portfolio whose work is invented
+   for the brief draws each piece as a finished still of that work (its title card with its own type,
+   an end frame, a poster), with real detail, never as a pictogram of the client's product.
+
+   **The floor, which the inspector checks:** at least four real pictures on the page, usually six to
+   twelve (photographs, archival images, maps, engravings, footage, raster artwork; for software, its
+   cropped interface fragments count too). SVG drawings do not count toward the floor: draw what no
+   picture exists of, and still carry real pictures. Add one moving picture wherever an honest clip
+   exists: search it with `assets.mjs --video "<query>"` and use it as a muted loop with a poster
+   frame. Models skip pictures and footage because finding them is work; the page fails without them.
+
+   `references/imagery.md` covers searching, licences and credits, video, drawing, crops and treatments.
+5. **The live thing** from step 4, built into the section where it proves the claim (often the hero
+   or the booking), with real content, a thumb-sized phone version and a plain fallback.
+6. **The scroll scenes,** when the sheet deals them (section 9), each with the section it carries: the page's big
+   moments, the camera that flies through the work, the picture that opens to the whole screen, the
+   word that buckles under the scroll. Copy the shared stage and the scene's files from
+   `$KSTACK_EXTENSION_DIR/skills/kstack-design-taste-frontend/assets/scenes/`, fill the scene with this project's own pictures and words, and set the
+   page's tokens so it takes the page's look. A scene is composition: it decides how long the page is
+   and what each screen shows, so it is built now and seen in every look round, not added at the end.
+   `references/scenes.md` says how to put one on a page, fill it, fit it and check it;
+   `assets/scenes/demo/<id>.html` is a working example of each.
+7. **Fullness.** Look at each desktop screen as a poster: one dominant thing and the content it
+   carries. A screen that is mostly empty ground is an underbuilt section, not a rest; one deliberate
+   rest per page is the limit, and the inspector fails a page with two or more near-empty screens.
+   Running text is in the full ink at 16px or more; grey is for secondary notes.
+8. **The frame.** The page has one pair of equal outer margins at every width, and every section uses
+   the width the page has set up: when its text sits in the left half, the right half holds its
+   picture, its second column, its list or its figure, never nothing. Asymmetry lives inside the grid,
+   never in the frame: a void is placed only when something closes it on the far side. No stretch of
+   the page taller than about half a screen holds nothing at all; sections are 120–240px apart on
+   desktop. Every section the visitor came for opens with a heading that names it, and the first
+   screen carries the page's title in an `h1`. These are what readers name first when a page looks
+   wrong ("no clear title", "random empty space", "everything is pushed to one side"), and the
+   inspector measures each of them.
+9. **States and semantics.** Real links and buttons, visible focus, alt text, a phone layout that is
+   its own composition.
+
+Read `references/type.md`, `references/colour.md` and `references/layout.md` when you need the detail
+behind a decision; the laws below are the short form.
+
+### 7. Gate
+
+```bash
+node $KSTACK_EXTENSION_DIR/skills/kstack-design-taste-frontend/scripts/lint.mjs <source files or folder>
+node $KSTACK_EXTENSION_DIR/skills/kstack-design-taste-frontend/scripts/inspect.mjs <url or path/to/index.html>
+node $KSTACK_EXTENSION_DIR/skills/kstack-design-taste-frontend/scripts/scenes.mjs <url or path/to/index.html>     # when the page has scroll scenes
 ```
 
-Use this for: feature lists, testimonial grids, logo walls, anything that just needs "enter on scroll." Save GSAP for actual pin/scrub work.
+`scenes.mjs` photographs every scroll scene at 0, 10 … 100% of its hold, on desktop and on a phone,
+and the reduced-motion page; with scenes on the sheet, `inspect.mjs` also films the whole scroll
+(`desktop-film-NN.jpg`). A scene that never started or rests on desktop is a `FAIL`.
 
-### 5.D Forbidden Animation Patterns
+`lint.mjs` scans source for banned patterns and stock phrases. `inspect.mjs` opens the page in a real
+browser at 1440, 768 and 390 pixels, measures it (headline line counts, type sizes, fonts actually
+loaded, colours, rules, shadows, gradients, contrast, overflow, and the frame: equal margins, sections
+huddled on one side, blank stretches, the title, untitled sections, text against the screen edge) and
+saves screenshots to `.taste-skill/inspect/`. Fix every `FAIL`. Treat each `WARN` as wrong unless you can defend it to a
+designer in one sentence. Re-run until there are no `FAIL`s. Do not argue with the meter and do not
+hide things from it. The inspector serves local files over a throwaway local server; if the page must
+also open straight from the file system, open `index.html` that way once before you finish.
 
-* **`window.addEventListener("scroll", ...)`** is banned. It runs on every scroll frame, jank-prone, no batching. Use Motion's `useScroll()`, GSAP's `ScrollTrigger`, IntersectionObserver, or CSS `scroll-driven animations` (`animation-timeline: view()`).
-* **Custom scroll progress calculations using `window.scrollY`** in React state. Same reason. Re-renders on every frame.
-* **`requestAnimationFrame` loops that touch React state.** Use motion values (`useMotionValue` + `useTransform`) instead.
-* **Layout Transitions:** Use Motion's `layout` and `layoutId` props for visible state changes (re-ordering lists, expanding modals, shared elements between routes). Do not wrap static content in `layout` props "for safety" - it costs measurement work.
-* **Staggered Orchestration:** Use `staggerChildren` (Motion) or CSS cascade (`animation-delay: calc(var(--index) * 100ms)`) for reveal moments where sequence matters. For `staggerChildren`, parent (`variants`) and children MUST share the same Client Component tree.
+### 8. Look
 
----
+Passing the gate means nothing banned was measured. It does not mean the page is good. Open the
+screenshots the inspector lists (every viewport, with your image viewer or Read tool) and critique them
+with `references/critique.md`: the fourteen passes, the Awwwards-weighted score, the caps. Write the critique
+down in its format, fix the top three problems, run the inspector again, look again. Three rounds at
+most.
 
-## 6. PERFORMANCE & ACCESSIBILITY GUARDRAILS
+Judge only the pictures. If a problem is visible in a screenshot, it is real, whatever the code says.
 
-### 6.A Hardware Acceleration
-* Animate ONLY `transform` and `opacity`. Never animate `top`, `left`, `width`, `height`.
-* Use `will-change: transform` sparingly - only on elements that will actually animate.
+### 9. Move
 
-### 6.B Reduced Motion (mandatory)
-* **Any motion above `MOTION_INTENSITY > 3` MUST honor `prefers-reduced-motion`.** This is non-negotiable.
-* In Motion: wrap with `useReducedMotion()` and degrade to static.
-* In CSS: gate animations behind `@media (prefers-reduced-motion: no-preference)` or provide an override block under `@media (prefers-reduced-motion: reduce)` that disables.
-* Infinite loops, parallax, scroll-hijack, and magnetic physics MUST collapse to static / instant under reduced motion.
+Now build the motion layer. It is required, and it is more than one fade: the inspector counts the
+elements that really move while the page loads and is scrolled, and fails a page under eight (it warns
+under sixteen). Any scroll scenes are already built (step 6); around them the layer has four parts:
 
-### 6.C Dark Mode (mandatory for any consumer-facing page)
-* Design for **both modes from the start**. Never ship light-only or dark-only without explicit user instruction.
-* Use Tailwind `dark:` variant OR CSS variables for tokens. Pick one strategy per project.
-* **Do not prescribe specific dark-mode colors here.** The brief decides. Maintain visual hierarchy, brand identity, and WCAG AA contrast (AAA for body) across both modes.
-* Respect `prefers-color-scheme: dark`. Default to system preference unless the brand insists on one mode.
+1. **The signature move** named on the sheet: one, done well (a dealt scene can be it).
+2. **An entrance for the parts of every section:** the heading, then the text, then the picture,
+   staggered by 60–90ms, rising 16–32px with opacity, triggered once as the section enters. Not one
+   fade for the whole block, and never content that stays hidden if the script fails.
+3. **Feedback on every control:** press, hover and focus on buttons, links, cards and the live thing.
+4. **One moving picture:** a found clip as a muted loop, a slow scale or drift on a photograph, or a
+   scroll-linked move on the hero picture.
 
-### 6.D Core Web Vitals Targets
-* **LCP** < 2.5s. Hero image must be `next/image priority` or preloaded.
-* **INP** < 200ms. Heavy work off main thread.
-* **CLS** < 0.1. Reserve space for images, fonts, embeds.
-* Run Lighthouse before declaring a page done.
+Transform and opacity only; every move has a `prefers-reduced-motion` fallback that keeps the content
+and drops the travel. A move that changes the colour or the layout of whole screens (colour by
+chapter, a pinned story) is part of the composition, so build it in step 6 and let every look round see
+it. `references/motion.md` has the tokens and tested recipes. Then run the inspector once more and check
+every screenshot for content that failed to appear.
 
-### 6.E DOM Cost
-* Apply grain / noise filters EXCLUSIVELY to fixed, `pointer-events-none` pseudo-elements (e.g., `fixed inset-0 z-[60] pointer-events-none`). NEVER on scrolling containers - continuous GPU repaints destroy mobile FPS.
-* Be aware of bundle size. Motion is not tiny. Three.js is large. Lazy-load anything that's not above-the-fold.
+### 10. Report
 
-### 6.F Z-Index Restraint
-NEVER spam arbitrary `z-50` or `z-10`. Use z-index strictly for systemic layer contexts (sticky navbars, modals, overlays, grain). Document the z-index scale in a project constants file.
+Do not report until every item of the DoD gate at the end of this file holds; each one was skipped in a test run that came out badly.
 
----
+Tell the user, briefly: the direction dealt (name and seed) and any redraws with reasons; the idea
+sentence and the live thing; the final scores from your last critique round and what still falls short;
+every found picture and clip with its title, creator, licence and source page (`assets.mjs --credits` prints
+the list) and where its credit sits on the page; which bundled photographs and which drawings stand in
+for photography (so they can be replaced); and any sample content that must be swapped before launch.
+Do not claim a check you did not run.
 
-## 7. DIAL DEFINITIONS (Technical Reference)
+## House rules
 
-### DESIGN_VARIANCE (Level 1-10)
-* **1-3 (Predictable):** Symmetrical CSS Grid (12-col, equal fr-units), equal paddings, centered alignment.
-* **4-7 (Offset):** `margin-top: -2rem` overlaps, varied image aspect ratios (4:3 next to 16:9), left-aligned headers over center-aligned data.
-* **8-10 (Asymmetric):** Masonry layouts, CSS Grid with fractional units (`grid-template-columns: 2fr 1fr 1fr`), massive empty zones (`padding-left: 20vw`).
-* **MOBILE OVERRIDE:** For levels 4-10, asymmetric layouts above `md:` MUST collapse to strict single-column (`w-full`, `px-4`, `py-8`) on viewports `< 768px`.
+These hold on every build, whatever the direction. `inspect.mjs` measures them.
 
-### MOTION_INTENSITY (Level 1-10)
-* **1-3 (Static):** No automatic animations. CSS `:hover` and `:active` states only. `prefers-reduced-motion` is the default mode anyway.
-* **4-7 (Fluid CSS):** `transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1)`. `animation-delay` cascades for load-ins. Focus on `transform` and `opacity`.
-* **8-10 (Advanced Choreography):** Complex scroll-triggered reveals, parallax, scroll-driven animation (CSS `animation-timeline` or GSAP ScrollTrigger). Use Motion hooks. **NEVER use `window.addEventListener('scroll')`** - it is a hard ban, not a "prefer-not." See Section 5.D for the allowed alternatives.
+| Rule | Instead |
+| --- | --- |
+| **Headlines: two lines or fewer, at every width.** Every `h1`–`h6`, and the main line of the first screen whatever its tag. | Cut words. Then widen the measure. Size last. |
+| **A clear title on the first screen**, in the page's one `h1`, and a heading on every section. | Say what this is: the name with what it does, the product with what it is for, the event with its date and place. |
+| **Equal outer margins; no section huddled on one side** with the other half of the screen empty. | Close every void with something on its far side: the section's picture, a second column, a list, a figure. |
+| **No blank stretches** taller than about half a screen. | The normal section gap. A deliberate rest is a placed picture or a field of colour, once per page. |
+| **Statements are paragraphs.** An intro sentence or a quotation set large is marked up as `<p>` or `<blockquote>`, stays at statement size (36px or less on desktop, 24px on a phone) and runs to about 25 words, three lines. | Larger than that it is a headline and the two-line rule applies. In blind tests jurors read a 42px sentence over four lines as a four-line headline. |
+| **No eyebrows.** No small label above a heading, no pill badge above the headline, no "New ·" chip. | Put the information in the heading or the first sentence, or drop it. |
+| **No monospace** outside real code blocks. | The text face. Tabular figures where numbers align. |
+| **No index numbering.** No 01 / 02 / 03, no (001), no "Step 2". | Order shown by position, size, or the words. A real `<ol>` if order matters. |
+| **No thin rules.** No hairline dividers, no 1px outlined boxes, no grid lines, crosshairs or crop marks. | Space. A step in background tone. A change of scale. A filled shape. |
+| **No gradients.** Not as backgrounds, not on buttons, not in text. | Flat colour, or a real photograph. A neutral scrim under text on a photo is the one exception. |
+| **No shadows on things at rest.** No glows. | A tone step between surfaces. Shadows only on what truly floats: a menu, a dialog. |
+| **No assistant palette.** No yellow-cream ground with terracotta or rust; no violet or indigo. | The dealt palette. |
+| **No tiny uppercase letter-spaced labels.** | Sentence case at a readable size. |
+| **No icon-topped feature cards, no rows of identical cards.** | The dealt section blueprint. |
+| **No glass.** No backdrop blur panels, no floating pill navigation. | A plain bar: wordmark, a few links, one action. |
+| **No emoji, no gradient blobs, no decorative shapes, no fake dashboards of grey bars.** | A real picture, a real interface fragment, or nothing. |
+| **No styled accent word** in a headline (italic, serif, coloured, underlined). | One face, one colour. The words carry the emphasis. |
+| **Two typefaces at most,** usually one. | The dealt type system. |
 
-### VISUAL_DENSITY (Level 1-10)
-* **1-3 (Art Gallery):** Lots of white space. Huge section gaps (`py-32` to `py-48`). Expensive, clean.
-* **4-7 (Daily App):** Standard web app spacing (`py-16` to `py-24`).
-* **8-10 (Cockpit):** Tight paddings. No card boxes; 1px lines separate data. Mandatory: `font-mono` for all numbers.
+Three places keep their own conventions and are left alone by the inspector: real code in
+`<pre>`/`<code>` (monospace is correct there), real tables and form fields (they may have lines), and
+a real interface fragment whose root carries the attribute `data-ui` (the product's own borders and
+menus; see `references/imagery.md` §7).
 
----
+Why these, honestly. Some are what the study measured: among the 247 sites, those the panel scored
+7.5 or higher used icon feature cards 1% of the time against 28% for sites under 6.5, pill badges 14%
+against 34%, gradients 22% against 52%, shadows 24% against 48%, tiny tracked caps 16% against 57%.
+Others are the owner's taste and go against current gallery fashion: monospace labels, index numbers
+and hairline grids are actually *more* common on award sites than on weak ones, which is exactly why
+generators imitate them and why they now read as costume. They are banned here without exception.
+`references/tells.md` keeps the dated registry.
 
-## 8. DARK MODE PROTOCOL
+Removing ornament leaves space. Never fill it with another ornament. Fill it with scale (make the main
+thing larger), with the full content, with a picture made for this subject, or with a field of flat
+colour. Leave it empty on purpose once per page at most.
 
-Dual-mode by default. Never assume light-only unless the brief is print-emulating editorial.
+## Laws of the craft
 
-### 8.A Token Strategy (pick one, stick to it)
-* **Tailwind `dark:` variant** (default for utility-first projects): every color utility paired with its dark variant (`bg-white dark:bg-zinc-950`, `text-gray-900 dark:text-gray-100`).
-* **CSS variables** (for shadcn/ui, Radix Themes, or component libraries with theming): define semantic tokens (`--surface`, `--surface-elevated`, `--text-primary`, `--accent`) and swap values under `[data-theme="dark"]` or `@media (prefers-color-scheme: dark)`.
+Short form. Numbers are from the study unless marked as house style.
 
-### 8.B Do Not Prescribe Specific Colors Here
-The brief and brand decide. This skill enforces only:
-* **Contrast** - WCAG AA minimum for body text, AAA target for hero copy.
-* **Hierarchy parity** - visual hierarchy that works in light must work in dark. If a CTA pops in light, it pops in dark.
-* **Brand fidelity** - primary brand color stays recognisable. Don't desaturate the brand into a dark mode.
-* **No pure `#000000` and no pure `#ffffff`** - use off-black (zinc-950, near-black warm gray) and off-white. Pure values kill depth.
+**Type**
+- Two or three sizes do the visible work: one very large, one small, nothing in between. Median
+  headline-to-body ratio on the studied sites is 4.3; the best go far beyond (largest type: median
+  8.4vw on the top sites against 5.0vw on the weak ones).
+- Display type: tracking -0.02 to -0.05em, leading 0.85–1.05. Text: 16–20px, leading 1.45–1.6,
+  45–75 characters per line.
+- Five sizes on a page is the ceiling. One family is normal (a third of the studied sites); two is the
+  limit.
+- Left-aligned by default. Centre at most one moment.
 
-### 8.C Default Mode
-Respect `prefers-color-scheme` unless the brand insists. Add a manual toggle if either mode would lose key brand expression.
+**Space**
+- One grid, one pair of tight margins (16–32px), used everywhere; large things run to the edges. Text
+  blocks share two or three left edges on the whole page.
+- Asymmetry inside the grid, never in the frame: the two outer margins are equal, and an off-centre
+  heading is answered by something at the far side of the grid.
+- The gap between sections is clearly larger than any gap inside one: 120–240px on desktop (the study's median is about 240).
+- Each section has a different composition from its neighbours; none is a card grid.
 
-### 8.D Test in Both Modes Before Finishing
-Open the page in both modes during development. Do not ship a page you've only seen in one mode.
+**Colour**
+- One ground, one ink, one accent. The accent appears on the action and perhaps one other thing.
+- Running text in the full ink. A page set in soft grey reads unfinished.
+- Surfaces are separated by a small step in tone, never by a line or a shadow.
+- A section may change the whole field colour. Nothing fades into anything.
 
----
+**Imagery**
+- One dominant image beats six small ones. On the top-scored sites the hero media covers at least half
+  the first screen 68% of the time.
+- Same crop ratios, same treatment, square corners unless the direction says otherwise (73% of the
+  studied sites leave media square).
+- No image is better than a placeholder, an icon, or an abstract shape. A picture drawn for this
+  subject, in its colours and with care, is better than either. A real picture of its world, found
+  and credited, is better still.
+- Every found picture is downloaded into the project, credited on the page and listed in the report.
+  None is presented as the client's own.
+- Nothing ever lies on top of a headline or a statement (the inspector fails it).
 
-## 9. AI TELLS (Forbidden Patterns) + 10. REFERENCE VOCABULARY
-
-**→ `references/ai-tells.md`** — the forbidden-pattern catalog (visual/CSS, copy, layout, motion tells) and the pattern-name vocabulary the agent should know. Consult it during the Section-14 pre-flight pass and whenever a design starts to feel generic.
-
-## 11. REDESIGN PROTOCOL
-
-This skill handles **greenfield builds AND redesigns**. Misclassifying the mode is the single biggest source of bad redesign output.
-
-### 11.A Detect the Mode (first action)
-* **Greenfield** - no existing site, or full overhaul approved. Dial baseline from Section 1.
-* **Redesign - Preserve** - modernise without breaking the brand. Audit first, extract brand tokens, evolve gradually.
-* **Redesign - Overhaul** - new visual language on top of existing content. Treat as greenfield for visuals; preserve content and IA.
-
-If ambiguous, ask **once**: *"Should this redesign preserve the existing brand, or are we starting visually from scratch?"*
-
-### 11.B Audit Before Touching
-Document the current state before proposing changes:
-* **Brand tokens** - primary / accent colors, type stack, logo treatment, radii.
-* **Information architecture** - page tree, primary nav, key conversion paths.
-* **Content blocks** - what exists, what's doing work, what's filler.
-* **Patterns to preserve** - signature interactions, recognisable hero, copy voice.
-* **Patterns to retire** - AI-slop tells, broken layouts, dead links, generic stock imagery, perf traps.
-* **Dial reading of the existing site** - infer current `DESIGN_VARIANCE` / `MOTION_INTENSITY` / `VISUAL_DENSITY`. That's your starting point, not the baseline.
-* **SEO baseline** - current ranking pages, meta titles, structured data, OG cards. **SEO migration is the #1 redesign risk.**
-
-### 11.C Preservation Rules
-* **Do not change information architecture** unless asked. Keep page slugs, anchor IDs, primary nav labels stable for SEO and muscle memory.
-* **Extract brand colors before applying Section 4.2.** A brand that is already purple stays purple - apply the LILA RULE's override.
-* **Preserve copy voice** unless asked for a rewrite. Visual modernisation ≠ content rewrite.
-* **Honor existing accessibility wins.** Do not regress focus states, alt text, keyboard nav, contrast.
-* **Respect existing analytics events.** Do not rename buttons, form fields, section IDs that downstream tracking depends on.
-
-### 11.D Modernisation Levers (priority order)
-Apply in order - stop when the brief is satisfied:
-1. **Typography refresh** - biggest visual lift per unit of risk.
-2. **Spacing & rhythm** - increase section padding, fix vertical rhythm.
-3. **Color recalibration** - desaturate, unify neutrals, keep brand accent.
-4. **Motion layer** - add `MOTION_INTENSITY`-appropriate micro-interactions to existing components.
-5. **Hero & key-section recomposition** - restructure top-of-funnel using Section 10 vocabulary.
-6. **Full block replacement** - only when the existing block is unsalvageable.
-
-### 11.E Decision Tree: Targeted Evolution vs Full Redesign
-* IA, content, and SEO sound → **targeted evolution** (Levers 1-4). ~70% of value at ~40% of risk.
-* Visual debt is structural (broken IA, no design system, broken mobile) → **full redesign** with strict content preservation.
-* Brand itself is changing → **greenfield**.
-
-### 11.F What Never Changes Silently
-Never modify without explicit user approval:
-* URL structure / route slugs.
-* Primary nav labels.
-* Form field names or order (breaks analytics + autofill).
-* Brand logo or wordmark.
-* Existing legal / consent / cookie copy.
-
----
-
-## 12. THE BLOCK LIBRARY (Contract - Implementations Land Here Iteratively)
-
-The Reference Vocabulary (Section 10) names patterns. The Block Library implements them with real props, real motion specs, and real code sketches.
-
-**Status:** schema defined here. Blocks will be added iteratively. Do not freelance new blocks without following this schema.
-
-### 12.A File Location
-```
-skills/taste-skill/blocks/
-  hero/
-    asymmetric-split.md
-    editorial-manifesto.md
-    kinetic-type.md
-    ...
-  feature/
-    bento-grid.md
-    sticky-scroll-stack.md
-    zig-zag.md
-    ...
-  social-proof/
-  pricing/
-  cta/
-  footer/
-  navigation/
-  portfolio/
-  transition/
-```
-
-### 12.B Required Frontmatter
-```yaml
----
-name: asymmetric-split-hero
-category: hero
-dial_compatibility:
-  variance: [6, 10]
-  motion: [3, 10]
-  density: [2, 5]
-when_to_use: "Landing pages with one strong asset and one strong message. Default hero for SaaS, agency, premium consumer."
-not_for: "Editorial / manifesto launches where the message IS the design."
-stack: ["react", "next", "tailwind", "motion"]
----
-```
-
-### 12.C Required Body Sections
-1. **Visual sketch** - short ASCII or description of the layout.
-2. **Props API** - the component's interface.
-3. **Code sketch** - minimal working implementation (Server Component default, Client island for motion).
-4. **Mobile fallback** - explicit collapse rules for `< 768px`.
-5. **Motion variants** - one variant per `MOTION_INTENSITY` band (1-3, 4-7, 8-10). Reduced-motion fallback explicit.
-6. **Dark-mode notes** - token strategy specific to this block.
-7. **Anti-patterns** - common ways this block goes wrong.
-8. **References** - links to real examples in production.
-
-### 12.D Block-Library Discipline
-* One block per file. No multi-block files.
-* Every block must work standalone (drop it into a page, it renders).
-* Every block must pass the Pre-Flight Check (Section 14).
-* Blocks that depend on a design system from Section 2.A live under `blocks/<category>/<name>--<system>.md` (e.g. `feature/bento-grid--material.md`).
-
----
-
-## 13. OUT OF SCOPE
-
-This skill is NOT for:
-* Dashboards / dense product UI / admin panels (use Fluent, Carbon, Atlassian, or Polaris from Section 2.A).
-* Data tables (use TanStack Table or AG Grid).
-* Multi-step forms / wizards (use Form-specific patterns; this skill won't make them better).
-* Code editors (use Monaco / CodeMirror with their official skinning).
-* Native mobile (use Apple HIG / Material directly).
-* Realtime collab UIs (presence, cursors, OT-aware - different problem class).
-
-If the brief is one of the above, **say so explicitly**, point to the right tool, and only apply this skill's marketing-page / about-page / landing-page parts to the surfaces where they apply.
-
----
-
-## 14. FINAL PRE-FLIGHT CHECK
-
-Run this matrix before outputting code. This is the last filter.
-
-**THIS IS NOT OPTIONAL. Run every box. If any box fails, the output is not done.**
-
-- [ ] **Brief inference** declared (Section 0.B one-liner)?
-- [ ] **Dial values** explicit and reasoned from the brief, not silently using baseline?
-- [ ] **Design system** chosen from Section 2 if applicable, or aesthetic labeled honestly?
-- [ ] **Redesign mode** detected and audit performed (if applicable, Section 11)?
-- [ ] **ZERO em-dashes (`—`) anywhere on the page.** Headlines, eyebrows, pills, body, quotes, attribution, captions, buttons, alt text. Zero. (Section 9.G - non-negotiable.)
-- [ ] **Page Theme Lock**: ONE theme (light, dark, or auto) for the whole page. No section flips to inverted mode mid-page (Section 4.11)?
-- [ ] **Color Consistency Lock**: one accent color used identically across all sections (Section 4.2)?
-- [ ] **Shape Consistency Lock**: one corner-radius system applied consistently (Section 4.4)?
-- [ ] **Button Contrast Check**: every CTA text is readable against its background (no white-on-white, WCAG AA 4.5:1)?
-- [ ] **CTA Button Wrap**: no CTA label wraps to 2+ lines at desktop?
-- [ ] **Form Contrast Check**: form inputs, placeholders, focus rings, labels all pass WCAG AA against the section background?
-- [ ] **Serif discipline**: if a serif is used, it is NOT Fraunces or Instrument_Serif (or it is, with explicit brand justification)? Different serif from your previous project?
-- [ ] **Premium-consumer palette check**: if the brief is premium-consumer (cookware / wellness / artisan / luxury), the palette is NOT the AI-default beige+brass+oxblood+espresso family? Different family from your previous premium-consumer project?
-- [ ] **Italic descender clearance**: every italic word with `y g j p q` has `leading-[1.1]` min + `pb-1` reserve?
-- [ ] **Hero fits the viewport**: headline ≤ 2 lines, subtext ≤ 20 words AND ≤ 4 lines, CTA visible without scroll, font scale planned around image?
-- [ ] **Hero top padding**: max `pt-24` at desktop, hero content does not float halfway down the viewport?
-- [ ] **Hero stack discipline**: max 4 text elements in hero (eyebrow OR brand strip, headline, subtext, CTAs)? No tiny tagline below CTAs, no trust micro-strip in hero?
-- [ ] **EYEBROW COUNT (mechanical)**: count instances of `uppercase tracking` micro-labels above section headlines across all components. Count ≤ ceil(sectionCount / 3)? Hero counts as 1.
-- [ ] **Split-Header Ban**: no "left big headline + right small explainer paragraph" pattern as a section header (vertical stack instead)?
-- [ ] **Zigzag Alternation Cap**: no 3+ consecutive sections with the same image+text-split layout?
-- [ ] **No Duplicate CTA Intent**: no two CTAs with the same intent ("Get in touch" + "Let's talk" both on page = Fail)?
-- [ ] **Logo wall = logo only**: no industry / category labels printed below logos?
-- [ ] **Bento Background Diversity**: at least 2-3 bento cells have real visual variation (image, gradient, pattern), not all white-on-white text cards?
-- [ ] **"Used by / Trusted by" logo wall** lives UNDER the hero, not inside it, uses REAL SVG logos (Simple Icons / devicon) or generated SVG marks, NOT plain text wordmarks?
-- [ ] **Copy Self-Audit**: every visible string re-read, no grammatically-broken or AI-hallucinated phrases ("free on its past" type) shipped?
-- [ ] **Motion motivated**: every animation can be justified in one sentence (hierarchy / storytelling / feedback / state transition), no GSAP-for-show?
-- [ ] **Marquee max-one-per-page**: no two horizontal marquees on the same page?
-- [ ] **Navigation on ONE line** at desktop, height ≤ 80px?
-- [ ] **Section-Layout-Repetition** check: no two sections share the same layout family (at least 4 different families across 8 sections)?
-- [ ] **Bento has rhythm AND exact cell count** (N items → N cells, no empty cells in middle or at end)?
-- [ ] **Long lists use the right UI component** (not default `<ul>` with `divide-y` for > 5 items - see Section 4.9 alternatives)?
-- [ ] **Real images used** (gen-tool first, then Picsum-seed, then explicit placeholder slots) - NO div-based fake screenshots, NO hand-rolled decorative SVGs, NO pure-text minimalism?
-- [ ] **No pills/labels overlaid on images** (no `Plate · Brand`, no `Field notes - journal`)?
-- [ ] **No photo-credit captions as decoration** (`Field study no. 12 · Ines Caetano`)?
-- [ ] **No version footers** (`v1.4.2`, `Build 0048`) on marketing pages?
-- [ ] **No micro-meta-sentences** under eyebrows ("Each of these is a feature we ship today...")?
-- [ ] **No decoration text strip at hero bottom** (`BRAND. MOTION. SPATIAL.`)?
-- [ ] **No floating top-right sub-text** in section headings?
-- [ ] **No scoring/progress bars with filled background tracks** as comparison visuals?
-- [ ] **No locale / city-name / time / weather strips** unless brief is genuinely globally-distributed or place-focused?
-- [ ] **No scroll cues** (`Scroll`, `↓ scroll`, `Scroll to explore`)?
-- [ ] **No version labels in hero** (V0.6, BETA, INVITE-ONLY) unless the brief is a launch?
-- [ ] **No section-numbering eyebrows** (`00 / INDEX`, `001 · Capabilities`, `06 · how it works`)?
-- [ ] **No decorative dots** (zero by default, only for real semantic state)?
-- [ ] **No `border-t` + `border-b` on every row** of long lists / spec tables?
-- [ ] **Content density** sane: no 20-row data tables, no fake-precise specs without justification, ≤ 25-word sub-paragraphs by default?
-- [ ] **Quotes ≤ 3 lines** of body, attribution clean (no em-dash)?
-- [ ] **Motion claimed = motion shown**: if `MOTION_INTENSITY > 4`, page actually animates, not just claimed?
-- [ ] **GSAP sticky-stack / horizontal-pan** implemented per Section 5.A / 5.B canonical skeleton (`start: "top top"`, `pin: true`, correct scrub)?
-- [ ] **No `window.addEventListener('scroll')`** - using Motion `useScroll()` / ScrollTrigger / IntersectionObserver / CSS scroll-driven animations only?
-- [ ] **Reduced motion** wrapped for everything `MOTION_INTENSITY > 3`?
-- [ ] **Dark mode** tokens defined and tested in both modes?
-- [ ] **Mobile collapse** explicit (`w-full`, `px-4`, `max-w-7xl mx-auto`) for high-variance layouts?
-- [ ] **Viewport stability**: `min-h-[100dvh]`, never `h-screen`?
-- [ ] **`useEffect` animations** have strict cleanup functions?
-- [ ] **Empty / loading / error** states provided?
-- [ ] **Cards omitted** in favor of spacing where possible?
-- [ ] **Icons** from an allowed library only (Phosphor / HugeIcons / Radix / Tabler), no hand-rolled SVG paths?
-- [ ] **Motion** isolated in client-leaf components with `'use client'` at the top, memoized?
-- [ ] **No AI Tells** from Section 9 (Inter as default, AI-purple, three-equal cards, Jane Doe, Acme, "Quietly in use at")?
-- [ ] **Core Web Vitals** plausibly hit (LCP < 2.5s, INP < 200ms, CLS < 0.1)?
-- [ ] **One design system** per project (no Material + shadcn mixed)?
-
-If a single checkbox cannot be honestly ticked, the page is not done. Fix it before delivering.
-
----
+**Components**
+- Buttons: flat, one fill colour, either square-cornered or fully round, decided once (top sites: 52%
+  square, 23% pill; the 9–16px "soft" radius is the weak-site default). Most strong heroes have no
+  button at all, or one.
+- Navigation: wordmark, three to five plain links, one action. No bar chrome.
+- The footer is a designed close, not a sitemap: on most strong sites the name returns at full width.
 
 ## DoD gate (verification)
 
-- One-line Design Read declared before generating (page kind + audience + vibe + system family); at most ONE clarifying question, only on genuine divergence.
-- Three dials set explicitly from the read (`DESIGN_VARIANCE` / `MOTION_INTENSITY` / `VISUAL_DENSITY`) — never silent baseline.
-- Section 2 honesty: official package for real design systems, aesthetics labeled as honest implementations; one design system per project.
-- Consistency locks held across the whole page: one theme, one accent color, one corner-radius system.
-- Zero em-dashes; no Section-9 AI tells (Inter default, AI-purple, three-equal cards, Jane Doe / Acme, beige+brass on premium-consumer, serif default / Fraunces / Instrument_Serif).
-- Real imagery only (gen-tool → Picsum-seed → labeled placeholder); no fake screenshots, hand-rolled SVG icons, or decorative overlays.
-- Motion claimed = motion shown (`MOTION_INTENSITY > 4` actually animates); reduced-motion wrapped above 3; Motion isolated in `'use client'` leaves; no `window.addEventListener('scroll')`.
-- Section 14 pre-flight matrix honestly ticked, every box — a single unfixable box means not done.
+- `inspect.mjs` shows **0 FAIL** at 1440, 768 and 390, on the final version of the page.
+- You opened every screenshot it listed after the last change, not only the first screen.
+- With scroll scenes: `scenes.mjs` ran on the final page with no problems, and you read every sheet
+  (desktop, phone, reduced motion).
+- A stranger reading the first screen for five seconds can say what this is and what to do.
+- Every section has a heading; the margins match on both sides; no stretch of the page is empty.
+- The critique of your last round is written down in the shape of `references/critique.md` §4.
+- A direction was dealt by `scripts/draw.mjs` (or `--app`); the report names it and its seed, the last
+  critique scores, every found picture's credit, every stand-in drawing and sample text to replace,
+  and (headless) every `~assumed` choice. No check is claimed that did not run.
+- Without Node 22 or Chrome the inspector lines above give way to the fallback in
+  `references/special-cases.md`, and the report says so.
 
-## APPENDICES - Real Source-Backed Reference Material
+## Files
 
-**→ `references/appendices.md`** — vendored install commands per design system (Appendix A), canonical source links (Appendix B), and the Apple Liquid Glass honest-approximation recipe (Appendix C).
+| File | Read it when |
+| --- | --- |
+| `references/app-screens.md` | Any dashboard, admin, settings or other app screen: its own run, rules, tokens and checks. |
+| `references/copy.md` | Writing the argument and the copy deck (steps 2 and 5). The two-line arithmetic. |
+| `references/type.md` | Setting type: scales, tracking, measure, loading fonts, pairing. |
+| `references/colour.md` | Applying the palette: roles, proportions, tone steps, dark pages, contrast. |
+| `references/layout.md` | Grid, margins, rhythm, section variety, navigation, footer, the phone composition. |
+| `references/imagery.md` | Choosing, finding, crediting, cropping and treating pictures; what to do with none. |
+| `references/motion.md` | Step 9. Budget, tokens, recipes, reduced motion. |
+| `references/scenes.md` | Step 6, when the sheet deals scroll scenes: putting one on a page, filling, fitting, the phone, checking, the catalogue. |
+| `references/special-cases.md` | Before step 1, in any case the pointer above "The run" lists. |
+| `references/critique.md` | Step 8. How to look, how to score, what to fix first. |
+| `references/tells.md` | The dated registry of generated-page tells and what each is replaced by. |
+| `references/research.md` | The study: method, numbers, what the best and worst sites do. Cite it, do not guess. |
+| `scripts/draw.mjs` | Deals and reprints the direction; `--photos`, `--site <id>` for more references; `--app` deals an app style instead. |
+| `scripts/assets.mjs` | Step 6: searches open collections for real pictures of the subject's world; `--get` downloads with the credit, `--credits` prints them. |
+| `scripts/lint.mjs` · `scripts/inspect.mjs` | The gate. |
+| `scripts/scenes.mjs` | The gate for scroll scenes: each scene at 0-100% of its hold, desktop, phone, reduced motion. |
+| `assets/base.css` · `assets/base.js` | An optional neutral foundation to build on. |
+| `assets/scenes/` | The scroll scenes: the shared stage (`stage.js`, `stage.css`) and, for each scene in the library, its `.js`, `.css` and a working demo page in `demo/`. |
+| `assets/app.css` · `assets/charts.js` | For app screens: a neutral shell, panels, tables and controls, and small SVG charts drawn to the app rules. |
+| `assets/library/` | The data the draw reads: directions, heroes, sections, type systems, palettes, photographs, studied sites, motions, scroll scenes (`scenes.json`), and the app styles, shells and screen patterns (`app.json`). Do not read it whole; use the script. |
