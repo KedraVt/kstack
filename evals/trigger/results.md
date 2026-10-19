@@ -100,3 +100,19 @@ Two harness bugs cost a round each and are worth knowing about:
 2. The first validation attempt ran one arm before the other, so the cold
    endpoint penalized the first arm. Arms must be paired in the same window —
    that is what round 1 does.
+
+## Two limits of this measurement
+
+- **The eval loaded the catalog only.** `--skill <catalog dir>` replaces the
+  automatic skill discovery, so the personal skills in `~/.pi/agent/skills` were
+  not in the routing space. In a real session they are, and three of them
+  (`impeccable`, `mindrun`, `retro`) carry descriptions that overlap the
+  catalog's `kstack-impeccable`, `kstack-mindrun` and `kstack-retro` — the
+  "overlapping descriptions" failure the rulebook calls the #1 cause of
+  routing failure. The personal `design-taste-frontend` was removed once the
+  catalog port passed its eval; the other three are still there and still
+  compete.
+- **The raw traces are not checked in.** `results/*.jsonl` keeps the case, the
+  prompt, the outcome and the verdict for every run (840 runs); the tool traces
+  stay out of the repository.
+
