@@ -38,7 +38,11 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
+    "css-select": "^7.0.0",
+    "css-tree": "^3.2.1",
     "diff": "^9.0.0",
+    "domutils": "^4.0.2",
+    "htmlparser2": "^12.0.0",
     "playwright": "^1.62.1",
     "sharp": "^0.35.5",
     "socks": "^2.8.10"
