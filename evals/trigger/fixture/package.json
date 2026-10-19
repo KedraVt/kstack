@@ -1,0 +1,1 @@
+{ "name": "acme-app", "scripts": { "dev": "next dev", "test": "node --test" }, "dependencies": { "next": "15", "react": "19" } }

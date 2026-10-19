@@ -1,0 +1,210 @@
+{
+ "kstack-design-taste-frontend": {
+  "fire": [
+   "build a landing page for my bakery, its called Pane Nero, we're in Turin, open 6am-2pm. static html is fine",
+   "our marketing site looks like every other AI-generated SaaS page. can you redo the homepage so it actually looks designed?",
+   "Make a portfolio homepage for me — I'm a wedding photographer in Bristol, 10 years, I want it to feel editorial",
+   "design the main dashboard screen for our invoicing app: unpaid total, overdue list, cashflow chart. React + Tailwind",
+   "the hero on src/pages/index.astro looks templated (gradient blob, three icon cards). restyle it",
+   "I need a one-pager for a 2-day jazz festival in Lyon, 14-15 June, lineup TBA, tickets 40 euros",
+   "create the settings + billing screen for our SaaS, members table, plan, invoices. it should not look like a bootstrap admin",
+   "redesign our product page for the Kiln coffee dripper, it feels cheap and generic",
+   "make this look premium and less AI-made: app/landing/page.tsx",
+   "build an inbox screen for our support tool — conversation list, SLA timers, assignee"
+  ],
+  "near": [
+   "audit the accessibility of our checkout page, contrast and focus states mostly",
+   "the settings form has inconsistent spacing and the error states are missing — polish it, keep the current look",
+   "review this plan's UX before we build it: plan.md describes the onboarding flow",
+   "the login page throws a 500 after submit, can you figure out why",
+   "write e2e tests for the signup flow and check it works in the browser",
+   "add a dark mode toggle to the existing settings component, same styling as the rest",
+   "refactor the Button component to use variants instead of 6 boolean props",
+   "QA the new cart feature on localhost:3000 and tell me what's broken",
+   "write the copy for our pricing page FAQ, just the text, no code",
+   "our lighthouse performance score dropped to 54, find out what's slowing the homepage"
+  ]
+ },
+ "kstack-impeccable": {
+  "fire": [
+   "audit this page for UX problems: src/app/checkout/page.tsx",
+   "the onboarding flow feels bland, make it delight users without changing the brand",
+   "polish the empty states and error states in our dashboard",
+   "critique the visual hierarchy of the settings screen, too many things compete",
+   "this modal feels loud, tone it down",
+   "harden the forms on the account page — validation, focus, disabled states",
+   "check our app shell for accessibility issues and fix them",
+   "the typography and spacing in the pricing table are off, can you fix the rhythm",
+   "add micro-interactions to the buttons and toggles in components/ui so it feels more alive",
+   "review the existing UI of the admin panel and tell me what to improve first"
+  ],
+  "near": [
+   "build a brand-new landing page for my yoga studio from scratch",
+   "the API returns 403 for admins since yesterday's deploy",
+   "review the diff on this branch before I merge it",
+   "write a design doc for the new notifications service",
+   "test the signup flow end to end in the browser and report bugs",
+   "give our marketing site a completely new art direction, the current one is generic",
+   "draft an implementation plan for adding SSO",
+   "the bundle is 4MB, reduce it",
+   "add unit tests for utils/date.ts",
+   "check this plan's design decisions before we implement: .kstack/plans/onboarding.md"
+  ]
+ },
+ "kstack-qa": {
+  "fire": [
+   "test this: the new coupon flow on http://localhost:5173, does it work?",
+   "QA the branch before merge, the app runs on :3000",
+   "can you click through the signup and checkout like a real user and report bugs",
+   "does the password reset work? check it in the browser",
+   "run the e2e suite and also manually check the settings page, report-only, dont fix",
+   "verify the fix for the cart total end to end",
+   "find bugs on our staging site staging.example.com, just report them with severity",
+   "regression test the dashboard after the refactor, compare against before",
+   "smoke test the app after upgrading react to 19",
+   "check every form on the contact and booking pages works, including validation errors"
+  ],
+  "near": [
+   "why does test/auth.spec.ts fail only in CI? it passes locally",
+   "write a failing test first and then implement the discount rule",
+   "review the code in this PR for security issues",
+   "the login button looks off, polish the styling",
+   "set up a github actions pipeline that runs our tests",
+   "ship this branch: commit, push and open a PR",
+   "investigate why the cart total is wrong, I think it's the discount",
+   "write documentation for the testing setup",
+   "plan how we should add end-to-end testing to this repo",
+   "review the architecture of the payment module"
+  ]
+ },
+ "kstack-grilling": {
+  "fire": [
+   "interview me about this feature before you plan anything",
+   "ask me questions until you really understand what I want, dont assume",
+   "I want export to CSV but im not sure about the details. grill me",
+   "before writing the plan, interrogate my requirements for the billing change",
+   "don't assume my requirements — ask me what you need for the new permissions model",
+   "quiz me on the edge cases of the import feature, one round at a time",
+   "help me pin down the decisions for the API versioning, ask me the hard questions",
+   "my spec is vague, question me until it isn't",
+   "challenge my requirements for the offline mode feature",
+   "what do you need to know from me before we design the notifications? ask"
+  ],
+  "near": [
+   "I have a raw idea for a habit tracker app, help me shape it into a direction",
+   "review plan.md for engineering risks",
+   "write the implementation plan from understand.md",
+   "brainstorm 5 product ideas for freelancers",
+   "write user stories for the checkout",
+   "explain how our auth middleware works",
+   "summarize this meeting transcript",
+   "debug why the cron job runs twice",
+   "translate the README to italian",
+   "turn these notes into a design doc"
+  ]
+ },
+ "kstack-idea-refine": {
+  "fire": [
+   "I have a rough idea: a tool that turns support tickets into docs. help me refine it",
+   "refine this feature idea before we plan: team-shared bookmarks",
+   "here's a half-baked idea for our app, can you sharpen it into something buildable",
+   "expand on this idea and give me a few directions: AI summaries of PRs",
+   "help me think through variations of a referral program for our SaaS",
+   "is this idea any good? a CLI that tracks your coffee intake. push back",
+   "turn my vague idea into a one-pager with an MVP scope",
+   "explore different angles for 'smart reminders' in our todo app",
+   "what's the simplest version of this idea that still works: collaborative playlists",
+   "stress the assumptions in my idea for a marketplace of used camera gear"
+  ],
+  "near": [
+   "write the full implementation plan for the referral program",
+   "ask me questions about the requirements, one round at a time",
+   "review the engineering plan in plan.md",
+   "fix the flaky test in test/cart.spec.ts",
+   "build the landing page for the coffee CLI",
+   "write the ADR for choosing postgres",
+   "code review my diff",
+   "explain this regex",
+   "set up docker for this project",
+   "write release notes for v2.3"
+  ]
+ },
+ "kstack-office-hours": {
+  "fire": [
+   "lets do office hours on my startup idea, an app for climbing gyms",
+   "help me figure out what we should build next for the product",
+   "stress-test this proposal before we commit: moving to event sourcing",
+   "I need technical discovery for a new feature: real-time collaboration on docs",
+   "help me think through the architecture options for a plugin system",
+   "find the wedge for our B2B analytics product",
+   "challenge this design: one service per customer tenant",
+   "shape this feature with me before any planning: shared workspaces",
+   "product discovery session: do we build mobile first or web first",
+   "I have a pre-designed architecture, poke holes in it before we plan"
+  ],
+  "near": [
+   "write plan.md for the plugin system we already agreed on",
+   "review the engineering plan for blast radius",
+   "refine this small UI idea: a better empty state",
+   "ask me clarifying questions about the CSV export requirements",
+   "implement the shared workspaces feature",
+   "debug the websocket disconnects",
+   "write the system design doc with aggregates and invariants for sprint 3",
+   "create the user story for shared workspaces",
+   "audit the whole codebase for tech debt",
+   "write the README for the plugin API"
+  ]
+ },
+ "kstack-investigate": {
+  "fire": [
+   "debug this: TypeError: Cannot read properties of undefined (reading 'id') in orders/service.ts",
+   "why is the login broken since yesterday's deploy",
+   "find the root cause of the duplicated emails, dont just patch it",
+   "the test passes alone but fails in the full suite, figure out why",
+   "it was working last week and now the export returns empty files",
+   "our api returns 500 on POST /orders sometimes, investigate",
+   "something's wrong with the date filter, results are off by one day",
+   "intermittent crash in the worker, stack trace in logs/worker.log",
+   "trace why the cache never invalidates after an update",
+   "regression: search got slow after the last merge, root cause please"
+  ],
+  "near": [
+   "add a new endpoint for exporting orders",
+   "review my PR for bugs before merge",
+   "QA the export feature in the browser and report issues",
+   "write tests for orders/service.ts",
+   "refactor the date filter to use date-fns",
+   "plan the migration to postgres 17",
+   "explain how the cache layer works",
+   "improve the error messages on the login form",
+   "set up logging with pino",
+   "audit the whole repo for code quality issues"
+  ]
+ },
+ "kstack-triage": {
+  "fire": [
+   "users are reporting that the export button does nothing since monday",
+   "a customer says their invoices show the wrong currency, can you help me figure out what it is",
+   "we got a bug report from support: search returns nothing for some accounts",
+   "support forwarded a ticket: the mobile app logs people out every few minutes",
+   "a teammate says checkout is broken for them but works for me, where do I start",
+   "QA filed a vague ticket: dashboard numbers look wrong sometimes",
+   "our biggest client emailed: reports are missing data for last week",
+   "someone on slack said uploads fail, no details yet",
+   "bug report from a user: emails arrive twice, I have not looked at anything yet",
+   "a user says the app is slow, I need to understand the problem before touching code"
+  ],
+  "near": [
+   "debug this: TypeError in orders/service.ts line 42",
+   "the test in test/cart.spec.ts fails, find out why",
+   "QA the export feature in the browser",
+   "interview me about the requirements of the export feature",
+   "write a regression test for the double email bug",
+   "refine my idea for a status page",
+   "review my diff",
+   "the root cause is a missing index, now fix it properly",
+   "add retry logic to the email sender",
+   "write the incident postmortem for yesterday"
+  ]
+ }
+}
