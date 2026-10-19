@@ -14,7 +14,7 @@ description: >-
   stress-testing an already-drafted plan (use kstack-plan-eng-review), or
   for drafting the full plan artifact (use kstack-plan-draft).
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
 compatibility: Writes the embryonic plan doc under .kstack/plans/.
 ---
 
@@ -96,7 +96,7 @@ user's instinct inflates scope. The user decides; you advise.
 ## Phase 3: Write the one-pager — the plan doc is born
 
 Once the user picks a direction, write it to the plan document: the path
-the workflow/parent specifies (`{plan_file}` in orchestrated runs);
+the step specifies (`plan.md` in develop, `understand.md` in sprint);
 standalone, `.kstack/plans/<kebab-idea-slug>.md`. This file is the
 **embryonic living plan**: grilling evolves it with interrogated
 decisions, plan-draft rewrites it into the full 8-section plan, eng-review

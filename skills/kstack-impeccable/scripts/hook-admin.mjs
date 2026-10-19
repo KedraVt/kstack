@@ -17,7 +17,7 @@
  *   node hook-admin.mjs ignore-value <rule> "*"                 # refused: scope it or use ignore-rule
  *   node hook-admin.mjs reset                          # remove all config + cache
  *
- * Designed to be invoked by the LLM from the reference/hooks.md flow.
+ * Designed to be invoked by the LLM from the references/hooks.md flow.
  * Output is human-readable; the harness will pass it back to the user.
  */
 
@@ -127,8 +127,8 @@ const HOOK_MANIFEST_TARGETS = [
     selfEligible: () => selfPathHas('.pi'),
     destRel: '.pi/settings.json',
     manifest: ({ cwd }) => {
-      const command = fs.existsSync(path.join(cwd, '.pi/skills/kstack-impeccable/scripts/hook.mjs'))
-        ? 'node ".pi/skills/kstack-impeccable/scripts/hook.mjs"'
+      const command = fs.existsSync(path.join(cwd, '$KSTACK_EXTENSION_DIR/skills/kstack-impeccable/scripts/hook.mjs'))
+        ? 'node "$KSTACK_EXTENSION_DIR/skills/kstack-impeccable/scripts/hook.mjs"'
         : SELF_HOOK_CMD;
       return {
         description: 'Impeccable design detector: immediate-tier checks after edit/write on UI files, full-rule deep pass on Stop.',

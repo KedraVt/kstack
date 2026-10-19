@@ -39,7 +39,7 @@ const VARIANT_NUM_PATTERN = /^[0-9]{1,3}$/;
  *
  * live/completion.mjs only classifies a result as `error` when it carries
  * `mode: 'error'`; anything else unhandled falls through to `agent_done` with a
- * successful ack, and reference/live.md then tells the agent to finish the edit
+ * successful ack, and references/live.md then tells the agent to finish the edit
  * by hand. That is right for the documented fallback paths and wrong here: a
  * `source_locked` contention needs a retry (hand-editing races the publisher
  * holding the lock), and a crash needs surfacing, not a hand-applied guess.
@@ -55,7 +55,7 @@ function operationFailure(err, extra = {}) {
  * implementations also return `{handled: false, error}` for their own checks
  * (variant missing, template empty, original text ambiguous), and those arrived
  * without `mode`, so completion.mjs classified them as agent_done and
- * reference/live.md routed the agent to "read file, find markers, edit".
+ * references/live.md routed the agent to "read file, find markers, edit".
  *
  * That handoff only makes sense for a plain wrapper session, which is the one
  * shape with markers in the user's source to edit. Component and isolated
@@ -131,7 +131,7 @@ Output (JSON):
       : {
           // mode: 'error' is what marks this a real failure rather than a manual
           // handoff. Without it, live/completion.mjs classifies the reply as
-          // agent_done and reference/live.md tells the agent to "read file, find
+          // agent_done and references/live.md tells the agent to "read file, find
           // markers, edit" by hand — which would apply a second, conflicting
           // accept on top of the one the receipt already recorded.
           handled: false,
@@ -201,7 +201,7 @@ Output (JSON):
       result = operationFailure(err, resultContext);
     }
     if (result.carbonize) {
-      result.todo = 'REQUIRED before next poll: carbonize cleanup in ' + result.file + '. See reference/live.md "Required after accept".';
+      result.todo = 'REQUIRED before next poll: carbonize cleanup in ' + result.file + '. See references/live.md "Required after accept".';
     }
     emitResult({ handled: result.handled !== false, ...result });
     return;
@@ -256,10 +256,10 @@ Output (JSON):
     const acceptedOriginalText = result.acceptedOriginalText || '';
     delete result.acceptedOriginalText;
     // Single-line attention-grabber when cleanup is required. The full
-    // five-step checklist lives in reference/live.md (loaded once per
+    // five-step checklist lives in references/live.md (loaded once per
     // session); repeating it per-event would waste tokens.
     if (result.carbonize) {
-      result.todo = 'REQUIRED before next poll: carbonize cleanup in ' + relFile + '. See reference/live.md "Required after accept".';
+      result.todo = 'REQUIRED before next poll: carbonize cleanup in ' + relFile + '. See references/live.md "Required after accept".';
     }
     // Scrub stash entries whose text appeared inside the just-replaced
     // original wrap block. The accept embodies those manual edits (wrap was

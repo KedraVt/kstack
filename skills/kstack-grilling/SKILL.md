@@ -5,12 +5,18 @@ description: >
   it in rounds over the frontier — facts looked up (never asked), decisions
   asked with a recommended answer (never assumed). Use when the user says
   "interview me", "ask me questions before planning", "don't assume my
-  requirements", "help me think this through", or requirements are vague.
-  Do NOT use for reviewing a finished plan (use kstack-plan-eng-review) or
-  drafting the plan document (use kstack-plan-draft).
+  requirements", or requirements are vague.
+  Do NOT use for shaping a raw idea into a direction (use kstack-office-hours),
+  reviewing a finished plan (use kstack-plan-eng-review) or drafting the plan
+  document (use kstack-plan-draft).
+license: MIT (upstream mattpocock/skills)
+metadata:
+  version: "1.1.0"
 ---
 
-<!-- provenance: vendored from github.com/mattpocock/skills (MIT) · distilled digest materialized as first-class SKILL.md · 2026-08-28 -->
+<!-- provenance: vendored from github.com/mattpocock/skills (MIT) · distilled digest materialized as first-class SKILL.md · 2026-08-28 · termination target = the step's named file (living plan.md) 2026-10-19 -->
+
+> **Headless run?** If no user can answer (spawned step), the interview cannot happen: write the open frontier as numbered questions, each with your recommended answer marked `~assumed`, into the file the step names, and stop. Never answer for the user.
 
 # Grilling
 
@@ -61,8 +67,8 @@ The session is done when the frontier is empty: every branch of the design tree
 visited, nothing left silently assumed.
 
 Workflow adaptation: when the frontier is empty (or the question cap is
-reached), write the converged understanding to the plan/artifact the workflow
-expects (e.g. `.kstack/plans/{plan_file}` or the sprint's user-story) and call
+reached), append the converged decisions to the file the step names (develop:
+`plan.md`; sprint: `understand.md`) and call
 `kstack_advance` — the workflow's approval gate takes over from there. Do not
 start implementing.
 

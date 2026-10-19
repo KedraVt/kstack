@@ -5,7 +5,7 @@
  *
  * Before this script runs, the model retrieves cultural material and derives
  * a grounded shortlist of complete candidate directions from it (see
- * reference/new-work.md). Left alone, it then always builds its #1 —
+ * references/new-work.md). Left alone, it then always builds its #1 —
  * and a single model's resonance ranking is deterministic, so every run
  * in a category ships the same one or two concepts. Measured: 30/35
  * identical concepts across 16 prompt framings; the model cannot roll
@@ -701,7 +701,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       if (!loadContext(process.cwd()).hasProduct) {
         process.stdout.write([
           'NO_PRODUCT_MD: the dice stay in the cup until product truth exists.',
-          'Complete the init ask round and write PRODUCT.md first (reference/init.md), then re-run this exact command.',
+          'Complete the init ask round and write PRODUCT.md first (references/init.md), then re-run this exact command.',
           'Challengers fuse their form with facts from PRODUCT.md; without it every direction is ungrounded.',
         ].join(' ') + '\n');
         process.exit(1);

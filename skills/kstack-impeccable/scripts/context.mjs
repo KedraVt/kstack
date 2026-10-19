@@ -43,7 +43,7 @@ import {
 
 const PRODUCT_NAMES = ['PRODUCT.md', 'Product.md', 'product.md'];
 const DESIGN_NAMES = ['DESIGN.md', 'Design.md', 'design.md'];
-const SKILL_REFERENCE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'reference');
+const SKILL_REFERENCE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'references');
 const FALLBACK_DIRS = ['.agents/context', 'docs'];
 const MONOREPO_MARKER_FILES = ['pnpm-workspace.yaml', 'turbo.json', 'nx.json', 'lerna.json'];
 const MONOREPO_FALLBACK_PROJECT_DIRS = ['apps', 'packages'];
@@ -1113,13 +1113,13 @@ async function cli() {
     const parts = ctx.hasVisualImplementation
       ? [
           'NO_PRODUCT_MD: This project has no PRODUCT.md yet, but it does have an incumbent visual implementation. ' +
-          'For `init`, `teach`, `shape`, or any request to create a new surface or replacement visual world, load reference/init.md and create PRODUCT.md with the user first. ' +
-          'After init writes PRODUCT.md, reference/new-work.md preserves and documents the incumbent system for an ' +
+          'For `init`, `teach`, `shape`, or any request to create a new surface or replacement visual world, load references/init.md and create PRODUCT.md with the user first. ' +
+          'After init writes PRODUCT.md, references/new-work.md preserves and documents the incumbent system for an ' +
           'extension or replaces it with the user for a redesign/rebrand. Other ' +
           'narrow refinement commands may read the CSS, tokens, components, and assets and proceed without blocking, then ' +
           `offer \`${IMPECCABLE_COMMAND} init\` as a follow-up.`,
           'BUILD_INIT_REQUIRED: Before shape or any new-surface/redesign flow, init must capture PRODUCT.md with the human or structured ' +
-          'simulated user. Init writes product truth only; reference/new-work.md owns every visual decision.',
+          'simulated user. Init writes product truth only; references/new-work.md owns every visual decision.',
           'SCOPED_EXISTING_ALLOWED: Narrow refinement commands may use the incumbent implementation as authority without ' +
           'blocking on context setup; they must preserve it and offer init afterward.',
           'EXISTING_VISUAL_SYSTEM: For refinement or extension, code and assets are incumbent design authority and missing ' +
@@ -1130,13 +1130,13 @@ async function cli() {
           'NO_PRODUCT_MD: This project has no PRODUCT.md yet. ' +
           'For `init`, `teach`, `shape`, ' +
           'or wording that clearly maps to a from-scratch build/shape flow, load ' +
-          'reference/init.md, complete its human or structured simulated-user interview, and write PRODUCT.md before ' +
+          'references/init.md, complete its human or structured simulated-user interview, and write PRODUCT.md before ' +
           'designing. If no answer mechanism truly exists, init may infer only from the explicit brief and must label its ' +
           'assumptions. It never writes DESIGN.md. For any other ' +
           '(scoped) command against existing code, proceed using the code as ' +
           `context and offer \`${IMPECCABLE_COMMAND} init\` as a suggestion (do not block).`,
           'PRODUCT_INIT_REQUIRED: No product context or visual authority was found. New builds and redesigns ' +
-          'must finish reference/init.md for PRODUCT.md, then reference/new-work.md establishes the world and surface. Scoped ' +
+          'must finish references/init.md for PRODUCT.md, then references/new-work.md establishes the world and surface. Scoped ' +
           'fixes to existing code do not need the new-surface flow.',
         ];
     // DESIGN.md is authority in its own right and does not depend on
@@ -1179,17 +1179,17 @@ async function cli() {
   if (!ctx.hasDesign) {
     parts.push(ctx.hasVisualImplementation
       ? 'INCUMBENT_WORLD_UNDOCUMENTED: PRODUCT.md exists and DESIGN.md is missing, but code contains incumbent visual decisions. ' +
-        'For shape or a new-surface/redesign request, load reference/new-work.md: an extension documents and preserves the code-defined world; ' +
+        'For shape or a new-surface/redesign request, load references/new-work.md: an extension documents and preserves the code-defined world; ' +
         'a redesign replaces it with the user and uses the old look only as evidence and anti-reference. Narrow refinement ' +
         'commands may proceed using the implementation directly.'
       : 'WORLD_DISCOVERY_REQUIRED: PRODUCT.md exists but no DESIGN.md or incumbent visual implementation was found. ' +
-        'For a new build or redesign, load reference/new-work.md and establish the visual world with the human or structured ' +
+        'For a new build or redesign, load references/new-work.md and establish the visual world with the human or structured ' +
         'simulated user before developing the task concept. Scoped fixes to existing code do not need this flow.');
   }
   const platformReferences = loadNativePlatformReferences(ctx.platform);
   for (const reference of platformReferences) {
     parts.push(
-      `# NATIVE PLATFORM REFERENCE: ${reference.name.toUpperCase()} (reference/${reference.name}.md)\n\n${reference.content.trim()}`,
+      `# NATIVE PLATFORM REFERENCE: ${reference.name.toUpperCase()} (references/${reference.name}.md)\n\n${reference.content.trim()}`,
     );
   }
   appendImageToolsDirective(parts);
@@ -1374,7 +1374,7 @@ function appendSubagentAuthorizationDirective(parts) {
   ].join(' '));
 }
 
-// reference/craft-floor.md carries the detector-blind reflexes on every build,
+// references/craft-floor.md carries the detector-blind reflexes on every build,
 // so the only gap left here is the mechanical pass. A hook covers it, per-edit
 // or Stop; a session without one has to run the detector by hand. The detector
 // reads HTML and CSS, so native projects get nothing.

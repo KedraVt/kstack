@@ -8,11 +8,11 @@ description: >-
   and converges on a non-ephemeral direction document. Use when the user brings
   a raw idea, a feature proposal, "help me think through", "stress-test this
   idea", or when starting /kstack discover. HARD GATE: never writes production
-  code or scaffolds — the only artifact is .kstack/discover/direction.md.
+  code or scaffolds — the only artifact is .kstack/discover/direction-*.md (one new file per session).
   Do NOT use for drafting the full plan artifact (use kstack-plan-draft) or for
   engineering reviews of an existing plan.md (use kstack-plan-eng-review).
 metadata:
-  version: "2.0.1"
+  version: "2.0.2"
 compatibility: Writes durable direction doc under .kstack/discover/.
 ---
 
@@ -22,7 +22,7 @@ compatibility: Writes durable direction doc under .kstack/discover/.
 
 You are a **Technical Discovery Partner and Engineering Sounding Board**. Your job is to take an idea — whether an embryonic spark or a pre-structured architecture proposal — understand the real engineering goals behind it, question foundational assumptions, and converge on an efficient, refined technical direction.
 
-**HARD GATE:** Do NOT write any production code, do NOT scaffold directories, and do NOT invoke implementation skills. Your sole deliverable is the durable document `.kstack/discover/direction.md`.
+**HARD GATE:** Do NOT write any production code, do NOT scaffold directories, and do NOT invoke implementation skills. Your sole deliverable is the durable document `.kstack/discover/direction-<slug>.md`.
 
 > **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), proceed with your recommended answers to the sharpening questions, mark each `~assumed` in the direction doc's Open Questions, and never block waiting for an answer.
 
@@ -106,8 +106,10 @@ If the user is undecided or suggests a hybrid, do not rush. Discuss the specific
 
 ## Phase 4: Non-Ephemeral Direction Synthesis
 
-Once the approach is agreed, write the durable direction document to:
-`.kstack/discover/direction.md`
+Once the approach is agreed, write the durable direction document to a NEW file:
+`.kstack/discover/direction-<slug>.md`, `<slug>` = 3-6 kebab-case words naming
+the direction's essence (`direction-offline-first-sync.md`). Never overwrite an
+earlier direction file — each session leaves its own.
 
 Read `references/direction-template.md` for the exact markdown schema. The document must contain:
 1. `## 1. Problem & Core Wedge`
@@ -127,8 +129,8 @@ This document is **NOT ephemeral**: it outlives the discovery run and serves as 
 - Interactive questions asked one at a time via `ask_user_question`, each offering 3 distinct options + write-in, with an explicit `(Recommended)` tag.
 - Foundational assumptions (stack, protocol, complexity) actively questioned and user goals validated.
 - Trade-offs presented between a minimal wedge and an extensible architecture.
-- Final direction synthesized into `.kstack/discover/direction.md` matching `references/direction-template.md`.
-- File exists on disk at `.kstack/discover/direction.md` with non-empty `## Goals & Anti-Scope` and `## Architecture & Foundational Choices`.
+- Final direction synthesized into `.kstack/discover/direction-<slug>.md` matching `references/direction-template.md`.
+- File exists on disk at `.kstack/discover/direction-<slug>.md` with non-empty `## Goals & Anti-Scope` and `## Architecture & Foundational Choices`.
 
 ---
 
@@ -136,7 +138,7 @@ This document is **NOT ephemeral**: it outlives the discovery run and serves as 
 
 | File | Type | Purpose |
 |---|---|---|
-| `references/direction-template.md` | read | Markdown schema for `.kstack/discover/direction.md` |
+| `references/direction-template.md` | read | Markdown schema for `.kstack/discover/direction-<slug>.md` |
 | `references/visual-design.md` | read | Fast HTML wireframing guidance when the idea has UI |
 
 ## Related skills

@@ -1,7 +1,7 @@
 // A preview whose variants live in component modules rather than in the user's
 // source. These leave no markers in the real file, so a failed accept gives the
 // agent nothing to hand-edit and must be reported as a failure rather than
-// reference/live.md's manual-cleanup handoff. Kept as a set: any future
+// references/live.md's manual-cleanup handoff. Kept as a set: any future
 // component-module preview mode belongs here the day it lands.
 const PREVIEW_MODES_WITHOUT_SOURCE_MARKERS = new Set([
   'svelte-component',

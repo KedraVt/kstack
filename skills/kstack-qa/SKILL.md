@@ -4,7 +4,7 @@ description: >-
   Unified QA gate: test a web app like a real user through the browser AND
   through the test suite, triage GREEN/RED/ORANGE with
   repro-steps-or-it-doesn't-count, Testability Blockers, zero-flakiness
-  policy, and the qa-artifact dual-channel protocol. Modes: report-only
+  policy. Modes: report-only
   (findings loop back to developers), fix (atomic-commit bug fixing, requires
   clean tree), diff-aware (feature-branch verification), regression
   (baseline.json diff). Use for "test this", "QA this", "does it work",
@@ -12,11 +12,11 @@ description: >-
   for root-cause investigation (use kstack-investigate) or release/commit
   workflow (use kstack-ship).
 metadata:
-  version: "1.0.2"
+  version: "1.1.0"
 compatibility: Requires runtime/browse/dist/browse ($B) for live-browser QA; suite/report modes work without it — browse steps fail closed.
 ---
 
-<!-- provenance: sprint-beta/beta-qa (merged base — modes, triage, artifact contract) + gstack/gstack-qa (browse workflow, diff-aware, fix loop, health rubric) + gstack/gstack-qa-only (report-only mode) + kedra/qa-git (save-point) · merged S1 2026-02-11 -->
+<!-- provenance: sprint-beta/beta-qa (merged base — modes, triage, artifact contract) + gstack/gstack-qa (browse workflow, diff-aware, fix loop, health rubric) + gstack/gstack-qa-only (report-only mode) + kedra/qa-git (save-point) · merged S1 2026-02-11 · 1.1.0 output modes (record / case-file / standalone) replace the qa-artifact protocol 2026-10-19 -->
 
 # QA
 
@@ -24,16 +24,15 @@ You are the QA gatekeeper. You test web applications like a real user — click
 everything, fill every form, check every state — and you run the test suite
 like an engineer: unit, integration, E2E journeys mapped back to the
 acceptance criteria. You have **no commit authority in report-only mode**:
-committing belongs to `kstack-ship` and happens only after a verified GREEN
-artifact.
+committing belongs to `kstack-ship` and happens only after a verified GREEN.
 
-> **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), take the non-destructive option: proceed WITHOUT committing, treat dirty-tree fixes as report-only, and set `uncommitted-changes: true` in the artifact — never block a gate waiting for an answer.
+> **Headless run?** If `ask_user_question` is unavailable (spawned/non-interactive run), take the non-destructive option: proceed WITHOUT committing, treat dirty-tree fixes as report-only, and state `uncommitted-changes: true` in your summary — never block a gate waiting for an answer.
 
 ## Mode resolution
 
 | Mode | When | Behavior |
 |------|------|----------|
-| **report-only** (default in the sprint loop) | QA verdict phase, regression checks | Test and classify; do NOT fix anything, do NOT commit. The report is the entire deliverable; add a `Recommended fix` line per bug. |
+| **report-only** (default in every orchestrated QA step) | QA verdict phase, regression checks | Test and classify; do NOT fix anything, do NOT commit. The report is the entire deliverable; add a `Recommended fix` line per bug. |
 | **fix** | Explicitly requested bug-fixing passes | Fix bugs in source with atomic commits, then re-verify. Requires a clean working tree first: `git status --porcelain` must be empty — if dirty, stop and have the tree committed or stashed before starting. |
 | **diff-aware** | Feature branch, no URL given | Scope testing to the branch diff (below). |
 | **regression** | `--regression` / baseline exists | Run full pass, then diff against `baseline.json`. |
@@ -58,7 +57,9 @@ dirty → `ask_user_question`: A) commit current changes first (recommended —
 uncommitted work survives QA's own fix commits), B) stash and pop after,
 C) abort.
 
-**Output dirs:** `mkdir -p .kstack/qa-reports/screenshots`.
+**Output dirs:** screenshots go to `.kstack/runs/$KSTACK_RUN_ID/qa/` in
+record and case-file mode, `.kstack/qa-reports/screenshots/` standalone (see
+"Output modes").
 
 **No test framework detected?** When fix mode will need regression tests and
 none exists, follow `references/test-bootstrap.md` — detect runtime, propose
@@ -113,8 +114,9 @@ On a feature branch with no URL:
 
 ## Suite testing methodology
 
-1. **Extract & branch.** Turn the acceptance criteria (user-story_XX.md,
-   tasks_XX.md) into an explicit checklist. Operate strictly on the branch
+1. **Extract & branch.** Turn the acceptance criteria into an explicit
+   checklist — from the step's source of truth: `user-story.md`/`tasks.md`
+   (sprint), `plan.md` (develop), `bug-report.md` (investigate). Operate strictly on the branch
    created for this task; never mix testing scopes across tasks.
 2. **Unit tests.** Map positive/negative/edge inputs from the requirements
    onto each public interface. AAA pattern (Arrange–Act–Assert). Mock/stub
@@ -127,7 +129,7 @@ On a feature branch with no URL:
    `data-testid` selectors; use the browser core set to execute real journeys
    and capture evidence.
 5. **Reconcile.** Map every result back to its requirement; classify the run;
-   finalize the artifact.
+   write the output your mode names.
 
 ## Triage semantics (exact)
 
@@ -146,7 +148,7 @@ include: exact error message/exit code, expected vs actual value, numbered
 steps to reproduce, and attached evidence (runner logs, traces, screenshots).
 Every bug is classified CRITICAL/HIGH/MEDIUM/LOW with screenshot evidence.
 
-## Testability Blockers (required artifact section on ORANGE)
+## Testability Blockers (required on ORANGE)
 
 List every interactive element lacking `data-testid` or a stable unique
 selector, with the suggested selector to add. ORANGE runs hinge on this list,
@@ -199,42 +201,38 @@ Category scores 0–100, weighted average. Console 15% · Links 10% · Visual 10
 Per finding deduction: critical −25, high −15, medium −8, low −3 (min 0 per
 category). Framework-specific checks → `references/framework-qa.md`.
 
-## Output: the qa-artifact protocol
+## Output modes
 
-Write `qa-artifact_XX.md` in the project root: test execution report ending
-with `## STATUS == GREEN`, `## STATUS == RED` or `## STATUS == ORANGE` (exactly
-one — your real verdict) plus failure reports for RED or
-Testability Blockers for ORANGE. **Write the exact line `status == green`,
-`status == red` or `status == orange` (exactly one)
-AND repeat it inside your `## HANDOFF`** — the orchestrator cross-checks both
-channels before routing. RED/ORANGE loops back to implement automatically.
+The calling step names the mode in its task (`Output mode: …`). No mode
+named → **standalone**.
 
-```markdown
-## QA Report
-status == green        ← or `status == red` / `status == orange`; exactly one, verbatim
-Sprint: XX | Branch: <branch>
-Flows covered: <list> — COVERAGE: <tested flows>
-Bugs: N critical, N high, N medium, N low
+| Mode | Used by | Findings go to | Files you write |
+|---|---|---|---|
+| **record** | develop, sprint, review QA steps | the step record only: `--verdict status==<green\|orange\|red>` + one `--evidence` per finding | screenshots under `.kstack/runs/$KSTACK_RUN_ID/qa/` — nothing else |
+| **case-file** | investigate regression QA | the step record (as in record mode) AND a `## Regression QA` section appended to `bug-report.md` | that one section + screenshots as in record mode |
+| **standalone** | direct use, no orchestrator | `.kstack/qa-reports/qa-report-<date>.md` from `assets/qa-report-template.md`, with exactly one `status == …` line | the report + `.kstack/qa-reports/screenshots/` |
 
-### Failures (RED)
-- **[Bug title]** [CRITICAL|HIGH|MEDIUM|LOW]
-  - Expected vs actual: [...]
-  - Repro steps: 1. ... 2. ... 3. ...
-  - Evidence: screenshot path / trace path
-  - Recommended fix: [...]
+Each `--evidence` is one finding (bug or blocker — passes go in the summary),
+self-contained — it is the only thing the developer fixing it receives.
+Single-quote it: in double quotes the shell turns `$45.00` into `5.00`.
 
-### Testability Blockers (ORANGE)
-- [element] missing stable selector → suggest: data-testid="<name>"
+```
+--evidence '[HIGH] Coupon ignored at checkout — /cart: apply SAVE10 → total $50.00 (expected $45.00) — repro: 1. add item 2. apply SAVE10 3. read total — shot: .kstack/runs/<runId>/qa/cart-coupon.png — fix: apply the discount in cartTotal()'
+--evidence '[ORANGE] Pay button has no stable selector — suggest data-testid="pay-submit"'
 ```
 
-Full-mode reports use `templates/qa-report-template.md`; keep evidence in
-`.kstack/qa-reports/` (screenshots/, baseline.json). If `TODOS.md` exists:
+RED/ORANGE loop back to the developers automatically; GREEN advances. The
+case-file section carries `status == <value>`, the flows covered with the
+`COVERAGE:` line, and every finding as a plain `- ` bullet with the same
+one-line content (the text only — not the `--evidence` flag).
+
+Standalone keeps `baseline.json` in `.kstack/qa-reports/`. If `TODOS.md` exists:
 new deferred bugs → TODO entries with severity + repro; fixed TODOs → annotate
 "Fixed by kstack-qa on {branch}, {date}".
 
 ## Save-Point Pattern (fix mode only)
 
-- Commit ONLY after the artifact reports verified GREEN.
+- Commit ONLY after QA reports verified GREEN.
 - RED/ORANGE → abort commit, reject the task back to dev, preserve all
   uncommitted work intact.
 - **NEVER destructive git operations**: no `reset --hard`, no force-push — ever.
@@ -260,8 +258,13 @@ new deferred bugs → TODO entries with severity + repro; fixed TODOs → annota
 
 ## DoD gate (verification)
 
-- `qa-artifact_XX.md` ends with exactly one verbatim `status == …` line AND
-  repeats it inside `## HANDOFF` — orchestrator parses both channels.
+- Mode taken from the step's `Output mode:` line (none → standalone).
+- record / case-file: the step record carries exactly one `status==` verdict
+  and one self-contained `--evidence` per finding; nothing written outside
+  `.kstack/runs/$KSTACK_RUN_ID/qa/` except, in case-file mode, the
+  `## Regression QA` section of `bug-report.md`.
+- standalone: the report under `.kstack/qa-reports/` has exactly one
+  `status == …` line.
 - Every RED finding has repro steps + expected/actual + evidence path.
 - ORANGE runs list Testability Blockers with suggested selectors.
 - `COVERAGE:` line names the tested flows; console checked after every flow.
@@ -277,7 +280,7 @@ new deferred bugs → TODO entries with severity + repro; fixed TODOs → annota
 | `references/issue-taxonomy.md` | read | per-page checklist during exploration |
 | `references/framework-qa.md` | read | framework detected (Next.js, Rails, WP, SPA) |
 | `references/test-bootstrap.md` | read | fix mode needs regression tests but no framework exists |
-| `templates/qa-report-template.md` | read | writing the full-mode report |
+| `assets/qa-report-template.md` | read | writing the standalone report |
 
 ## Related skills
 
@@ -291,4 +294,4 @@ new deferred bugs → TODO entries with severity + repro; fixed TODOs → annota
 
 **Repro-steps-or-it-doesn't-count: a RED verdict without reproduction steps is
 invalid. No commit authority in report-only mode — committing belongs to
-`kstack-ship` after a verified GREEN artifact.**
+`kstack-ship` after a verified GREEN.**

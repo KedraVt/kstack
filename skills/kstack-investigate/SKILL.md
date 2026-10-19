@@ -76,7 +76,7 @@ Gather context before forming any hypothesis.
    investigations on the same files. Recurring bugs in the same area are an
    architectural smell — note patterns and check whether the prior root cause
    was structural. If a test fails only inside the full suite (never alone),
-   suspect test pollution: run `scripts/find-polluter.sh` to isolate it.
+   suspect test pollution: run `$KSTACK_EXTENSION_DIR/skills/kstack-investigate/scripts/find-polluter.sh` to isolate it.
 
 **Output of Phase 1:** a specific, testable claim — *"Root cause hypothesis:
 X, because Y"* — plus the mechanism pinned to `file:line` locations.
@@ -261,7 +261,7 @@ external: document what you investigated, implement appropriate handling
 | `references/defense-in-depth.md` | read | bug class could recur at another layer (Phase 4) |
 | `references/condition-based-waiting.md` | read | flaky waits / timing-dependent failures (Phase 2) |
 | `references/condition-based-waiting-example.ts` | read | concrete pattern for the above |
-| `scripts/find-polluter.sh` | run (`bash scripts/find-polluter.sh`) | test fails only inside the full suite |
+| `$KSTACK_EXTENSION_DIR/skills/kstack-investigate/scripts/find-polluter.sh` | run (`bash $KSTACK_EXTENSION_DIR/skills/kstack-investigate/scripts/find-polluter.sh`) | test fails only inside the full suite |
 
 ## Related skills
 

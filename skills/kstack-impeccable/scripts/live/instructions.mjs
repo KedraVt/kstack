@@ -77,7 +77,7 @@ function generateInstructions(event, scriptsPath) {
   }
 
   steps.push(event.action && event.action !== 'impeccable'
-    ? `Action is "${event.action}": read reference/${event.action}.md before planning; its MUST params are non-negotiable. ${PLAN_POINTER}`
+    ? `Action is "${event.action}": read references/${event.action}.md before planning; its MUST params are non-negotiable. ${PLAN_POINTER}`
     : `Freeform action: work from SKILL.md rules plus craft-floor.md; no sub-command file. ${PLAN_POINTER}`);
 
   steps.push(`When all ${event.count} variants are delivered: ${replyCmd(scriptsPath, id, 'done --file <project-root-relative path you wrote>')}. Then poll again. If generation fails after the browser flipped to GENERATING, reply --reply ${id} error "Short reason" so the bar resets (never live-accept --discard for this).`);

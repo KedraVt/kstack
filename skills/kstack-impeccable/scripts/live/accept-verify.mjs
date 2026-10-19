@@ -1,6 +1,6 @@
 /**
  * Postcondition scanner for accepted/carbonized source. The carbonize
- * contract used to exist only as prose in reference/live.md; nothing checked
+ * contract used to exist only as prose in references/live.md; nothing checked
  * that an accept actually left the file clean, so dead param branches,
  * preview attributes, and marker comments accumulated across sessions. This
  * scanner is the mechanical form of that contract. live-complete refuses to

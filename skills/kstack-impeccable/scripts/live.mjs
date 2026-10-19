@@ -58,7 +58,7 @@ On config_missing, prints:
 The agent should then:
   1. If target_selection_required, ask which app to use and rerun from that child cwd
   2. If config_missing, create the config and re-run this script
-  3. Optionally open the project's dev/preview URL in the browser (see reference/live.md—not serverPort)
+  3. Optionally open the project's dev/preview URL in the browser (see references/live.md—not serverPort)
   4. Enter the poll loop: node live-poll.mjs`);
     process.exit(0);
   }

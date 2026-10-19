@@ -14,4 +14,4 @@ Generate a single-file, self-contained HTML wireframe when visual alignment is n
 - If browser tooling (`pi_kstack_goto` or browse) is available, capture a screenshot for quick review.
 
 ## 3. Incorporation into Direction Doc
-When a wireframe or UI state flow is established, reference its path or key UI layout contract in `## 4. Key Interfaces & Contracts` of `.kstack/discover/direction.md`.
+When a wireframe or UI state flow is established, reference its path or key UI layout contract in `## 4. Key Interfaces & Contracts` of `.kstack/discover/direction-<slug>.md`.

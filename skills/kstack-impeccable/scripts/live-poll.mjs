@@ -261,7 +261,7 @@ export function writeCarbonizeBanner(event) {
     process.stderr.write('\n' + manualApplyPollBanner(event) + '\n');
   }
   if (event._acceptResult?.carbonize === true) {
-    process.stderr.write('\n⚠ Carbonize cleanup REQUIRED before next poll. After cleanup, run live-complete.mjs --id ' + event.id + '. See reference/live.md "Required after accept".\n\n');
+    process.stderr.write('\n⚠ Carbonize cleanup REQUIRED before next poll. After cleanup, run live-complete.mjs --id ' + event.id + '. See references/live.md "Required after accept".\n\n');
   }
 }
 

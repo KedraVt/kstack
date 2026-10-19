@@ -1236,7 +1236,7 @@ function inferSourceEventType(msg = {}, pendingEvents = state.pendingEvents) {
     if (!pendingTypes.has('generate') && pendingTypes.has('variant_mount_failed')) return 'variant_mount_failed';
     return 'generate';
   }
-  // `error` is reference/live.md's documented failure reply, and parseReplyArgs
+  // `error` is references/live.md's documented failure reply, and parseReplyArgs
   // never sets sourceEventType on it (the poller is a fresh process that cannot
   // know what it leased). Returning undefined here makes acknowledgePendingEvent
   // match *any* event for this id: a stale generate worker's failure silently

@@ -19,7 +19,7 @@
 /** PRODUCT.md as init.md writes it today: the ten-section v4 record. */
 export const PRODUCT_SCHEMA_VERSION = 1;
 
-/** `.impeccable/design.json`, as documented in reference/document.md Step 4b. */
+/** `.impeccable/design.json`, as documented in references/document.md Step 4b. */
 export const DESIGN_SIDECAR_SCHEMA_VERSION = 2;
 
 /**
