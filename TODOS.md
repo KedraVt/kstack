@@ -53,6 +53,44 @@ with its trigger for when to build it:
 
 ## BACKLOG
 
+### Skill authoring — routing follow-ups (2026-10-19 eval round)
+
+Measured with the paired trigger eval (`evals/trigger/`): 840 runs across two
+arms, minimax m3.1 flash free, the same window for both arms.
+
+- **`kstack-impeccable` does not trigger** on the held-out prompts (0/4 in both
+  the baseline and the candidate arm) — "check our app shell for accessibility
+  issues", "the typography and spacing in the pricing table are off". The
+  near-miss side is clean, so the description is not over-firing; the agent
+  answers with no skill at all. Next round should watch the *routing target*,
+  not the wording.
+- **The held-out split is flat.** The four re-authored descriptions lift the
+  split they were revised from (impeccable 0/6 → 4/6, qa 1/6 → 3/6,
+  idea-refine 3/6 → 6/6, investigate 1/6 → 5/6) and hold the held-out split
+  (idea-refine 1/4 → 2/4, the rest unchanged). The control skill, whose
+  description did not change, moved 2 cases on the same split — the noise floor
+  is about ±2 of 4.
+- **Duplicate descriptions in the real routing space.** The eval loaded the
+  catalog only. A real session also loads `~/.pi/agent/skills`, where
+  `impeccable`, `mindrun` and `retro` still carry descriptions that overlap the
+  catalog's `kstack-impeccable`, `kstack-mindrun` and `kstack-retro`. The
+  personal `design-taste-frontend` was removed once the catalog port passed its
+  eval; the other three still compete and should follow.
+- **Free endpoints make this expensive.** `agnes` (hourly 429), `b-ai` (balance
+  0) and `atria` (429) were all unavailable during the round; only the
+  OpenRouter free tier answered, and it degrades under load — a batch that
+  suddenly reads no skill is a rate-limited batch, not a description regression.
+  Re-run the eval on a paid endpoint before shipping a description change that
+  matters.
+
+### End-to-end session — still owed by a human
+
+The workflow engine is covered by the test suite (512 tests), but no real
+`/kstack develop` and `/kstack investigate` session has been run against a
+throwaway repository since the audit (retry loops, needs-a-person, the design
+step). Both need `/reload` in the running pi session first, because the
+extension code changed.
+
 ### Ponytail integration — gated code-simplification cycle (`/kstack simplify`)
 
 **What:** Add a new workflow to `orchestrator/workflows.ts` implementing a bounded,
