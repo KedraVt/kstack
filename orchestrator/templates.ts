@@ -206,7 +206,7 @@ export function buildPhaseInstructions(phase: WorkflowPhase, ctx: WorkflowContex
 
   const priorResults = Object.entries(ctx.state.results)
     .filter(([, r]) => r.status === "completed")
-    .map(([id, r]) => `- **${id}**: ${r.summary}`);
+    .map(([id, r]) => `- **${id}**: ${briefSummary(r.summary)}`);
   if (priorResults.length > 0) {
     parts.push("### Completed phases");
     parts.push(priorResults.join("\n"));
@@ -372,6 +372,16 @@ const MAIN_CONTRACTS: Record<string, (ctx: Pick<WorkflowContext, "state">) => st
   "action": () =>
     '## DELIVERABLE\nThe requested single action (QA / review / ship / investigate) completed, with its standard report.\n\n## STOP CONDITION\nStop when: the action\'s own deliverable is produced.',
 };
+
+/**
+ * Completed-phase summaries are re-sent with EVERY later step; the full text
+ * (up to 4000 chars each) made them ~90% of a mid-sprint prompt. The detail
+ * lives in the phase's artifacts on disk.
+ */
+const BRIEF_SUMMARY_CHARS = 600;
+function briefSummary(summary: string): string {
+  return summary.length > BRIEF_SUMMARY_CHARS ? `${summary.slice(0, BRIEF_SUMMARY_CHARS)}…` : summary;
+}
 
 export function mainContractFor(phase: WorkflowPhase, ctx: Pick<WorkflowContext, "state">, step?: WorkflowStep): string {
   // S3 stepped phases: the step task carries its own DELIVERABLE/STOP lines —
@@ -1097,7 +1107,7 @@ export function buildStepInstructions(phase: WorkflowPhase, step: WorkflowStep, 
   // Phase-level results only — dotted "phase.step" keys belong to the tail.
   const priorPhases = Object.entries(ctx.state.results)
     .filter(([id, r]) => r.status === "completed" && !id.includes("."))
-    .map(([id, r]) => `- **${id}**: ${r.summary}`);
+    .map(([id, r]) => `- **${id}**: ${briefSummary(r.summary)}`);
   if (priorPhases.length > 0) {
     parts.push("### Completed phases");
     parts.push(priorPhases.join("\n"));
@@ -1146,8 +1156,14 @@ export function buildStepInstructions(phase: WorkflowPhase, step: WorkflowStep, 
   // appended it to the phase's final output).
   const dod = sprintDodSuffix(ctx.state.workflowId, phase.id);
   if (dod) parts.push(dod.trimStart());
-  parts.push("");
-  parts.push(mainContractFor(phase, ctx, step));
+  // An inline step task already carries its own DELIVERABLE/STOP pair —
+  // repeating it only re-sends the same tokens on every delivery. The
+  // subagent-tool branch buries the task in JSON, so it keeps the contract.
+  const taskInline = !(step.execution === "subagent" && !deterministicSubagents());
+  if (!taskInline || !/## DELIVERABLE/.test(step.task)) {
+    parts.push("");
+    parts.push(mainContractFor(phase, ctx, step));
+  }
 
   // Tool contract: the step ends by calling kstack_advance.
   parts.push("");
