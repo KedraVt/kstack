@@ -916,7 +916,7 @@ describe("S4 capability gates (TASK_06, ADR-16)", () => {
 
 import { buildStepTask, buildStepInstructions, interpolateStepTask, buildRecordContract } from "../orchestrator/templates.ts";
 import { ephemeralArtifactsFor, cleanupEphemeralArtifacts } from "../orchestrator/artifacts.ts";
-import { reportCliPath } from "../orchestrator/records.ts";
+import { reportCliPath, projectRootFor } from "../orchestrator/records.ts";
 
 describe("S4 ambient skills (TASK_07, D25)", () => {
   test("buildStepTask embeds ambient digests OUTSIDE the skill slot", () => {
@@ -1123,9 +1123,13 @@ describe("S4 executor — sideEffect gate + resume + ephemeral (TASK_07)", () =>
         assert.equal(env!.KSTACK_PHASE, "build");
         assert.equal(env!.KSTACK_STEP, "scout");
         assert.equal(env!.KSTACK_REPORT, reportCliPath());
+        // The project that owns .kstack/ rides along: the child may cd away
+        // before reporting, so the record path is pinned twice (env + --root).
+        assert.equal(env!.KSTACK_PROJECT_ROOT, projectRootFor(cwd));
         // ADR-23: spawn → work → report → exit — the task itself mandates the record.
         assert.ok(task.includes("RECORD CONTRACT"), "delegated task must carry the record contract");
         assert.ok(task.includes('"$KSTACK_REPORT" --workflow "$KSTACK_WORKFLOW"'), "contract must name the env-var CLI invocation");
+        assert.ok(task.includes(`--root "${projectRootFor(cwd)}"`), "contract must pin the project root");
       } finally {
         rmSync(cwd, { recursive: true, force: true });
       }

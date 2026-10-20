@@ -7,13 +7,18 @@
 #
 # Usage:
 #   kstack-report --workflow <id> --run-id <id> --phase <id> [--step <id>] \
-#     [--attempt <n>] \
+#     [--attempt <n>] [--root <project dir>] \
 #     [--verdict KEY==VALUE]... [--var KEY==VALUE]... \
 #     [--evidence <text>]... [--deliverable <path>]... \
 #     [--marker <text>]... [--summary <text>]
 #
 # The agent learns workflow/runId/phase/step from its task contract — the
 # orchestrator interpolates {runId}/{phase}/{step} into step tasks.
+#
+# The project root decides WHERE .kstack/ lives: --root wins, then
+# $KSTACK_PROJECT_ROOT, then the current directory (backward compatible).
+# An agent that cd'd elsewhere would otherwise drop its record outside the
+# orchestrator's .kstack/ — the step would park as signal-missing.
 # Records are UNTRUSTED input: routing re-validates verdict values against
 # the (workflow, phase) expectation map before acting on them.
 #
@@ -26,6 +31,7 @@ RUN_ID=""
 PHASE=""
 STEP=""
 ATTEMPT=""
+ROOT=""
 SUMMARY=""
 declare -a VERDICTS=()
 declare -a VARS=()
@@ -40,6 +46,7 @@ while [ $# -gt 0 ]; do
     --phase)       PHASE="$2"; shift 2 ;;
     --step)        STEP="$2"; shift 2 ;;
     --attempt)     ATTEMPT="$2"; shift 2 ;;
+    --root)        ROOT="$2"; shift 2 ;;
     --verdict)     VERDICTS+=("$2"); shift 2 ;;
     --var)         VARS+=("$2"); shift 2 ;;
     --evidence)    EVIDENCE+=("$2"); shift 2 ;;
@@ -53,6 +60,25 @@ done
 if [ -z "$WORKFLOW" ] || [ -z "$RUN_ID" ] || [ -z "$PHASE" ]; then
   echo "kstack-report: --workflow, --run-id and --phase are required" >&2
   exit 1
+fi
+
+# Project root that owns .kstack/ — the orchestrator reads the record from
+# <root>/.kstack/runs, so a record written under another cwd is invisible.
+# An empty BASE_DIR keeps the historical relative paths (".kstack/...").
+if [ -n "$ROOT" ]; then
+  if [ ! -d "$ROOT" ]; then
+    echo "kstack-report: --root '$ROOT' is not an existing directory" >&2
+    exit 1
+  fi
+  BASE_DIR="$ROOT"
+elif [ -n "${KSTACK_PROJECT_ROOT:-}" ]; then
+  if [ ! -d "$KSTACK_PROJECT_ROOT" ]; then
+    echo "kstack-report: KSTACK_PROJECT_ROOT '$KSTACK_PROJECT_ROOT' is not an existing directory" >&2
+    exit 1
+  fi
+  BASE_DIR="$KSTACK_PROJECT_ROOT"
+else
+  BASE_DIR=""
 fi
 
 # Verdict ownership: when the orchestrator sets KSTACK_VERDICT_KEYS (space-
@@ -88,13 +114,13 @@ SAFE_PHASE="$(safe "$PHASE")"
 SAFE_STEP="$(safe "$STEP")"
 SAFE_WF="$(safe "$WORKFLOW")"
 
-RECORD_DIR=".kstack/runs/$SAFE_RUN"
+RECORD_DIR="${BASE_DIR:+$BASE_DIR/}.kstack/runs/$SAFE_RUN"
 if [ -n "$SAFE_STEP" ]; then
   RECORD_FILE="$RECORD_DIR/$SAFE_PHASE.$SAFE_STEP.json"
 else
   RECORD_FILE="$RECORD_DIR/$SAFE_PHASE.json"
 fi
-LEDGER_DIR=".kstack/ledger"
+LEDGER_DIR="${BASE_DIR:+$BASE_DIR/}.kstack/ledger"
 # The ledger filename uses ledger.ts's allowlist (no dot): with the record
 # allowlist, ISO runIds ("...52.631Z...") split every run into two files.
 lsafe() { printf '%s' "$1" | tr -c '[:alnum:]_-' '-'; }

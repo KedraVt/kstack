@@ -15,7 +15,7 @@ import { extractHandoff } from "./handoff.ts";
 import { isRefutedStrategy, isValidatedStrategy } from "./skip.ts";
 import { replaceExact } from "./text.ts";
 import { appendLedger } from "./ledger.ts";
-import { reportCliPath, verdictKeysFor, clearPhaseRecords } from "./records.ts";
+import { reportCliPath, projectRootFor, verdictKeysFor, clearPhaseRecords } from "./records.ts";
 import { newStepRun, feedStepEvent, detectStuck, checkStepBudgets, stepBudgetDefaults, beginStepWatch, endStepWatch } from "./stuck.ts";
 import { cleanupEphemeralArtifacts, sprintGateEphemerals, artifactSignalFiles, runStartMs } from "./artifacts.ts";
 
@@ -668,7 +668,7 @@ export async function executeCurrentPhase(
               sprintDodSuffix(state.workflowId, phase.id) +
               // ADR-23: spawn → work → report → exit — the record contract is
               // mandatory for every deterministic delegated step.
-              `\n\n${buildRecordContract(step, { workflowId: state.workflowId, phase })}` +
+              `\n\n${buildRecordContract(step, { workflowId: state.workflowId, phase, cwd: ctx.cwd })}` +
               (degradedNote ? `\n\n${degradedNote}` : "") + resumeHint +
               // The worker that must address a gate's blockers is THIS child —
               // the retry block reaching only the orchestrator came too late.
@@ -688,6 +688,10 @@ export async function executeCurrentPhase(
               KSTACK_PHASE: phase.id,
               KSTACK_STEP: step.id,
               KSTACK_REPORT: reportCliPath(),
+              // The project that owns .kstack/ — the child may cd elsewhere
+              // before reporting, so the record path is pinned twice (env
+              // fallback + the contract's --root).
+              KSTACK_PROJECT_ROOT: projectRootFor(ctx.cwd),
               // kstack-report drops verdict keys outside this list (empty = none owned).
               KSTACK_VERDICT_KEYS: verdictKeysFor(state.workflowId, phase, step).join(" "),
               // Step-declared env (e.g. a skill's working dir under the run folder).

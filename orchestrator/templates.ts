@@ -1,7 +1,7 @@
 import type { WorkflowPhase, WorkflowContext, Workflow, WorkflowStep } from "./types.ts";
 import { getWorkflow } from "./workflows.ts";
 import { loadSkillFull, loadSkillGate, getSkillInfo } from "./skills.ts";
-import { reportCliPath, verdictKeysFor } from "./records.ts";
+import { reportCliPath, projectRootFor, verdictKeysFor } from "./records.ts";
 import { expectationsFor, NEGATIVE_VALUES } from "./verdicts.ts";
 import { skillsEnabled, manualGates, deterministicSubagents } from "./config.ts";
 import { replaceExact } from "./text.ts";
@@ -1023,6 +1023,9 @@ export function interpolateStepTask(task: string, phase: WorkflowPhase, stepInde
   out = replaceExact(out, /\{phase\}/g, phase.id);
   out = replaceExact(out, /\{step\}/g, phase.steps?.[stepIndex]?.id ?? "");
   out = replaceExact(out, /\{kstack_report\}/g, reportCliPath());
+  // The record must land in the project the orchestrator reads from — the
+  // agent may cd elsewhere before reporting (the record would be invisible).
+  out = replaceExact(out, /\{kstack_root\}/g, projectRootFor(ctx.cwd));
   return out;
 }
 
@@ -1195,8 +1198,10 @@ export function buildStepInstructions(phase: WorkflowPhase, step: WorkflowStep, 
  * the canonical kstack-report record — HANDOFF text alone does NOT satisfy a
  * declared signal. Identity comes from the spawn env ($KSTACK_*), which the
  * executor sets verbatim; a declared signal gets its mandatory flag named.
+ * `--root` pins the project that owns .kstack/ — a child that cd'd away
+ * would otherwise drop the record where the orchestrator never looks.
  */
-export function buildRecordContract(step: WorkflowStep, scope?: { workflowId: string; phase: Pick<WorkflowPhase, "id" | "steps"> }): string {
+export function buildRecordContract(step: WorkflowStep, scope?: { workflowId: string; phase: Pick<WorkflowPhase, "id" | "steps">; cwd?: string }): string {
   const sig = step.signal;
   const owned = scope ? verdictKeysFor(scope.workflowId, scope.phase, step) : sig?.kind === "verdict" ? [sig.value] : [];
   const valuesFor = (key: string): string =>
@@ -1215,10 +1220,15 @@ export function buildRecordContract(step: WorkflowStep, scope?: { workflowId: st
   const ownership = owned.length
     ? ` This step owns ONLY these verdict keys: ${owned.join(", ")} — any other key is discarded.`
     : " This step owns NO gate verdict: do NOT pass --verdict (it would be discarded).";
+  // The record must land in the project the orchestrator reads from
+  // (<cwd>/.kstack/runs) — a child that cd'd elsewhere would drop it
+  // elsewhere and the step would park as signal-missing.
+  const root = scope?.cwd ? projectRootFor(scope.cwd) : null;
+  const rootFlag = root ? ` --root "${root}"` : "";
   return `## RECORD CONTRACT (canonical)
 Before exiting you MUST write your step record exactly once via the kstack-report CLI (its path is in $KSTACK_REPORT):
 \`\`\`
-"$KSTACK_REPORT" --workflow "$KSTACK_WORKFLOW" --run-id "$KSTACK_RUN_ID" --phase "$KSTACK_PHASE" --step "$KSTACK_STEP" \\
+"$KSTACK_REPORT" --workflow "$KSTACK_WORKFLOW" --run-id "$KSTACK_RUN_ID" --phase "$KSTACK_PHASE" --step "$KSTACK_STEP"${rootFlag} \\
   --summary '<2-3 sentence outcome>'${verdictFlags} [--var KEY==VALUE]... [--evidence '<finding @ file:line — fix>']... [--marker <text>]... [--deliverable <path>]...
 \`\`\`
 Quote every value in SINGLE quotes — inside double quotes the shell expands \`$50.00\` to \`0.00\`. An apostrophe inside a value is written \`'\\''\`.

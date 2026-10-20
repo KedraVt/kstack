@@ -19,7 +19,7 @@ import { getWorkflow, getWorkflowIds } from "../orchestrator/workflows.ts";
 import { initOrchestrator } from "../orchestrator/index.ts";
 import { handleSprintPanel, manualAdvancePanel } from "../orchestrator/command.ts";
 import { buildRecordContract, interpolateStepTask, buildStepTask } from "../orchestrator/templates.ts";
-import { reportCliPath, verdictKeysFor, writeStepRecord, readStepRecord, stepCompletionStatus } from "../orchestrator/records.ts";
+import { reportCliPath, projectRootFor, verdictKeysFor, writeStepRecord, readStepRecord, stepCompletionStatus } from "../orchestrator/records.ts";
 import { invalidateRuntime, releasePhaseInFlight, executeCurrentPhase } from "../orchestrator/executor.ts";
 import { sprintGateEphemerals, cleanupEphemeralArtifacts, runStartMs } from "../orchestrator/artifacts.ts";
 
@@ -93,6 +93,11 @@ describe("verdict ownership", () => {
     const cli = reportCliPath();
     assert.ok(!cli.includes("\\"), "bash eats backslashes");
     assert.ok(task.includes(`"${cli}" --workflow "sprint"`), task);
+    // The record must be pinned to the project that owns .kstack/ — an agent
+    // that cd'd elsewhere would otherwise drop it where nobody looks.
+    const root = projectRootFor(".");
+    assert.ok(!root.includes("\\"), "the root keeps forward slashes");
+    assert.ok(task.includes(`--root "${root}"`), task);
   });
 
   test("kstack-report drops verdict keys outside KSTACK_VERDICT_KEYS and normalizes values", () => {
@@ -111,6 +116,52 @@ describe("verdict ownership", () => {
     const rec = readStepRecord(cwd, "sprint", "r1", "implement", "backend");
     assert.deepEqual(rec?.verdicts, { ui: "pass" });
     assert.deepEqual(rec?.markers, ["BACKEND-DONE"]);
+  });
+
+  test("kstack-report --root writes the record under the ROOT's .kstack from any cwd", () => {
+    if (spawnSync("bash", ["-c", "echo ok"], { encoding: "utf-8" }).status !== 0) return; // no bash on this host
+    const root = fs.mkdtempSync(path.join(TMP, "root-"));
+    const elsewhere = fs.mkdtempSync(path.join(TMP, "elsewhere-"));
+    const script = new URL("../runtime/bin/kstack-report", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+    const run = spawnSync(
+      "bash",
+      [script, "--workflow", "develop", "--run-id", "r1", "--phase", "implement", "--step", "build",
+        "--root", root, "--marker", "BUILD-DONE"],
+      { cwd: elsewhere, encoding: "utf-8" },
+    );
+    assert.equal(run.status, 0, run.stderr);
+    assert.ok(fs.existsSync(path.join(root, ".kstack", "runs", "r1", "implement.build.json")), "record landed under --root");
+    assert.deepEqual(fs.readdirSync(elsewhere), [], "nothing was written in the agent's cwd");
+    assert.ok(readStepRecord(root, "develop", "r1", "implement", "build"), "the orchestrator reads the record back");
+  });
+
+  test("kstack-report honors KSTACK_PROJECT_ROOT when --root is absent", () => {
+    if (spawnSync("bash", ["-c", "echo ok"], { encoding: "utf-8" }).status !== 0) return; // no bash on this host
+    const root = fs.mkdtempSync(path.join(TMP, "root-"));
+    const elsewhere = fs.mkdtempSync(path.join(TMP, "elsewhere-"));
+    const script = new URL("../runtime/bin/kstack-report", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+    const run = spawnSync(
+      "bash",
+      [script, "--workflow", "develop", "--run-id", "r1", "--phase", "implement", "--step", "build", "--marker", "BUILD-DONE"],
+      { cwd: elsewhere, encoding: "utf-8", env: { ...process.env, KSTACK_PROJECT_ROOT: root } },
+    );
+    assert.equal(run.status, 0, run.stderr);
+    assert.ok(fs.existsSync(path.join(root, ".kstack", "runs", "r1", "implement.build.json")), "record landed under the env root");
+    assert.deepEqual(fs.readdirSync(elsewhere), [], "nothing was written in the agent's cwd");
+  });
+
+  test("kstack-report --root <missing dir> fails instead of writing the record elsewhere", () => {
+    if (spawnSync("bash", ["-c", "echo ok"], { encoding: "utf-8" }).status !== 0) return; // no bash on this host
+    const cwd = fs.mkdtempSync(path.join(TMP, "cli-"));
+    const script = new URL("../runtime/bin/kstack-report", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+    const run = spawnSync(
+      "bash",
+      [script, "--workflow", "develop", "--run-id", "r1", "--phase", "implement", "--root", path.join(cwd, "nope")],
+      { cwd, encoding: "utf-8" },
+    );
+    assert.notEqual(run.status, 0, "a bad --root must fail");
+    assert.match(run.stderr, /--root .* is not an existing directory/);
+    assert.deepEqual(fs.readdirSync(cwd), [], "no record was written");
   });
 
   test("a stray verdict on a non-verdict step is ledgered, never parks", async () => {

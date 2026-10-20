@@ -40,6 +40,16 @@ export function reportCliPath(): string {
 }
 
 /**
+ * Absolute project root (forward slashes) that owns .kstack/ — the root the
+ * orchestrator reads records from. Rendered into the record command as
+ * `--root` so a record written from another cwd still lands in the right
+ * place. Forward slashes: bash eats backslashes ("C:Users..." ⇒ not found).
+ */
+export function projectRootFor(cwd: string): string {
+  return path.resolve(cwd).replace(/\\/g, "/");
+}
+
+/**
  * Gate verdict keys a step OWNS (KSTACK_VERDICT_KEYS / record contract):
  * a non-flagged step owns none; a flagged step owns its declared signal
  * plus phase expectation vars no other flagged step declares (e.g.

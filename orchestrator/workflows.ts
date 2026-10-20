@@ -20,7 +20,7 @@ import { join } from "node:path";
 
 /** Standard record-write line for main steps whose signal is a marker. */
 const REC = (marker: string) => `On completion, BEFORE calling kstack_advance, write your step record:
-\`"{kstack_report}" --workflow "{workflow}" --run-id "{runId}" --phase "{phase}" --step "{step}" --marker ${marker} --summary '<1-2 line outcome>'\`
+\`"{kstack_report}" --workflow "{workflow}" --run-id "{runId}" --phase "{phase}" --step "{step}" --root "{kstack_root}" --marker ${marker} --summary '<1-2 line outcome>'\`
 (Run it exactly as written, path quoted; keep the summary in SINGLE quotes — double quotes let the shell expand \`$\` amounts. This step owns no gate verdict — do not add --verdict.)`;
 
 /**
