@@ -37,7 +37,7 @@ export function resolveBinary(): { path: string } | { error: string } {
     return cachedBinary === null ? { error: cachedError! } : { path: cachedBinary };
   }
 
-  const here = fileURLToPath(new URL(".", import.meta.url)); // kstack-pi/lib/
+  const here = fileURLToPath(new URL(".", import.meta.url)); // kstack/lib/
   const localRuntime = resolve(here, "..", "runtime", "browse", "dist", "browse");
   const kstackRootGuess = resolve(here, "..", "..", "kstack");
 

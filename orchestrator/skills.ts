@@ -110,7 +110,9 @@ function readSkill(id: string): string | null {
   if (!info) return null;
   try {
     if (!existsSync(info.skillPath)) return null;
-    const content = readFileSync(info.skillPath, "utf-8").trim();
+    // HTML comments (the `<!-- provenance -->` lines) are authoring metadata —
+    // injecting them only costs tokens and leaks upstream names to agents.
+    const content = readFileSync(info.skillPath, "utf-8").replace(/<!--[\s\S]*?-->\n?/g, "").trim();
     return content.length > 0 ? content : null;
   } catch {
     return null;

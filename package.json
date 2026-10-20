@@ -1,5 +1,5 @@
 {
-  "name": "@kedra/kstack-pi",
+  "name": "@kedra/kstack",
   "version": "2.1.0",
   "description": "kstack browser tools + workflow orchestrator for pi coding agent",
   "license": "MIT",

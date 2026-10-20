@@ -1,4 +1,4 @@
-# kstack-pi
+# kstack
 
 Browser automation + guided workflow orchestrator for the [pi](https://github.com/earendil-works/pi) coding agent.
 
@@ -46,7 +46,7 @@ One extension, two layers:
 ### 1. Clone
 
 ```bash
-git clone https://github.com/YOUR_USER/kstack-pi ~/.pi/agent/extensions/kstack-pi
+git clone https://github.com/YOUR_USER/kstack ~/.pi/agent/extensions/kstack
 ```
 
 Pi auto-discovers extensions in `~/.pi/agent/extensions/`. No settings.json changes needed.
@@ -186,7 +186,7 @@ tag changes (`lib/download.ts`).
 
 The extension was renamed gstack → kstack (command `/kstack`, tools `kstack_*`,
 env `KSTACK_*`, skills `kstack-*`). Install it as a separate extension dir —
-`~/.pi/agent/extensions/kstack-pi` — and remove the old `gstack-pi` one.
+`~/.pi/agent/extensions/kstack` — and remove the old `gstack-pi` one.
 
 State lives in two places, both renamed: `.kstack/` inside each target repo
 (`plans/`, `sprints/`, `runs/`) and `~/.kstack` for session-level data
@@ -201,7 +201,7 @@ place by `/kstack init`.
 ## Architecture
 
 ```
-kstack-pi/
+kstack/
 ├── index.ts                 Entry: registers tools + orchestrator
 ├── tools.generated.ts       65 browser tool registrations (auto-generated)
 ├── lib/
@@ -293,7 +293,7 @@ Deferred ideas live in `TODOS.md` (absorbed the old `FUTURE_UPDATES.md`).
 |---------|-----|
 | "kstack browse binary not found" | Restart pi (auto-download) or set `KSTACK_BINARY` |
 | "server-node.mjs not found" (Windows) | Run `bash browse/scripts/build-node-server.sh` in the kstack repo |
-| `/kstack` not showing in pi | Ensure the extension is in `~/.pi/agent/extensions/kstack-pi/` with `index.ts` at root |
+| `/kstack` not showing in pi | Ensure the extension is in `~/.pi/agent/extensions/kstack/` with `index.ts` at root |
 | Subagent phases fail | Ensure `~/.pi/agent/agents/` has scout.md, planner.md, worker.md, reviewer.md — plus the sprint specialists (sprint-planner, software-architect, backend-developer, frontend-developer, qa-engineer, devsecops-reviewer) for the sprint workflow. Canonical copies live in this repo's [`agents/`](agents/) — copy them to `~/.pi/agent/agents/` manually |
 | Skills not loading | Pi requires `"skills": ["./skills"]` in a package.json, or project `.pi/settings.json` |
 

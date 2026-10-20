@@ -323,7 +323,7 @@ function extractFinalOutput(events: any[]): string {
 }
 
 async function writePromptToTempFile(agentName: string, systemPrompt: string): Promise<{ dir: string; filePath: string }> {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kstack-pi-agent-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kstack-agent-"));
   const safeName = agentName.replace(/[^a-z0-9_-]/gi, "_");
   const filePath = path.join(dir, `${safeName}.md`);
   try {
