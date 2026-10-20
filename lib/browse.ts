@@ -116,14 +116,14 @@ export const STALE_LOCK_MS = 2 * 60 * 1000;
 
 const gitRoots = new Map<string, string | null>();
 
-/** Same resolution as browse/src/config.ts: BROWSE_STATE_FILE, else <git root | cwd>/.gstack/browse.json. */
+/** Same resolution as browse/src/config.ts: BROWSE_STATE_FILE, else <git root | cwd>/.kstack/browse.json. */
 export function serverLockPath(cwd: string = process.cwd()): string {
   if (process.env.BROWSE_STATE_FILE) return `${process.env.BROWSE_STATE_FILE}.lock`;
   if (!gitRoots.has(cwd)) {
     const r = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, windowsHide: true, encoding: "utf-8", timeout: 8000 });
     gitRoots.set(cwd, r.status === 0 && r.stdout.trim() ? r.stdout.trim() : null);
   }
-  return join(gitRoots.get(cwd) ?? cwd, ".gstack", "browse.json.lock");
+  return join(gitRoots.get(cwd) ?? cwd, ".kstack", "browse.json.lock");
 }
 
 /**
