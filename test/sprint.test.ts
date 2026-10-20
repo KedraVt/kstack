@@ -482,12 +482,12 @@ describe("loop engine in advancePhase (B3)", () => {
   test("approved architect verdict advances linearly and resets counters", () => {
     const cwd = tmpDir("kstack-le-");
     try {
-      const state = sprintState(5, { attempts: { "system-design": 2 } });
+      const state = sprintState(5, { attempts: { "architect-gate->system-design": 2 } });
       writeRec(cwd, state, "architect-gate", "review", { "software-architect-review": "approved" });
       const next = advancePhase(state, "architect-gate", { status: "completed", summary: "ok" }, total, { phases: SPRINT.phases, cwd });
       assert.equal(next.phaseIndex, 6);
       assert.equal(next.status, "active");
-      assert.equal(next.attempts["system-design"], undefined, "counter reset after approval");
+      assert.equal(next.attempts["architect-gate->system-design"], undefined, "counter reset after approval");
     } finally { rmSync(cwd, { recursive: true, force: true }); }
   });
 
@@ -498,7 +498,7 @@ describe("loop engine in advancePhase (B3)", () => {
       writeRec(cwd, state, "architect-gate", "review", { "software-architect-review": "rejected" });
       const next = advancePhase(state, "architect-gate", { status: "completed", summary: "found issues" }, total, { phases: SPRINT.phases, cwd });
       assert.equal(next.phaseIndex, 4, "back to system-design");
-      assert.equal(next.attempts["system-design"], 1);
+      assert.equal(next.attempts["architect-gate->system-design"], 1);
       assert.ok(next.retryContext);
       assert.equal(next.retryContext.targetPhaseId, "system-design");
       assert.equal(next.retryContext.attempt, 2, "upcoming run number");
@@ -510,25 +510,25 @@ describe("loop engine in advancePhase (B3)", () => {
     const cwd = tmpDir("kstack-le-");
     try {
       const ceiling = sprintMaxAttempts();
-      const state = sprintState(9, { attempts: { implement: ceiling - 1 } });
+      const state = sprintState(9, { attempts: { "devsecops-review->implement": ceiling - 1 } });
       devsecopsRecords(cwd, state, { "code-review": "rejected" });
       const next = advancePhase(state, "devsecops-review", { status: "completed", summary: "still failing" }, total, { phases: SPRINT.phases, cwd });
       assert.equal(next.status, "paused");
       assert.match(next.pausedReason!, /^loop-exhausted:implement/);
-      assert.equal(next.attempts.implement, ceiling);
+      assert.equal(next.attempts["devsecops-review->implement"], ceiling);
     } finally { rmSync(cwd, { recursive: true, force: true }); }
   });
 
   test("security critical/high freeze parks WITHOUT advancing or burning attempts (D3)", () => {
     const cwd = tmpDir("kstack-le-");
     try {
-      const state = sprintState(9, { sprintNumber: 7, attempts: { implement: 1 } });
+      const state = sprintState(9, { sprintNumber: 7, attempts: { "devsecops-review->implement": 1 } });
       devsecopsRecords(cwd, state, { "security-review": "rejected", severity: "critical" });
       const next = advancePhase(state, "devsecops-review", { status: "completed", summary: "severe finding" }, total, { phases: SPRINT.phases, cwd });
       assert.ok(isSecurityFrozen(next));
       assert.equal(next.status, "paused");
       assert.equal(next.phaseIndex, 9, "held at the review phase");
-      assert.equal(next.attempts.implement, 1, "no attempt burned");
+      assert.equal(next.attempts["devsecops-review->implement"], 1, "no attempt burned");
       assert.match(next.freezeInfo.artifactPath, /security-review-artifact_07\.md$/);
       assert.equal(next.results["devsecops-review"].summary, "severe finding", "gate result still recorded");
 
@@ -583,11 +583,82 @@ describe("loop engine in advancePhase (B3)", () => {
   });
 });
 
+// --- Per-gate loop budget (attempts keyed by gate->target) --------------------
+
+describe("per-gate loop budget (attempts keyed by gate->target)", () => {
+  const total = SPRINT.phases.length;
+  const IMPL = SPRINT.phases.findIndex((p) => p.id === "implement");
+  const QA = SPRINT.phases.findIndex((p) => p.id === "qa-browsing");
+  const DEVSECOPS = SPRINT.phases.findIndex((p) => p.id === "devsecops-review");
+
+  /** Drive the qa-browsing gate: a RED verdict loops back to implement. */
+  function qaRejects(cwd: string, state: any) {
+    writeRec(cwd, state, "qa-browsing", "test", { status: "red" });
+    return advancePhase(state, "qa-browsing", { status: "completed", summary: "qa found issues" }, total, { phases: SPRINT.phases, cwd });
+  }
+
+  /** Drive implement to an APPROVED verdict (the target phase runs again). */
+  function implementApproves(cwd: string, state: any) {
+    const approved = { ...state, phaseIndex: IMPL, pendingVerdict: { phaseId: "implement", parsed: { verdicts: { "be-walk": "pass" } }, excerpt: "" } };
+    return advancePhase(approved, "implement", { status: "completed", summary: "shipped" }, total, { phases: SPRINT.phases, cwd });
+  }
+
+  test("implement's approval must not reset the QA gate's budget — the ceiling fires after N rejections", () => {
+    const cwd = tmpDir("kstack-budget-");
+    try {
+      const ceiling = sprintMaxAttempts();
+      let state: any = sprintState(QA);
+      for (let i = 1; i < ceiling; i++) {
+        const rejected = qaRejects(cwd, state);
+        assert.equal(rejected.status, "active", `rejection ${i} must loop back, not park`);
+        assert.equal(rejected.phaseIndex, IMPL, "loops back to implement");
+        assert.equal(rejected.attempts["qa-browsing->implement"], i, "the QA gate charged its own budget");
+
+        state = implementApproves(cwd, rejected);
+        assert.equal(state.phaseIndex, QA, "implement approved → back at the QA gate");
+        assert.equal(state.attempts["qa-browsing->implement"], i, "implement's approval must NOT reset the QA budget");
+        assert.equal(state.attempts["implement->implement"], undefined, "implement's own self-loop budget is separate");
+      }
+      // The Nth rejection exhausts the QA gate's budget → park for the human.
+      const exhausted = qaRejects(cwd, state);
+      assert.equal(exhausted.status, "paused");
+      assert.match(exhausted.pausedReason!, new RegExp(`^loop-exhausted:implement after ${ceiling} runs$`));
+      assert.equal(exhausted.attempts["qa-browsing->implement"], ceiling);
+    } finally { rmSync(cwd, { recursive: true, force: true }); }
+  });
+
+  test("each gate owns its budget — devsecops-review's counter is independent of qa-browsing's", () => {
+    const cwd = tmpDir("kstack-budget-");
+    try {
+      // qa-browsing rejects twice (its own budget burns twice).
+      let state: any = sprintState(QA);
+      state = qaRejects(cwd, state);
+      state = implementApproves(cwd, state);
+      state = qaRejects(cwd, state);
+      assert.equal(state.attempts["qa-browsing->implement"], 2);
+
+      // devsecops-review rejects once — its own counter starts at 1.
+      writeRec(cwd, state, "devsecops-review", "code-review", { "code-review": "rejected" });
+      writeRec(cwd, state, "devsecops-review", "security", { "security-review": "approved" });
+      const devRejected = advancePhase(
+        { ...state, phaseIndex: DEVSECOPS },
+        "devsecops-review",
+        { status: "completed", summary: "code review rejected" },
+        total,
+        { phases: SPRINT.phases, cwd },
+      );
+      assert.equal(devRejected.phaseIndex, IMPL, "devsecops-review loops back to implement");
+      assert.equal(devRejected.attempts["devsecops-review->implement"], 1, "the devsecops gate has its own budget");
+      assert.equal(devRejected.attempts["qa-browsing->implement"], 2, "the QA budget is untouched by the other gate");
+    } finally { rmSync(cwd, { recursive: true, force: true }); }
+  });
+});
+
 // --- D4 park helpers -------------------------------------------------------------
 
 describe("D4 park helpers", () => {
   test("park is idempotent and burns no attempts", () => {
-    const state = sprintState(7, { attempts: { implement: 2 } });
+    const state = sprintState(7, { attempts: { "implement->implement": 2 } });
     const parked = parkForUnreadableVerdict(state, "devsecops-review", "no-verdict");
     assert.equal(parked.status, "paused");
     assert.equal(parked.verdictPark, "devsecops-review");
@@ -607,11 +678,11 @@ describe("D4 park helpers", () => {
   });
 
   test("returnParkedWithContext loops back without incrementing attempts", () => {
-    const parked = parkForUnreadableVerdict(sprintState(8, { attempts: { implement: 1 } }), "qa-browsing", "no-verdict");
+    const parked = parkForUnreadableVerdict(sprintState(8, { attempts: { "qa-browsing->implement": 1 } }), "qa-browsing", "no-verdict");
     const next = returnParkedWithContext(parked, SPRINT.phases, "custom guidance");
     assert.ok(next);
     assert.equal(next!.phaseIndex, 7, "back to implement");
-    assert.equal(next!.attempts.implement, 1, "no burn");
+    assert.equal(next!.attempts["qa-browsing->implement"], 1, "no burn");
     assert.ok(next!.retryContext.feedback.includes("custom guidance"));
   });
 
@@ -1107,16 +1178,17 @@ describe("code-review pass-1 fixes", () => {
 
   test("B9: reissueGate restores exactly one verified loop-target run after exhaustion", () => {
     const ceiling = sprintMaxAttempts(); // 4 by default
-    const exhausted = sprintState(7, {
+    const devsecopsIndex = SPRINT.phases.findIndex((p) => p.id === "devsecops-review");
+    const exhausted = sprintState(devsecopsIndex, {
       status: "paused" as const,
       pausedReason: `loop-exhausted:implement after ${ceiling} runs`,
-      attempts: { implement: ceiling },
+      attempts: { "devsecops-review->implement": ceiling },
     });
 
     const reissued = reissueGate(exhausted, SPRINT.phases);
     assert.equal(reissued.status, "active");
     assert.equal(reissued.pausedReason, undefined);
-    assert.equal(reissued.attempts!.implement, Math.max(0, ceiling - 2));
+    assert.equal(reissued.attempts!["devsecops-review->implement"], Math.max(0, ceiling - 2));
     // Non-exhaustion pauses pass through as a plain resume.
     assert.equal(reissueGate({ ...exhausted, pausedReason: "anomaly:dup" }, SPRINT.phases).status, "active");
 
@@ -1126,10 +1198,10 @@ describe("code-review pass-1 fixes", () => {
     const after = advancePhase({ ...reissued, pendingVerdict: rejectedVerdict }, "devsecops-review", { status: "completed", summary: "gate re-ran, rejected" }, SPRINT.phases.length, { phases: SPRINT.phases });
     assert.equal(after.phaseIndex, SPRINT.phases.findIndex((p) => p.id === "implement"));
     assert.equal(after.status, "active");
-    assert.equal(after.attempts!.implement, ceiling - 1);
+    assert.equal(after.attempts!["devsecops-review->implement"], ceiling - 1);
 
     // A SECOND consecutive rejection re-exhausts and returns to the human.
-    const after2 = advancePhase({ ...after, phaseIndex: 7, pendingVerdict: rejectedVerdict }, "devsecops-review", { status: "completed", summary: "gate re-ran, rejected again" }, SPRINT.phases.length, { phases: SPRINT.phases });
+    const after2 = advancePhase({ ...after, phaseIndex: devsecopsIndex, pendingVerdict: rejectedVerdict }, "devsecops-review", { status: "completed", summary: "gate re-ran, rejected again" }, SPRINT.phases.length, { phases: SPRINT.phases });
     assert.equal(after2.status, "paused");
     assert.match(after2.pausedReason ?? "", /loop-exhausted:implement/);
   });
@@ -1216,21 +1288,22 @@ describe("advanceBlockReason (F1): every parked state is code-enforced", () => {
 describe("forceContinuePastGate (F3): the next gate gets a fresh loop budget", () => {
   test("accepting an exhausted gate resets the target counter", () => {
     const ceiling = sprintMaxAttempts();
-    const state = sprintState(7, {
-      attempts: { implement: ceiling },
+    const devsecopsIndex = SPRINT.phases.findIndex((p) => p.id === "devsecops-review");
+    const state = sprintState(devsecopsIndex, {
+      attempts: { "devsecops-review->implement": ceiling },
       pausedReason: `loop-exhausted:implement after ${ceiling} runs`,
     });
     const next = forceContinuePastGate(state, SPRINT.phases);
-    assert.equal(next.phaseIndex, 8, "moves past the accepted gate");
+    assert.equal(next.phaseIndex, devsecopsIndex + 1, "moves past the accepted gate");
     assert.equal(next.status, "active");
-    assert.equal(next.attempts.implement, undefined, "loop budget reset");
+    assert.equal(next.attempts["devsecops-review->implement"], undefined, "loop budget reset");
     assert.equal(next.pausedReason, undefined);
   });
 
   test("after acceptance, qa-browsing's FIRST rejection loops back instead of parking (F3 regression)", () => {
     const ceiling = sprintMaxAttempts();
     const next = forceContinuePastGate(
-      sprintState(8, { attempts: { implement: ceiling }, pausedReason: `loop-exhausted:implement after ${ceiling} runs` }),
+      sprintState(8, { attempts: { "qa-browsing->implement": ceiling }, pausedReason: `loop-exhausted:implement after ${ceiling} runs` }),
       SPRINT.phases,
     );
     const rejected = advancePhase(
@@ -1242,14 +1315,14 @@ describe("forceContinuePastGate (F3): the next gate gets a fresh loop budget", (
     );
     assert.equal(rejected.phaseIndex, 7, "loops back to implement with zero prior reruns");
     assert.equal(rejected.status, "active", "must NOT park on the first QA rejection");
-    assert.equal(rejected.attempts.implement, 1, "budget starts fresh: this is rerun 1");
+    assert.equal(rejected.attempts["qa-browsing->implement"], 1, "budget starts fresh: this is rerun 1");
     assert.equal(rejected.retryContext?.targetPhaseId, "implement");
   });
 
   test("single-arg call stays compatible and leaves attempts untouched", () => {
-    const state = sprintState(7, { attempts: { implement: 4 }, pausedReason: "loop-exhausted:implement after 4 runs" });
+    const state = sprintState(7, { attempts: { "devsecops-review->implement": 4 }, pausedReason: "loop-exhausted:implement after 4 runs" });
     const next = forceContinuePastGate(state);
-    assert.equal(next.attempts.implement, 4);
+    assert.equal(next.attempts["devsecops-review->implement"], 4);
     assert.equal(next.phaseIndex, 8);
   });
 });

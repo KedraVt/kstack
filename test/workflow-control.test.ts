@@ -382,8 +382,8 @@ describe("2026-10 workflow audit fixes", () => {
   test("investigate.verify (loopBackOn only): re-issue, accept and return follow its real edges", () => {
     const phases = getWorkflow("investigate")!.phases;
     const ceiling = phaseOf("investigate", "verify").maxAttempts!;
-    const exhausted = { ...createState("investigate", "g"), phaseIndex: indexOf("investigate", "verify"), status: "paused" as const, pausedReason: `loop-exhausted:fix after ${ceiling} runs`, attempts: { fix: ceiling, "root-cause": 1 } };
-    assert.equal(reissueGate(exhausted, phases).attempts!.fix, ceiling - 2, "+1 verified attempt restores the fix edge");
+    const exhausted = { ...createState("investigate", "g"), phaseIndex: indexOf("investigate", "verify"), status: "paused" as const, pausedReason: `loop-exhausted:fix after ${ceiling} runs`, attempts: { "verify->fix": ceiling, "verify->root-cause": 1 } };
+    assert.equal(reissueGate(exhausted, phases).attempts!["verify->fix"], ceiling - 2, "+1 verified attempt restores the fix edge");
     assert.deepEqual(forceContinuePastGate(exhausted, phases).attempts, {}, "regression-qa → fix gets a fresh budget");
     const parked = { ...exhausted, verdictPark: "verify", pausedReason: "verdict-unreadable:verify:unroutable", pendingVerdict: { phaseId: "verify", parsed: { verdicts: { outcome: "refuted" } }, excerpt: "" } };
     assert.equal(returnParkedWithContext(parked, phases, "look again", TMP)?.phaseIndex, indexOf("investigate", "root-cause"));

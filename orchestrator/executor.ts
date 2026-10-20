@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { WorkflowState, WorkflowContext, GitContext, WorkflowPhase } from "./types.ts";
 import { getWorkflow } from "./workflows.ts";
-import { saveState, advancePhase, gateOptionalPhase, gateEntry, parkForUnreadableVerdict, loadActiveState, recordStepResult, type AdvanceOptions } from "./state.ts";
+import { saveState, advancePhase, gateOptionalPhase, gateEntry, parkForUnreadableVerdict, loadActiveState, recordStepResult, attemptKey, returnTargetFor, type AdvanceOptions } from "./state.ts";
 import { resolvePhaseEnabled, stepSkippedByVars } from "./enabled.ts";
 import { probeCapabilities, capabilitiesUnprobed, missingRequires, missingPrefers } from "./capabilities.ts";
 import { buildPhaseInstructions, buildDeterministicPlan, mainContractFor, buildStepInstructions, buildStepTask, interpolateStepTask, buildRecordContract, sprintDodSuffix, retryContextBlock } from "./templates.ts";
@@ -734,8 +734,11 @@ export async function executeCurrentPhase(
       const withVerdict = { ...state, pendingVerdict: { phaseId: phase.id, parsed, excerpt: outcome.lines.join("\n") } };
       saveState(pi, withVerdict);
       state = withVerdict;
-      // S3 ledger: verdict resolution lands verbatim (INV-L2).
-      appendLedger(ctx.cwd, state, { kind: "verdict", phaseId: phase.id, stepId: step?.id, attempt: (state.attempts?.[phase.id] ?? 0) + 1, payload: { verdicts: { ...parsed.verdicts } } }, (m) => notify(m, "warning"));
+      // S3 ledger: verdict resolution lands verbatim (INV-L2). The attempt
+      // number is THIS gate's own budget for its loop target (pair key).
+      const chargedTarget = returnTargetFor(phase, parsed) ?? phase.onComplete;
+      const gateAttempt = chargedTarget ? (state.attempts?.[attemptKey(phase.id, chargedTarget)] ?? 0) + 1 : 1;
+      appendLedger(ctx.cwd, state, { kind: "verdict", phaseId: phase.id, stepId: step?.id, attempt: gateAttempt, payload: { verdicts: { ...parsed.verdicts } } }, (m) => notify(m, "warning"));
     }
 
     // STEP 0 telemetry: persist per-step measurements (persistence only —

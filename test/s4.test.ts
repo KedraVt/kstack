@@ -248,7 +248,7 @@ describe("S4 advancePhase — publish-only + lastVerdicts + onComplete (TASK_03)
       });
       assert.equal(next.phaseIndex, 3, "persists routes to fix");
       assert.deepEqual(next.lastVerdicts?.["verify"], { outcome: "persists" });
-      assert.equal((next.attempts ?? {})["fix"], 1);
+      assert.equal((next.attempts ?? {})["verify->fix"], 1);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -277,7 +277,7 @@ describe("S4 advancePhase — publish-only + lastVerdicts + onComplete (TASK_03)
     });
     assert.equal(next.status, "active");
     assert.equal(next.phaseIndex, 2, "onComplete back-edge lands on findings");
-    assert.equal((next.attempts ?? {})["findings"], 1);
+    assert.equal((next.attempts ?? {})["fix->findings"], 1);
   });
 
   test("onComplete never fires on skipped or failed status", () => {
@@ -295,7 +295,7 @@ describe("S4 advancePhase — publish-only + lastVerdicts + onComplete (TASK_03)
   });
 
   test("onComplete target ceiling exhausts ⇒ loop-exhausted park", () => {
-    const s: WorkflowState = { ...base(), phaseIndex: 5, attempts: { findings: 4 } };
+    const s: WorkflowState = { ...base(), phaseIndex: 5, attempts: { "fix->findings": 4 } };
     const capped: WorkflowPhase[] = REVIEW_PHASES.map((p) =>
       p.id === "findings" ? { ...p, maxAttempts: 4 } : p,
     );

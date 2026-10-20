@@ -190,11 +190,11 @@ describe("parked-state hygiene", () => {
       status: "paused" as const,
       phaseIndex: 0,
       verdictPark: "gate",
-      attempts: { implement: 2 },
+      attempts: { "gate->implement": 2 },
     };
     const next = forceApproveParked(state, phases);
     assert.equal(next.status, "active");
-    assert.equal(next.attempts?.implement, undefined, "force-approve must grant a fresh ceiling");
+    assert.equal(next.attempts?.["gate->implement"], undefined, "force-approve must grant a fresh ceiling");
   });
 
   test("resumeState clears stale verdict state", () => {

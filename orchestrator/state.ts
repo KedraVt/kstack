@@ -164,6 +164,31 @@ function ceilingFor(targetPhaseId: string, declared?: number): number {
   return targetPhaseId === "system-design" ? sprintArchMaxAttempts() : sprintMaxAttempts();
 }
 
+/**
+ * Attempt-counter key for one gate→target edge. Every GATE owns its own
+ * budget of reruns of its target, so the counter is keyed by the PAIR
+ * (`${gateId}->${targetId}`): qa-browsing's rejections keep their count even
+ * when the target (implement) completes and approves in between. Keying by
+ * the target alone let implement's approval wipe the counter the QA gate
+ * had charged — the ceiling never fired and the loop could run forever.
+ */
+export function attemptKey(gateId: string, targetId: string): string {
+  return `${gateId}->${targetId}`;
+}
+
+/**
+ * Drop every counter charged by one gate (its own approval resets its
+ * budget). `keep` holds keys that must survive — the gate's own onComplete
+ * edge, whose back-edge fires in the very transition that clears the budget.
+ */
+function clearGateAttempts(attempts: Record<string, number>, gateId: string | undefined, keep?: string[]): void {
+  if (!gateId) return;
+  const prefix = `${gateId}->`;
+  for (const key of Object.keys(attempts)) {
+    if (key.startsWith(prefix) && !keep?.includes(key)) delete attempts[key];
+  }
+}
+
 /** Every phase a gate's routing can charge attempts to: loopBackTo, loopBackOn targets, onComplete. */
 export function loopEdges(phase: WorkflowPhase | undefined): string[] {
   if (!phase) return [];
@@ -443,8 +468,11 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
       purgeStepResults(next.results, opts!.phases!, targetIndex, state.phaseIndex);
       const target = opts!.phases![targetIndex];
       const ceiling = ceilingFor(action.target!, phase!.maxAttempts ?? target.maxAttempts);
-      const runsDone = (next.attempts[action.target!] ?? 0) + 1;
-      next.attempts[action.target!] = runsDone;
+      // Per-GATE budget: the counter is keyed by the gate→target PAIR, so
+      // this gate's reruns are counted apart from every other gate's.
+      const key = attemptKey(phase!.id, action.target!);
+      const runsDone = (next.attempts[key] ?? 0) + 1;
+      next.attempts[key] = runsDone;
       if (runsDone >= ceiling) {
         // Exhaustion ⇒ paused + user notified; phaseIndex stays AT the gate
         // phase — forceContinuePastGate() performs the +1 when the human
@@ -464,11 +492,12 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
       return next;
     }
 
-    // Approved / publish-only advance: the loop edges are cleared — reset
-    // the attempt counters this phase's routing could have charged.
-    for (const edge of [phase!.loopBackTo, ...Object.keys(phase!.loopBackOn ?? {}).map((k) => phase!.loopBackOn![k])]) {
-      if (edge) delete next.attempts[edge];
-    }
+    // Approved / publish-only advance: the gate's OWN budget is reset — only
+    // the counters this phase charged (its own edges) are dropped. Another
+    // gate's budget for the same target (qa-browsing→implement) survives.
+    // The phase's own onComplete edge keeps its budget: that back-edge fires
+    // in this very transition and must keep counting.
+    clearGateAttempts(next.attempts, phase!.id, phase!.onComplete ? [attemptKey(phase!.id, phase!.onComplete)] : undefined);
     next.retryContext = undefined;
   }
 
@@ -487,8 +516,10 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
     // Same ceiling rule as verdict loop-backs (and reissueGate): the gate's
     // declared maxAttempts wins over the target's.
     const ceiling = ceilingFor(phase.onComplete, phase.maxAttempts ?? target.maxAttempts);
-    const runsDone = (next.attempts[phase.onComplete] ?? 0) + 1;
-    next.attempts[phase.onComplete] = runsDone;
+    // The gate carrying the onComplete edge owns the budget for its target.
+    const key = attemptKey(phase.id, phase.onComplete);
+    const runsDone = (next.attempts[key] ?? 0) + 1;
+    next.attempts[key] = runsDone;
     if (runsDone >= ceiling) {
       next.status = "paused";
       next.pausedReason = `loop-exhausted:${phase.onComplete} after ${runsDone} runs`;
@@ -531,12 +562,13 @@ export function parkForUnreadableVerdict(state: WorkflowState, phaseId: string, 
  */
 export function forceApproveParked(state: WorkflowState, phases?: WorkflowPhase[]): WorkflowState {
   const phaseId = state.verdictPark ?? phases?.[state.phaseIndex]?.id ?? `phase-${state.phaseIndex}`;
-  // Reset the loop target's attempt counter — same contract as
-  // forceContinuePastGate: the human approved moving on, so the NEXT gate
-  // must get a fresh ceiling rather than inheriting a burned one.
+  // Reset the gate's OWN attempt counters — same contract as
+  // forceContinuePastGate: the human approved moving on, so this gate's next
+  // visit gets a fresh ceiling rather than inheriting a burned one. Other
+  // gates' budgets (their own pair keys) are untouched.
   const gate = phases?.[state.phaseIndex];
   const attempts = { ...(state.attempts ?? {}) };
-  for (const edge of loopEdges(gate)) delete attempts[edge];
+  clearGateAttempts(attempts, gate?.id);
   return {
     ...state,
     status: "active",
@@ -588,7 +620,7 @@ export function returnParkedWithContext(state: WorkflowState, phases: WorkflowPh
     pausedReason: undefined,
     retryContext: {
       targetPhaseId: loopTarget,
-      attempt: (state.attempts?.[loopTarget] ?? 0) + 1,
+      attempt: (state.attempts?.[attemptKey(phase.id, loopTarget)] ?? 0) + 1,
       maxAttempts: ceilingFor(loopTarget, phase.maxAttempts),
       feedback:
         [loopFeedback(state, phase, prior, cwd), extraFeedback]
@@ -620,15 +652,17 @@ export function unfreeze(state: WorkflowState, phases?: WorkflowPhase[]): Workfl
  * result is already recorded, so the index moves PAST it — linear continuation
  * without re-running the gate.
  *
- * The attempt counter of the gate's loop TARGET is reset: the ceiling is
+ * The attempt counters of the ACCEPTED GATE are reset: the ceiling is
  * documented as CONSECUTIVE reruns per review gate (config.ts), and the next
  * gate (e.g. qa-verdict after an accepted devsecops-review) must get a fresh
- * budget instead of parking on its first rejection with zero rework.
+ * budget instead of parking on its first rejection with zero rework. Each
+ * gate owns its own budget (pair key), so accepting one gate never grants
+ * budget to — nor burns — another's.
  */
 export function forceContinuePastGate(state: WorkflowState, phases?: WorkflowPhase[]): WorkflowState {
   const gate = phases?.[state.phaseIndex];
   const attempts = { ...(state.attempts ?? {}) };
-  for (const edge of loopEdges(gate)) delete attempts[edge];
+  clearGateAttempts(attempts, gate?.id);
   // INV-01: moving phaseIndex clears stepIndex (stale cursor → skipped gates).
   return {
     ...state,
@@ -823,12 +857,13 @@ export function reissueGate(state: WorkflowState, phases: WorkflowPhase[]): Work
   // runs") — loopBackOn/onComplete gates have no loopBackTo to fall back on.
   const target = reason.slice("loop-exhausted:".length).split(" ")[0];
   const targetPhase = phases.find((p) => p.id === target);
-  if (targetPhase) {
-    const ceiling = ceilingFor(target, gatePhase?.maxAttempts ?? targetPhase.maxAttempts);
+  if (targetPhase && gatePhase) {
+    const ceiling = ceilingFor(target, gatePhase.maxAttempts ?? targetPhase.maxAttempts);
     // ceiling - 2, deliberately unclamped: a ceiling of 1 or 2 must still
     // grant the promised ONE verified run (negative counters make the next
-    // rejection's runsDone = attempts + 1 < ceiling).
-    attempts[target] = ceiling - 2;
+    // rejection's runsDone = attempts + 1 < ceiling). The counter lives under
+    // the gate→target PAIR key — only THIS gate's budget is restored.
+    attempts[attemptKey(gatePhase.id, target)] = ceiling - 2;
   }
   // Re-running the gate phase restarts it — INV-01: a stale step cursor must
   // not carry into the re-run (harmless today: no stepped phase is a gate).
