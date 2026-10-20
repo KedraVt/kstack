@@ -1,0 +1,23 @@
+{
+  "name": "@kedra/kstack-browser",
+  "version": "1.91.165.0",
+  "private": true,
+  "description": "Vendored kstack headless browser (browse CLI + daemon server) — upstream MIT project, renamed.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "bash build.sh",
+    "build:win32": "bash build.sh win32-x64"
+  },
+  "dependencies": {
+    "@ngrok/ngrok": "^1.7.0",
+    "cross-spawn": "^7.0.6",
+    "diff": "^9.0.0",
+    "playwright": "1.62.1",
+    "sharp": "^0.35.5",
+    "socks": "^2.8.10"
+  },
+  "patchedDependencies": {
+    "playwright-core@1.62.1": "patches/playwright-core@1.62.1.patch"
+  }
+}

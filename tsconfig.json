@@ -21,5 +21,8 @@
     "test/**/*.ts",
     "tools.generated.ts",
     "index.ts"
+  ],
+  "exclude": [
+    "browser"
   ]
 }

@@ -14,6 +14,13 @@ bun.lock
 runtime/browse/
 runtime/design/
 
+# vendored browser/ (kstack headless browser, built from browser/build.sh):
+# node_modules and dist are build artifacts — never commit them.
+browser/node_modules/
+browser/dist/
+# keep the vendored browser's lockfile tracked (reproducible builds)
+!browser/bun.lock
+
 # mindrun QA artifacts (temporary, never committed)
 mindrun-*.md
 
