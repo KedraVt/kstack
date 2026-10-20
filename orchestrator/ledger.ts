@@ -135,6 +135,60 @@ export function appendLedger(
   }
 }
 
+/**
+ * Delete THIS run's ledger file at a terminal run status. The ledger is
+ * per-RUN operational data: it lives only while the run is live and dies
+ * with it (the durable record of a run is the run report under
+ * `.kstack/runs/`). INV-L1 governs the WRITE side — while the run lives the
+ * file is still append-only.
+ *
+ * The shared legacy "adhoc" lane (a state without a runId) is NEVER
+ * deleted: it is shared by every legacy run.
+ *
+ * Containment mirrors appendLedger: a ledger dir that resolves outside
+ * <cwd> is refused, and a symlink at the file is never followed (nor
+ * unlinked — it is not our file). Never throws: a failure is reported
+ * through onWarn and the run still ends.
+ */
+export function removeRunLedger(
+  cwd: string,
+  state: LedgerState,
+  onWarn?: (message: string) => void,
+): boolean {
+  try {
+    const file = ledgerPathFor(cwd, state);
+    // The shared legacy lane (no runId → "<workflow>-adhoc.jsonl") is not
+    // this run's file — it must survive every run.
+    if (file === ledgerPathFor(cwd, { ...state, runId: undefined })) return false;
+    let lst: fs.Stats | null = null;
+    try {
+      lst = fs.lstatSync(file);
+    } catch {
+      return false; // ENOENT — nothing to delete
+    }
+    if (lst.isSymbolicLink()) {
+      onWarn?.(`kstack: refusing to delete the symlinked ledger file "${path.basename(file)}"`);
+      return false;
+    }
+    if (!lst.isFile()) return false;
+    const dir = path.dirname(file);
+    const rel = path.relative(fs.realpathSync(cwd), fs.realpathSync(dir));
+    if (rel.startsWith("..") || path.isAbsolute(rel)) {
+      onWarn?.(`kstack: refusing to delete the ledger file outside the repo cwd`);
+      return false;
+    }
+    fs.unlinkSync(file);
+    return true;
+  } catch (err: any) {
+    try {
+      onWarn?.(`kstack: ledger cleanup failed (${err?.code ?? err?.message ?? "unknown"}) — continuing`);
+    } catch {
+      /* even the notify path is best-effort */
+    }
+    return false;
+  }
+}
+
 /** Inspection/test reader — never consulted by the state machine. */
 export function readLedger(cwd: string, state: LedgerState): LedgerEntry[] {
   try {

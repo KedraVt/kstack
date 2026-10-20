@@ -14,6 +14,8 @@ import { launchPhase, executeCurrentPhase, releasePhaseInFlight, isPhaseInFlight
 import { existsSync } from "node:fs";
 import * as path from "node:path";
 import { appendLedger } from "./ledger.ts";
+import { writeRunReport } from "./telemetry.ts";
+import { cleanupRunArtifacts } from "./runcleanup.ts";
 import { endStepWatch } from "./stuck.ts";
 import { verdictKeysFor, writeStepRecord } from "./records.ts";
 import { verdictValuesFor } from "./templates.ts";
@@ -118,6 +120,13 @@ function abortWorkflow(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: Wo
       () => {},
     );
   }
+  // The run is over: its ledger file and step records die with it. The run
+  // report is written FIRST — it is the durable record and must not depend
+  // on the files deleted below.
+  writeRunReport(ctx.cwd, state.workflowId);
+  cleanupRunArtifacts(ctx.cwd, state, (m) => {
+    try { ctx.ui.notify(m, "warning"); } catch { /* stale ctx */ }
+  });
   saveState(pi, { ...abortState(state), ephemeralArtifacts: [] });
   try { ctx.ui.setStatus("kstack", undefined); } catch { /* stale */ }
   ctx.ui.notify(message, "info");

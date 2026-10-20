@@ -76,10 +76,15 @@ const normVerdict = (v: string): string => v.trim().toLowerCase().replace(/[\s.,
 /** Same allowlist as the kstack-report writer and ledgerPathFor (+ dot). */
 const safe = (v: string): string => v.replace(/[^\w.-]/g, "-");
 
+/** `.kstack/runs/<runId>/` — the dir holding ONE run's step records. */
+export function runRecordsDirFor(cwd: string, runId: string): string {
+  return path.join(cwd, ".kstack", "runs", safe(runId));
+}
+
 /** `.kstack/runs/<runId>/<phase>[.<step>].json` — never trusts raw segments. */
 export function recordPathFor(cwd: string, runId: string, phaseId: string, stepId?: string): string {
   const file = stepId ? `${safe(phaseId)}.${safe(stepId)}.json` : `${safe(phaseId)}.json`;
-  return path.join(cwd, ".kstack", "runs", safe(runId), file);
+  return path.join(runRecordsDirFor(cwd, runId), file);
 }
 
 /** One kstack-report record file — the canonical delegated-step completion proof. */
@@ -325,7 +330,7 @@ export function phaseRecordFeedback(
  */
 export function clearPhaseRecords(cwd: string, runId: string, phaseId: string): void {
   try {
-    const dir = path.join(cwd, ".kstack", "runs", safe(runId));
+    const dir = runRecordsDirFor(cwd, runId);
     if (!fs.existsSync(dir)) return;
     const rel = path.relative(fs.realpathSync(cwd), fs.realpathSync(dir));
     if (rel.startsWith("..") || path.isAbsolute(rel)) return;
@@ -335,6 +340,47 @@ export function clearPhaseRecords(cwd: string, runId: string, phaseId: string): 
     }
   } catch {
     /* best-effort — a surviving record degrades to the pre-fix behavior */
+  }
+}
+
+/**
+ * Delete a run's step-record dir at a terminal run status. Records are
+ * per-RUN operational data: they live only while the run is live (a resume
+ * needs them) and die with it — the durable record of a run is the run
+ * report under `.kstack/runs/`.
+ *
+ * Containment mirrors clearPhaseRecords: the dir must resolve inside <cwd>,
+ * and a symlinked run dir is never followed (nor unlinked — it is not our
+ * dir). Never throws: a failure is reported through onWarn.
+ */
+export function removeRunRecords(cwd: string, runId: string, onWarn?: (message: string) => void): boolean {
+  try {
+    const dir = runRecordsDirFor(cwd, runId);
+    let lst: fs.Stats | null = null;
+    try {
+      lst = fs.lstatSync(dir);
+    } catch {
+      return false; // ENOENT — nothing to delete
+    }
+    if (lst.isSymbolicLink()) {
+      onWarn?.(`kstack: refusing to delete the symlinked run dir "${path.basename(dir)}"`);
+      return false;
+    }
+    if (!lst.isDirectory()) return false;
+    const rel = path.relative(fs.realpathSync(cwd), fs.realpathSync(dir));
+    if (rel.startsWith("..") || path.isAbsolute(rel)) {
+      onWarn?.(`kstack: refusing to delete the run dir outside the repo cwd`);
+      return false;
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+    return true;
+  } catch (err: any) {
+    try {
+      onWarn?.(`kstack: run-record cleanup failed (${err?.code ?? err?.message ?? "unknown"}) — continuing`);
+    } catch {
+      /* even the notify path is best-effort */
+    }
+    return false;
   }
 }
 
@@ -356,7 +402,7 @@ export function writeStepRecord(
     deliverables?: string[];
   },
 ): string {
-  const dir = path.join(cwd, ".kstack", "runs", safe(record.runId));
+  const dir = runRecordsDirFor(cwd, record.runId);
   fs.mkdirSync(dir, { recursive: true });
   const file = record.step ? `${safe(record.phase)}.${safe(record.step)}.json` : `${safe(record.phase)}.json`;
   const target = path.join(dir, file);

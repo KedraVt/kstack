@@ -16,6 +16,7 @@ import { isRefutedStrategy, isValidatedStrategy } from "./skip.ts";
 import { replaceExact } from "./text.ts";
 import { appendLedger } from "./ledger.ts";
 import { reportCliPath, projectRootFor, verdictKeysFor, clearPhaseRecords } from "./records.ts";
+import { cleanupRunArtifacts } from "./runcleanup.ts";
 import { newStepRun, feedStepEvent, detectStuck, checkStepBudgets, stepBudgetDefaults, beginStepWatch, endStepWatch } from "./stuck.ts";
 import { cleanupEphemeralArtifacts, sprintGateEphemerals, artifactSignalFiles, runStartMs } from "./artifacts.ts";
 
@@ -261,7 +262,9 @@ export function advanceBlockReason(state: WorkflowState): string | null {
  * Terminal bookkeeping shared by EVERY completion path (executor recursion,
  * kstack_advance on the last phase, the optional-skip panel): flush the run
  * report, delete the run's ephemerals (S4/§10.5 — every failure is
- * ledger-noted, cleanup never crashes the finish), persist "completed".
+ * ledger-noted, cleanup never crashes the finish), delete the run's own
+ * operational files (ledger + step records — they live only while the run
+ * is live), persist "completed".
  */
 export function finalizeRun(pi: ExtensionAPI, ctx: ExtensionContext, state: WorkflowState): WorkflowState {
   const warn = (m: string) => {
@@ -271,6 +274,8 @@ export function finalizeRun(pi: ExtensionAPI, ctx: ExtensionContext, state: Work
       /* stale ctx */
     }
   };
+  // The run report is written FIRST: it is the durable record of the run and
+  // must not depend on the files deleted below.
   writeRunReport(ctx.cwd, state.workflowId);
   if ((state.ephemeralArtifacts ?? []).length > 0) {
     const { deleted, failed } = cleanupEphemeralArtifacts(ctx.cwd, state.ephemeralArtifacts!, warn);
@@ -280,6 +285,8 @@ export function finalizeRun(pi: ExtensionAPI, ctx: ExtensionContext, state: Work
       payload: { summary: `ephemeral cleanup: ${deleted.length} deleted${failed.length ? `, ${failed.length} failed` : ""}`, artifacts: deleted },
     }, () => {});
   }
+  // The run is over: its ledger file and step records die with it.
+  cleanupRunArtifacts(ctx.cwd, state, warn);
   const done: WorkflowState = { ...state, status: "completed", ephemeralArtifacts: [] };
   saveState(pi, done);
   try {

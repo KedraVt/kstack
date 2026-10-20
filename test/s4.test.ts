@@ -1059,6 +1059,10 @@ describe("S4 executor — sideEffect gate + resume + ephemeral (TASK_07)", () =>
       try {
         const state = {
           ...createState("t7-eph", "g"),
+          // The shared legacy lane: a PER-RUN ledger file dies with the run
+          // (see test/run-cleanup.test.ts) — the shared lane is the one that
+          // survives, so the cleanup event stays readable here.
+          runId: undefined,
           phaseIndex: 1, // past the last phase → terminal
           status: "completed" as const,
           ephemeralArtifacts: ["understand.md", "missing.md", "../escape.md"],

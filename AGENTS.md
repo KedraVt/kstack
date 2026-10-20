@@ -13,8 +13,11 @@
   skill dirs, `skills-distilled/`, `source/`, `update.sh` and `scripts/` are
   deleted; `main` stays the stable baseline, work happens on `kstack`.
 - **Telemetry convention**: telemetry belongs to the orchestrator — every
-  step and run lands in `.kstack/ledger/` and the run report. Skill bodies
-  carry methodology only, with zero telemetry calls.
+  step and run lands in `.kstack/ledger/` and the run report. The ledger and
+  the step records live under `.kstack/` only while the run is live and are
+  deleted at run end (completed or aborted); the run report under
+  `.kstack/runs/` is the durable record. Skill bodies carry methodology
+  only, with zero telemetry calls.
 - **Headless rule**: skills that may run inside spawned subagents
   (`pi --mode json -p --no-session`, no user on the wire) must not block on
   `ask_user_question` — each carries a "Headless run?" fallback line that

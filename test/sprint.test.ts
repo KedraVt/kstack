@@ -1561,8 +1561,10 @@ describe("in-flight decision guards (2026-09 fix 4)", () => {
       assert.equal(gate!.payload.gateId, "devsecops-review", "gateId names the parked phase, not the loop target");
 
       // "Abort workflow" — the shared abortWorkflow funnel writes
-      // decision:"abort" (covers all 8 abort call sites).
-      const parked2 = parkForUnreadableVerdict(sprintState(8), "qa-verdict", "artifact-mismatch");
+      // decision:"abort" (covers all 8 abort call sites). The audit lands in
+      // the SHARED legacy lane: a per-run ledger file dies with the run (see
+      // test/run-cleanup.test.ts), the shared lane is the one that survives.
+      const parked2 = { ...parkForUnreadableVerdict(sprintState(8), "qa-verdict", "artifact-mismatch"), runId: undefined };
       const p2 = mkPanel("Abort workflow", true);
       assert.equal(await handleSprintPanel(parked2, p2.cmdCtx, p2.pi), true);
       entries = readLedger(cwd, parked2);
