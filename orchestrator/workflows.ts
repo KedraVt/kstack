@@ -1362,7 +1362,7 @@ Audit what implement shipped against plan/design intent.`,
 Security audit of the sprint diff: STRIDE-lite over new trust boundaries from capability.md, secrets hygiene, injection prevention — emit \`--verdict security-review==approved\` or \`==rejected\` PLUS \`--verdict severity==<critical|high|medium|low|red|orange|green>\` on rejection in your step record. Findings in --evidence.
 
 ## STOP CONDITION
-Stop when: every new boundary has been rated and each finding carries a copy-paste-ready fix. Escalate-on-doubt — critical/high/red freeze the pipeline for human review; medium/low loop back automatically.
+Stop when: every new boundary has been rated and each finding carries a copy-paste-ready fix. Escalate-on-doubt — critical/high/red freeze the pipeline for human review; medium/low loop back automatically. On a critical/high rejection the security artifact MUST include a \`### Remediation options\` section (1-3 numbered strategies, option 1 = your recommendation) — the human picks one at the freeze panel and the implementer applies it.
 
 ## CONTEXT
 Sprint {sprint} | Goal: {goal} | Branch: {branch}

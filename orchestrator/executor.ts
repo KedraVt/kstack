@@ -245,7 +245,7 @@ export function advanceBlockReason(state: WorkflowState): string | null {
   if (state.status === "paused") {
     const reason = state.pausedReason ?? "";
     if (state.frozenUntilHuman || reason.startsWith("security-freeze:")) {
-      return `the sprint is FROZEN by a critical/high security rejection — only the user may resolve it via the /kstack freeze panel (re-run, return with guidance, accept risk, abort)`;
+      return `the sprint is FROZEN by a critical/high security rejection — only the user may resolve it via the /kstack freeze panel (pick a reviewer fix, write your own fix, abort)`;
     }
     if (state.verdictPark) {
       return `the phase's verdict was unreadable — only the /kstack panel may continue, return or abort (no attempt was burned)`;

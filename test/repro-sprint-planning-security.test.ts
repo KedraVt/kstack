@@ -45,7 +45,9 @@ describe("Reproduction: DevSecOps Security Freeze & Planning Issues", () => {
   });
 
   test("repro 2: forceContinuePastGate should clear security freeze flags so subsequent phases are not blocked", () => {
-    // When user chooses 'Accept risk — continue past the gate', the freeze must be lifted.
+    // Defense in depth: the freeze panel no longer offers "accept risk", but
+    // forceContinuePastGate (kill-switch / loop-exhaustion panels) must still
+    // clear the freeze markers it inherits.
     const baseState = createState("sprint", "test accept risk past security freeze");
     const devsecopsIndex = SPRINT.phases.findIndex((p) => p.id === "devsecops-review");
 
@@ -75,7 +77,7 @@ describe("Reproduction: DevSecOps Security Freeze & Planning Issues", () => {
     assert.equal(
       blockReason,
       null,
-      "advanceBlockReason should not block next phase due to lingering security freeze after accepting risk"
+      "advanceBlockReason should not block next phase due to lingering security freeze markers"
     );
   });
 

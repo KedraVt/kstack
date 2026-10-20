@@ -16,6 +16,7 @@ import { getWorkflow } from "../orchestrator/workflows.ts";
 import { carryOverOpenQuestions } from "../orchestrator/templates.ts";
 import { advanceBlockReason } from "../orchestrator/executor.ts";
 import { handleSprintPanel } from "../orchestrator/command.ts";
+import { parseRemediationOptions, readRemediationOptions, FALLBACK_FIX_CHOICE } from "../orchestrator/security-options.ts";
 import { createInputRouter } from "../orchestrator/router.ts";
 import {
   sprintArchiveDir,
@@ -143,99 +144,274 @@ describe("Regression Blast Radius: DevSecOps Security Freeze & Resolution", () =
 
 describe("Regression Blast Radius: handleSprintPanel Modal Decisions", () => {
   const devsecopsIndex = SPRINT.phases.findIndex((p) => p.id === "devsecops-review");
+  const implementIndex = SPRINT.phases.findIndex((p) => p.id === "implement");
 
-  test("1. handleSprintPanel provides structured choices and handles 'Accept risk'", async () => {
-    const base = createState("sprint", "test panel accept risk");
-    const frozenState = {
-      ...base,
-      status: "paused" as const,
-      phaseIndex: devsecopsIndex,
-      frozenUntilHuman: true,
-      freezeInfo: {
-        phaseId: "devsecops-review",
-        severity: "critical",
-        artifactPath: "devsecops/security-review-artifact_01.md",
-      },
-    };
-
-    let selectedChoice = "";
-    let savedState: any = null;
-    let launched = false;
-
-    const mockPi: any = {
-      registerCommand: () => {},
-      appendEntry: (_type: string, st: any) => { savedState = st; },
-      on: () => {},
-    };
-
-    const mockCtx: any = {
-      ui: {
-        select: async (prompt: string, options: string[]) => {
-          assert.ok(prompt.includes("SECURITY FREEZE"));
-          assert.deepEqual(options, [
-            "Re-run review gate",
-            "Accept risk — continue past the gate",
-            "Return phase with guidance",
-            "Custom remediation…",
-            "Abort workflow",
-          ]);
-          selectedChoice = "Accept risk — continue past the gate";
-          return selectedChoice;
+  /** A frozen sprint state + a temp cwd holding the security artifact. */
+  function frozenFixture(artifact: string | null): { state: any; cwd: string } {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "kstack-freeze-"));
+    if (artifact !== null) {
+      fs.mkdirSync(path.join(cwd, "devsecops"), { recursive: true });
+      fs.writeFileSync(path.join(cwd, "devsecops", "security-review-artifact_01.md"), artifact, "utf-8");
+    }
+    const base = createState("sprint", "test freeze panel");
+    return {
+      cwd,
+      state: {
+        ...base,
+        status: "paused" as const,
+        phaseIndex: devsecopsIndex,
+        frozenUntilHuman: true,
+        freezeInfo: {
+          phaseId: "devsecops-review",
+          severity: "critical",
+          artifactPath: "devsecops/security-review-artifact_01.md",
         },
-        notify: () => {},
-      },
-      cwd: process.cwd(),
-      sessionManager: {
-        appendCustomEntry: () => {},
-        getEntries: () => [],
       },
     };
+  }
 
-    const handled = await handleSprintPanel(frozenState, mockCtx, mockPi);
-    assert.equal(handled, true);
+  const ARTIFACT_WITH_OPTIONS = [
+    "## Security Audit Report",
+    "security-review == rejected",
+    "severity == critical",
+    "",
+    "### Security Vulnerabilities (problems-security details)",
+    "- **[src/db.ts:42]** SQL injection in the search endpoint",
+    "",
+    "### Remediation options",
+    "1. Parameterize every query — smallest diff, one file",
+    "2. Swap the data layer for the ORM builder — touches three modules",
+    "",
+    "## HANDOFF",
+    "security-review == rejected",
+    "severity == critical",
+  ].join("\n");
+
+  /**
+   * The launched chain keeps a handle on the temp dir (a git child process
+   * runs with it as cwd) — Windows refuses the delete while it is open, so
+   * retry and never fail the test over temp garbage.
+   */
+  function rmCwd(cwd: string): void {
+    try {
+      fs.rmSync(cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    } catch {
+      /* the background chain still holds a handle — temp garbage is harmless */
+    }
+  }
+
+  test("1. the freeze panel offers the reviewer's fixes — never 'accept risk' or 're-run'", async () => {
+    const { state, cwd } = frozenFixture(ARTIFACT_WITH_OPTIONS);
+    try {
+      let offered: string[] = [];
+      const mockPi: any = {
+        registerCommand: () => {},
+        appendEntry: () => {},
+        on: () => {},
+      };
+      const mockCtx: any = {
+        ui: {
+          select: async (_prompt: string, options: string[]) => {
+            offered = options;
+            return "Abort workflow";
+          },
+          confirm: async () => false, // the human keeps the freeze
+          notify: () => {},
+        },
+        cwd,
+        sessionManager: { appendCustomEntry: () => {}, getEntries: () => [] },
+      };
+
+      const handled = await handleSprintPanel(state, mockCtx, mockPi);
+      assert.equal(handled, true);
+      assert.ok(offered.some((o) => o.startsWith("Fix 1: Parameterize every query")), `offered: ${offered.join(" | ")}`);
+      assert.ok(offered.some((o) => o.startsWith("Fix 2: Swap the data layer")), `offered: ${offered.join(" | ")}`);
+      assert.ok(!offered.some((o) => /accept risk/i.test(o)), "a critical/high finding can never be accepted");
+      assert.ok(!offered.some((o) => /re-run review gate/i.test(o)), "re-reviewing before a fix exists is pointless");
+      assert.ok(!offered.some((o) => /return phase with guidance/i.test(o)), "the reviewer options supersede generic guidance");
+      assert.ok(offered.includes("Write my own fix…"));
+      assert.ok(offered.includes("Abort workflow"));
+    } finally {
+      rmCwd(cwd);
+    }
   });
 
-  test("2. handleSprintPanel handles 'Custom remediation…' by requesting input and looping back", async () => {
-    const base = createState("sprint", "test panel custom remediation");
-    const frozenState = {
-      ...base,
-      status: "paused" as const,
-      phaseIndex: devsecopsIndex,
-      frozenUntilHuman: true,
-      freezeInfo: {
-        phaseId: "devsecops-review",
-        severity: "critical",
-        artifactPath: "devsecops/security-review-artifact_01.md",
-      },
-    };
-
-    let inputPrompted = false;
-    const mockPi: any = {
-      registerCommand: () => {},
-      appendEntry: () => {},
-      on: () => {},
-    };
-
-    const mockCtx: any = {
-      ui: {
-        select: async () => "Custom remediation…",
-        input: async (title: string, msg: string) => {
-          inputPrompted = true;
-          assert.equal(title, "Custom security remediation");
-          return "Escape HTML tags in output";
+  test("2. a missing options section falls back to 'Apply the reviewer's fixes (from the report)'", async () => {
+    const { state, cwd } = frozenFixture("## Security Audit Report\nsecurity-review == rejected\nseverity == critical\n");
+    try {
+      let offered: string[] = [];
+      const mockPi: any = { registerCommand: () => {}, appendEntry: () => {}, on: () => {} };
+      const mockCtx: any = {
+        ui: {
+          select: async (_prompt: string, options: string[]) => {
+            offered = options;
+            return "Abort workflow";
+          },
+          confirm: async () => false,
+          notify: () => {},
         },
-        notify: () => {},
-      },
-      cwd: process.cwd(),
-      sessionManager: {
-        appendCustomEntry: () => {},
-        getEntries: () => [],
-      },
-    };
+        cwd,
+        sessionManager: { appendCustomEntry: () => {}, getEntries: () => [] },
+      };
 
-    const handled = await handleSprintPanel(frozenState, mockCtx, mockPi);
-    assert.equal(handled, true);
-    assert.equal(inputPrompted, true);
+      const handled = await handleSprintPanel(state, mockCtx, mockPi);
+      assert.equal(handled, true);
+      assert.ok(offered.includes(FALLBACK_FIX_CHOICE), `offered: ${offered.join(" | ")}`);
+      assert.ok(!offered.some((o) => o.startsWith("Fix ")), "no reviewer options → no Fix entries");
+    } finally {
+      rmCwd(cwd);
+    }
+  });
+
+  test("3. picking a reviewer fix loops back to implement with that text in the retry context", async () => {
+    const { state, cwd } = frozenFixture(ARTIFACT_WITH_OPTIONS);
+    try {
+      const saved: any[] = [];
+      const mockPi: any = {
+        registerCommand: () => {},
+        appendEntry: (_type: string, st: any) => { saved.push(st); },
+        on: () => {},
+      };
+      const mockCtx: any = {
+        ui: {
+          select: async (_prompt: string, options: string[]) => options[1], // "Fix 2: …"
+          notify: () => {},
+        },
+        cwd,
+        sessionManager: { appendCustomEntry: () => {}, getEntries: () => [] },
+      };
+
+      const handled = await handleSprintPanel(state, mockCtx, mockPi);
+      assert.equal(handled, true);
+      const next = saved[0];
+      assert.ok(next, "the panel must save the looped-back state");
+      assert.equal(next.phaseIndex, implementIndex, "loops back to implement");
+      assert.equal(next.frozenUntilHuman, false, "the freeze is lifted by the fix decision");
+      assert.equal(isSecurityFrozen(next), false);
+      assert.equal(next.retryContext?.targetPhaseId, "implement");
+      assert.match(next.retryContext?.feedback ?? "", /Swap the data layer for the ORM builder/);
+      assert.doesNotMatch(next.retryContext?.feedback ?? "", /Parameterize every query/, "only the CHOSEN fix travels");
+    } finally {
+      invalidateRuntime();
+      for (let i = 0; i < 32; i++) releasePhaseInFlight("sprint", i);
+      rmCwd(cwd);
+    }
+  });
+
+  test("4. handleSprintPanel handles 'Write my own fix…' by requesting input and looping back", async () => {
+    const { state, cwd } = frozenFixture(ARTIFACT_WITH_OPTIONS);
+    try {
+      let inputPrompted = false;
+      const saved: any[] = [];
+      const mockPi: any = {
+        registerCommand: () => {},
+        appendEntry: (_type: string, st: any) => { saved.push(st); },
+        on: () => {},
+      };
+
+      const mockCtx: any = {
+        ui: {
+          select: async () => "Write my own fix…",
+          input: async (title: string, msg: string) => {
+            inputPrompted = true;
+            assert.equal(title, "Custom security remediation");
+            return "Escape HTML tags in output";
+          },
+          notify: () => {},
+        },
+        cwd,
+        sessionManager: {
+          appendCustomEntry: () => {},
+          getEntries: () => [],
+        },
+      };
+
+      const handled = await handleSprintPanel(state, mockCtx, mockPi);
+      assert.equal(handled, true);
+      assert.equal(inputPrompted, true);
+      assert.match(saved[0]?.retryContext?.feedback ?? "", /Escape HTML tags in output/);
+      assert.equal(saved[0]?.phaseIndex, implementIndex);
+    } finally {
+      invalidateRuntime();
+      for (let i = 0; i < 32; i++) releasePhaseInFlight("sprint", i);
+      rmCwd(cwd);
+    }
+  });
+
+  test("5. an empty custom fix keeps the freeze (no loop with nothing)", async () => {
+    const { state, cwd } = frozenFixture(ARTIFACT_WITH_OPTIONS);
+    try {
+      const saved: any[] = [];
+      const mockPi: any = {
+        registerCommand: () => {},
+        appendEntry: (_type: string, st: any) => { saved.push(st); },
+        on: () => {},
+      };
+      const mockCtx: any = {
+        ui: {
+          select: async () => "Write my own fix…",
+          input: async () => "   ",
+          notify: () => {},
+        },
+        cwd,
+        sessionManager: { appendCustomEntry: () => {}, getEntries: () => [] },
+      };
+
+      const handled = await handleSprintPanel(state, mockCtx, mockPi);
+      assert.equal(handled, true);
+      assert.equal(saved.length, 0, "no state mutation on an empty fix");
+      assert.equal(isSecurityFrozen(state), true, "the sprint stays frozen");
+    } finally {
+      rmCwd(cwd);
+    }
+  });
+});
+
+describe("Regression Blast Radius: security artifact remediation options", () => {
+  test("1. parseRemediationOptions extracts the numbered options of the artifact section", () => {
+    const options = parseRemediationOptions(
+      [
+        "## Security Audit Report",
+        "severity == critical",
+        "",
+        "### Security Vulnerabilities (problems-security details)",
+        "- **[src/db.ts:42]** SQL injection",
+        "",
+        "### Remediation options",
+        "1. Parameterize every query — smallest diff",
+        "2) Use the ORM builder — bigger diff",
+        "",
+        "### STRIDE Analysis",
+        "| boundary | threat |",
+      ].join("\n"),
+    );
+    assert.deepEqual(options, ["Parameterize every query — smallest diff", "Use the ORM builder — bigger diff"]);
+  });
+
+  test("2. numbered lines after the next heading are not options", () => {
+    const options = parseRemediationOptions(
+      ["### Remediation options", "1. The only option", "", "## HANDOFF", "1. not an option"].join("\n"),
+    );
+    assert.deepEqual(options, ["The only option"]);
+  });
+
+  test("3. an artifact without the section yields no options (the panel falls back)", () => {
+    assert.deepEqual(parseRemediationOptions("## Security Audit Report\nsecurity-review == rejected\n"), []);
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "kstack-artifact-"));
+    try {
+      assert.deepEqual(readRemediationOptions("devsecops/security-review-artifact_01.md", cwd), [], "missing artifact → no options");
+      fs.mkdirSync(path.join(cwd, "devsecops"), { recursive: true });
+      fs.writeFileSync(path.join(cwd, "devsecops", "security-review-artifact_01.md"), "## Security Audit Report\n", "utf-8");
+      assert.deepEqual(readRemediationOptions("devsecops/security-review-artifact_01.md", cwd), [], "no options section → no options");
+      fs.writeFileSync(
+        path.join(cwd, "devsecops", "security-review-artifact_01.md"),
+        "### Remediation options\n1. Rotate the leaked key\n",
+        "utf-8",
+      );
+      assert.deepEqual(readRemediationOptions("devsecops/security-review-artifact_01.md", cwd), ["Rotate the leaked key"]);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
   });
 });
 

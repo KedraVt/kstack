@@ -183,9 +183,19 @@ problems-security: none | <summary for developers>
 - **[File:line]** [Description]
   - *Fix:* [actionable code snippet to mitigate the risk]
 
+### Remediation options
+1. <strategy for the critical/high findings + its trade-off>   ← your recommendation
+2. <alternative strategy + its trade-off>
+3. <alternative strategy + its trade-off>
+
 ### STRIDE Analysis
 <threat model table over the new boundaries>
 ```
+
+**Remediation options** (when rejecting): 1-3 numbered, mutually exclusive
+remediation strategies for the critical/high findings, one line each with its
+trade-off; option 1 is your recommendation. The human picks one at the freeze
+panel and the implementer applies it.
 
 In posture mode also write `.kstack/security-reports/{date}-{HHMMSS}.json`
 (date, mode, scope, phases_run, attack_surface counts, findings with
@@ -201,6 +211,8 @@ back automatically.
 - Artifact ends with exactly one verbatim `security-review ==` line (+
   `severity ==` when rejected) AND repeats both inside `## HANDOFF`.
 - `approved` ⟹ zero open critical/high.
+- A rejected artifact carries a `### Remediation options` list (1-3 numbered
+  strategies, option 1 = the recommendation).
 - Every finding has file:line, confidence, attack scenario, blast radius, fix —
   and the quoted vulnerable line(s) backing it.
 - Scope flags honored: never silently combined; phases 0–1 always ran.

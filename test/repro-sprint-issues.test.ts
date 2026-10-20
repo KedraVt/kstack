@@ -67,7 +67,8 @@ describe("reproduction tests for reported sprint issues", () => {
       ui: {
         select: async () => {
           selectCalled = true;
-          return "Re-run review gate";
+          // "Abort workflow" is the only freeze choice that asks for NO input.
+          return "Abort workflow";
         },
         input: async () => {
           inputCalled = true;

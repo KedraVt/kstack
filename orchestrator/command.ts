@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getAllWorkflows, getWorkflow, getWorkflowIds } from "./workflows.ts";
-import { loadActiveState, createState, saveState, abortState, resumeState, reissueGate, approveNext, approveEntryGate, approveOptionalPhase, skipPendingOptional, isSecurityFrozen, unfreeze, forceApproveParked, returnParkedWithContext, forceContinuePastGate, advancePhase, recordStepResult, returnTargetFor } from "./state.ts";
+import { loadActiveState, createState, saveState, abortState, resumeState, reissueGate, approveNext, approveEntryGate, approveOptionalPhase, skipPendingOptional, isSecurityFrozen, forceApproveParked, returnParkedWithContext, forceContinuePastGate, advancePhase, recordStepResult, returnTargetFor } from "./state.ts";
+import { readRemediationOptions, remediationLabel, FALLBACK_FIX_CHOICE } from "./security-options.ts";
 import { detectGitContext } from "./git.ts";
 import { initAgentsMd, syncAgents } from "./init.ts";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -499,55 +500,58 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
   const phases = getWorkflow(state.workflowId)?.phases ?? [];
   const wfId = state.workflowId;
 
-  // D3 SECURITY FREEZE: structured resolution options via select panel.
+  // D3 SECURITY FREEZE: the REVIEWER's remediation options are the only way
+  // out. A critical/high finding can NEVER be accepted and re-running the
+  // gate before a fix exists is pointless — the human picks a strategy (or
+  // writes one) and the sprint loops back to implement.
   if (isSecurityFrozen(state)) {
     const info = state.freezeInfo;
+    const artifactPath = info?.artifactPath ?? "devsecops/security-review-artifact.md";
+    const reviewerOptions = readRemediationOptions(artifactPath, ctx.cwd);
+    const fixChoices = reviewerOptions.length
+      ? reviewerOptions.map((text, i) => `Fix ${i + 1}: ${remediationLabel(text)}`)
+      : [FALLBACK_FIX_CHOICE];
     const choice = await ctx.ui.select(
-      `SECURITY FREEZE: A ${info?.severity ?? "critical/high"}-severity security rejection froze the sprint at "${info?.phaseId}". Review ${info?.artifactPath ?? "devsecops/security-review-artifact.md"} with your security panel FIRST.`,
-      [
-        "Re-run review gate",
-        "Accept risk — continue past the gate",
-        "Return phase with guidance",
-        "Custom remediation…",
-        "Abort workflow",
-      ],
+      `SECURITY FREEZE: A ${info?.severity ?? "critical/high"}-severity security rejection froze the sprint at "${info?.phaseId}". A critical/high finding CANNOT be accepted — pick one of the reviewer's remediation options (or write your own fix) and the sprint loops back to implement. Read ${artifactPath} first.`,
+      [...fixChoices, "Write my own fix…", "Abort workflow"],
     );
-    if (
-      choice === "Re-run review gate" ||
-      choice === "Accept risk — continue past the gate" ||
-      choice === "Return phase with guidance" ||
-      choice === "Custom remediation…"
-    ) {
+    const fixIndex = fixChoices.indexOf(choice ?? "");
+    if (fixIndex >= 0) {
       if (panelGuard(ctx, state)) return true;
-      if (choice === "Re-run review gate") {
-        const unfrozen = unfreeze(state, getWorkflow(state.workflowId)?.phases);
-        auditGateDecision(ctx, state, "run");
-        saveState(pi, unfrozen);
-        ctx.ui.notify("Freeze lifted — re-running the devsecops review gate.", "info");
-        launchPhase(pi, ctx, unfrozen);
-      } else if (choice === "Accept risk — continue past the gate") {
-        const next = forceContinuePastGate(state, phases);
-        auditGateDecision(ctx, state, "run");
+      const picked = reviewerOptions[fixIndex];
+      const context = picked
+        ? `HUMAN DECISION — the security review proposed ${reviewerOptions.length} remediation strategies for the ${info?.severity ?? "critical/high"}-severity findings and the human chose option ${fixIndex + 1}. Implement it EXACTLY as written (it MUST be applied before the gate re-runs):\n\n${picked}\n\nFull report: ${artifactPath}`
+        : `HUMAN DECISION — the human chose to apply the reviewer's fixes. Read ${artifactPath} and implement EVERY critical/high fix it documents (the fixes MUST be applied before the gate re-runs).`;
+      const next = returnParkedWithContext(state, phases, context, ctx.cwd);
+      if (next) {
+        auditGateDecision(ctx, state, "return");
         saveState(pi, next);
         launchPhase(pi, ctx, next);
-      } else if (choice === "Return phase with guidance") {
-        const next = returnParkedWithContext(state, phases, undefined, ctx.cwd);
-        if (next) {
-          auditGateDecision(ctx, state, "return");
-          saveState(pi, next);
-          launchPhase(pi, ctx, next);
-        }
-      } else if (choice === "Custom remediation…") {
-        const custom = await ctx.ui.input(
-          "Custom security remediation",
-          "Specify guidance or remediation instruction for the phase",
-        );
-        const next = returnParkedWithContext(state, phases, custom?.trim() || undefined, ctx.cwd);
-        if (next) {
-          auditGateDecision(ctx, state, "return");
-          saveState(pi, next);
-          launchPhase(pi, ctx, next);
-        }
+      } else {
+        ctx.ui.notify("Cannot loop back: the frozen phase has no loop-back target.", "error");
+      }
+    } else if (choice === "Write my own fix…") {
+      if (panelGuard(ctx, state)) return true;
+      const custom = await ctx.ui.input(
+        "Custom security remediation",
+        "Describe the fix the implementer must apply to the critical/high findings",
+      );
+      if (!custom?.trim()) {
+        ctx.ui.notify("Freeze kept — no remediation given. The sprint stays frozen.", "warning");
+        return true;
+      }
+      const next = returnParkedWithContext(
+        state,
+        phases,
+        `HUMAN DECISION — the human wrote the remediation for the ${info?.severity ?? "critical/high"}-severity findings. Implement it (it MUST be applied before the gate re-runs):\n\n${custom.trim()}\n\nFull report: ${artifactPath}`,
+        ctx.cwd,
+      );
+      if (next) {
+        auditGateDecision(ctx, state, "return");
+        saveState(pi, next);
+        launchPhase(pi, ctx, next);
+      } else {
+        ctx.ui.notify("Cannot loop back: the frozen phase has no loop-back target.", "error");
       }
     } else if (choice === "Abort workflow") {
       if (await ctx.ui.confirm("Abort frozen workflow?", `Abandon "${wfId}" despite the unresolved security finding?`)) {
