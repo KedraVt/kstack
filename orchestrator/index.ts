@@ -4,6 +4,7 @@ import { handleKstackCommand, getCompletions } from "./command.ts";
 import { createInputRouter } from "./router.ts";
 import { loadActiveState, saveState, advancePhase, gateForApproval, recordStepResult } from "./state.ts";
 import { stepCompletionStatus } from "./records.ts";
+import { evaluateStepRecordTrust, repairKey } from "./repair.ts";
 import { NEGATIVE_VALUES } from "./verdicts.ts";
 import type { AdvanceOptions } from "./state.ts";
 import { getWorkflow } from "./workflows.ts";
@@ -294,6 +295,40 @@ export function initOrchestrator(pi: ExtensionAPI): void {
                 text: `Step "${curStep.id}" completion signal "${check.want}" was not observed — the step is being re-issued in resume mode. Produce the signal (kstack-report record / declared artifact) and call kstack_advance again.`,
               }],
             };
+          }
+          // S4 rider — verdict-record REPAIR (main-session step): the main
+          // agent owns the record it wrote, so it FIXES the record — it does
+          // not redo the review. ONE attempt per step per park: the second
+          // untrusted record falls through to the normal park.
+          if (
+            check.kind === "ok" &&
+            curStep.signal?.kind === "verdict" &&
+            (curStep.execution === "main" || !deterministicSubagents())
+          ) {
+            const key = repairKey(phase.id, curStep.id);
+            const trust = evaluateStepRecordTrust(state.workflowId, phase, curStep, check.record);
+            if (!trust.ok && trust.repairable && advanceState.verdictRepairTried !== key) {
+              const marked = { ...advanceState, verdictRepairTried: key };
+              saveState(pi, marked);
+              setKstackStatus(ctx, marked, workflow);
+              appendLedger(
+                ctx.cwd,
+                state,
+                {
+                  kind: "run-interrupted",
+                  phaseId: phase.id,
+                  stepId: curStep.id,
+                  payload: { summary: `verdict record untrusted (${trust.cause}): ${trust.defect} — repair requested from the main session` },
+                },
+                (m) => { try { ctx.ui.notify(m, "warning"); } catch { /* stale ctx */ } },
+              );
+              return {
+                content: [{
+                  type: "text" as const,
+                  text: `Your step record for "${phase.id}.${curStep.id}" cannot be trusted: ${trust.defect} (park cause: ${trust.cause}). Fix ONLY the record — re-run the record command from your step instructions with the corrected verdict (never delete the record: it is the repair's input) and call kstack_advance again. Do NOT redo the review. This is the ONE repair attempt for this step: if the record is still untrusted on the next kstack_advance, the workflow parks for a human decision.`,
+                }],
+              };
+            }
           }
           // Routing vars emitted via the step's record land in state.vars.
           if (check.kind === "ok" && Object.keys(check.vars).length > 0) {

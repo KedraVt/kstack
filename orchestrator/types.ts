@@ -415,6 +415,14 @@ export interface WorkflowState {
   /** Automatic signal-missing re-issues of the CURRENT step (capped; cleared when the step completes). */
   reissues?: number;
   /**
+   * S4 rider: the step whose verdict record was already REPAIRED —
+   * `${phaseId}.${stepId}`. ONE repair attempt per step per park: the agent
+   * that produced the step fixes its RECORD (never the work); a second
+   * untrusted record parks for a human decision. Cleared when the phase
+   * advances.
+   */
+  verdictRepairTried?: string;
+  /**
    * Entry gate for side-effect phases (commit-archive): `true` = parked
    * BEFORE the gated phase runs, awaiting an explicit human Run/Abort via
    * /kstack; `"approved"` = approved once — the executor proceeds and

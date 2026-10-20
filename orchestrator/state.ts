@@ -109,6 +109,9 @@ export function loadActiveState(ctx: ExtensionContext): WorkflowState | null {
         if (typeof normalized.stepGates !== "boolean") delete normalized.stepGates;
         if (typeof normalized.stepGate !== "boolean") delete normalized.stepGate;
         if (!Number.isInteger(normalized.reissues) || (normalized.reissues as number) < 0) delete normalized.reissues;
+        // verdictRepairTried rides the same untrusted channel: only a plain
+        // string may name the step whose repair was already attempted.
+        if (typeof normalized.verdictRepairTried !== "string") delete normalized.verdictRepairTried;
         return normalized;
       }
       return null;
@@ -348,6 +351,9 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
     verdictPark: undefined,
     pausedReason: undefined,
     entryGate: undefined,
+    // Leaving the phase clears the repair marker — the next visit of the
+    // phase gets a fresh repair budget (one attempt per step per park).
+    verdictRepairTried: undefined,
   };
 
   if (result.status === "failed") {
@@ -586,6 +592,9 @@ export function forceApproveParked(state: WorkflowState, phases?: WorkflowPhase[
     reissues: undefined,
     stepGate: undefined,
     entryGate: undefined,
+    // The park is over — the next visit of the phase gets a fresh repair
+    // budget (one repair attempt per step per park).
+    verdictRepairTried: undefined,
     attempts,
     results: { ...state.results, [phaseId]: { status: "completed", summary: state.verdictPark ? "Continued as approved by explicit user decision (verdict was unreadable)." : "Advanced manually by explicit user decision." } },
   };
@@ -618,6 +627,8 @@ export function returnParkedWithContext(state: WorkflowState, phases: WorkflowPh
     frozenUntilHuman: false,
     freezeInfo: undefined,
     pausedReason: undefined,
+    // The park is over — the re-run gets a fresh repair budget.
+    verdictRepairTried: undefined,
     retryContext: {
       targetPhaseId: loopTarget,
       attempt: (state.attempts?.[attemptKey(phase.id, loopTarget)] ?? 0) + 1,
@@ -640,7 +651,7 @@ export function unfreeze(state: WorkflowState, phases?: WorkflowPhase[]): Workfl
   // Unfreeze re-RUNS the parked phase (launchPhase → executeCurrentPhase) — a
   // stale stepIndex would skip its entry gates and resume mid-step instead of
   // restarting clean. Same class as the four phaseIndex-moving transitions.
-  const next: WorkflowState = { ...state, frozenUntilHuman: false, freezeInfo: undefined, pausedReason: undefined, status: "active", stepIndex: undefined, results: { ...state.results } };
+  const next: WorkflowState = { ...state, frozenUntilHuman: false, freezeInfo: undefined, pausedReason: undefined, status: "active", stepIndex: undefined, results: { ...state.results }, verdictRepairTried: undefined };
   // INV-04: the parked phase re-runs — its step keys are attempt-local.
   if (phases) purgeStepResults(next.results, phases, state.phaseIndex, state.phaseIndex);
   return next;
@@ -673,6 +684,7 @@ export function forceContinuePastGate(state: WorkflowState, phases?: WorkflowPha
     pausedReason: undefined,
     frozenUntilHuman: false,
     freezeInfo: undefined,
+    verdictRepairTried: undefined,
     attempts,
   };
 }
@@ -819,8 +831,9 @@ export function abortState(state: WorkflowState): WorkflowState {
 
 export function resumeState(state: WorkflowState): WorkflowState {
   // A resume RE-RUNS the parked phase — any stashed verdict from its previous
-  // attempt must not survive to misroute the rerun.
-  return { ...state, status: "active", pausedReason: undefined, verdictPark: undefined, pendingVerdict: undefined, reissues: undefined };
+  // attempt must not survive to misroute the rerun. The repair marker dies
+  // with the park it belonged to: the re-run gets a fresh repair attempt.
+  return { ...state, status: "active", pausedReason: undefined, verdictPark: undefined, pendingVerdict: undefined, reissues: undefined, verdictRepairTried: undefined };
 }
 
 /**

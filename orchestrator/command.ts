@@ -6,7 +6,7 @@ import { detectGitContext } from "./git.ts";
 import { initAgentsMd, syncAgents } from "./init.ts";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { EXTENSION_ROOT } from "./skills.ts";
-import { deterministicSubagents } from "./config.ts";
+import { deterministicSubagents, modelTierFor } from "./config.ts";
 import { gateInventory, configureGates } from "./gates.ts";
 import { collectAskAnswers } from "./enabled.ts";
 import { probeCapabilities } from "./capabilities.ts";
@@ -19,6 +19,8 @@ import { writeRunReport } from "./telemetry.ts";
 import { cleanupRunArtifacts } from "./runcleanup.ts";
 import { endStepWatch } from "./stuck.ts";
 import { verdictKeysFor, writeStepRecord } from "./records.ts";
+import { evaluateStepRecordTrust, runRecordRepair, stepArtifactPaths, stepRecordFor, stepSpawnEnv } from "./repair.ts";
+import { runSubagent } from "./spawn.ts";
 import { verdictValuesFor } from "./templates.ts";
 import type { GitContext, WorkflowPhase, WorkflowState, WorkflowStep } from "./types.ts";
 
@@ -494,7 +496,14 @@ function panelGuard(ctx: ExtensionCommandContext, state: WorkflowState): boolean
  * ctx.ui is the extension's only UI channel (same as every existing gate) —
  * no separate !hasUI protocol exists to hook into.
  */
-export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<boolean> {
+export async function handleSprintPanel(
+  state: WorkflowState,
+  ctx: ExtensionCommandContext,
+  pi: ExtensionAPI,
+  // Test seam: the spawn used by the panel's record repair (the real
+  // runSubagent in production).
+  opts?: { spawnFn?: typeof runSubagent },
+): Promise<boolean> {
   // Park panels serve EVERY workflow: without them a non-sprint verdict park
   // fell through to the generic Resume, which re-parked forever.
   const phases = getWorkflow(state.workflowId)?.phases ?? [];
@@ -579,12 +588,15 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
             ? `a designed park fired (${state.pausedReason})`
             : "the agent emitted no trustworthy verdict";
     const excerpt = state.pendingVerdict?.excerpt?.trim() || "(no verdict-shaped lines found in the step records)";
-    const flagged = phase?.steps?.some((st) => st.signal?.kind === "verdict") ?? false;
+    // A security verdict can NEVER be skipped: "Continue as approved" is not
+    // offered for a phase whose verdict step is the security review.
+    const securityVerdict = (phase?.steps ?? []).some(
+      (st) => st.signal?.kind === "verdict" && st.signal.value === "security-review",
+    );
     const options = [
-      "Continue as approved",
-      ...(flagged ? ["Set verdict manually…"] : []),
+      ...(securityVerdict ? [] : ["Continue as approved"]),
       ...(returnTargetFor(phase, state.pendingVerdict?.parsed) ? ["Return phase with context"] : []),
-      "Re-run the step",
+      "Repair the step record",
       "View report excerpt",
       "Abort workflow",
     ];
@@ -598,29 +610,12 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
       auditGateDecision(ctx, state, "run");
       saveState(pi, next);
       launchPhase(pi, ctx, next);
-    } else if (choice === "Set verdict manually…" && phase) {
-      if (panelGuard(ctx, state)) return true;
-      if (!(await setPhaseVerdictsManually(state, phase, ctx))) return true;
-      const lastStep = phase.steps![phase.steps!.length - 1];
-      const resumed: WorkflowState = { ...state, status: "active", verdictPark: undefined, pausedReason: undefined, pendingVerdict: undefined };
-      const next = advancePhase(
-        resumed,
-        phase.id,
-        { status: "completed", summary: state.results[`${phase.id}.${lastStep.id}`]?.summary ?? "Verdict set manually by the user." },
-        phases.length,
-        { phases, cwd: ctx.cwd },
-      );
-      auditGateDecision(ctx, state, "run");
-      saveState(pi, next);
-      if (next.status === "active" || next.status === "completed") launchPhase(pi, ctx, next);
-      else ctx.ui.notify(`kstack: the manual verdict routed to a new park — ${next.pausedReason ?? next.status}. Run /kstack to decide.`, "warning");
     } else if (choice === "Return phase with context") {
-      const extra = await ctx.ui.input(
-        "Feedback for the retried phase",
-        "Optional custom guidance appended to the RETRY CONTEXT (empty = rely on extracted blockers)",
-      );
+      // No free-text input any more: the retry context carries the blockers
+      // EXTRACTED from the step's own record (evidence lines) — a typed
+      // instruction was never part of the record contract.
       if (panelGuard(ctx, state)) return true;
-      const next = returnParkedWithContext(state, phases, extra?.trim() || undefined, ctx.cwd);
+      const next = returnParkedWithContext(state, phases, undefined, ctx.cwd);
       if (!next) {
         ctx.ui.notify("Cannot loop back: the parked phase has no loop-back target.", "error");
         return true;
@@ -628,13 +623,9 @@ export async function handleSprintPanel(state: WorkflowState, ctx: ExtensionComm
       auditGateDecision(ctx, state, "return");
       saveState(pi, next);
       launchPhase(pi, ctx, next);
-    } else if (choice === "Re-run the step") {
+    } else if (choice === "Repair the step record") {
       if (panelGuard(ctx, state)) return true;
-      // The parked phase's last step re-delivers (stepIndex is clamped at delivery).
-      const resumed = resumeState(state);
-      auditGateDecision(ctx, state, "run");
-      saveState(pi, resumed);
-      launchPhase(pi, ctx, resumed);
+      await repairParkedStepRecord(pi, ctx, state, phase, phases, opts?.spawnFn ?? runSubagent);
     } else if (choice === "View report excerpt") {
       ctx.ui.notify(`Verdict excerpt: ${excerpt.slice(0, 1500)}`, "info");
     } else if (choice === "Abort workflow") {
@@ -728,38 +719,99 @@ function currentStepOf(state: WorkflowState): WorkflowStep | undefined {
 }
 
 /**
- * Write a human-chosen verdict record for every verdict-flagged, non-skipped
- * step of `phase` — the routing then runs through the normal record merge,
- * so a manual "rejected" still loops back exactly like an agent's would.
- * Returns false when the user cancels or the run has no record channel.
+ * D4 panel: repair the parked phase's verdict record.
+ *
+ * The step's own agent fixes its RECORD — the work is never redone and the
+ * stale record is never accepted: a delegated step is re-invoked with the
+ * repair task (the record's mtime must move), a main-session step gets a
+ * message naming exactly what to fix. On success the phase re-routes
+ * through the normal verdict merge — never through a hand-made verdict.
  */
-async function setPhaseVerdictsManually(state: WorkflowState, phase: WorkflowPhase, ctx: ExtensionCommandContext): Promise<boolean> {
-  if (!state.runId) {
-    ctx.ui.notify("kstack: this run has no runId — verdict records cannot be written.", "error");
-    return false;
+async function repairParkedStepRecord(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  state: WorkflowState,
+  phase: WorkflowPhase | undefined,
+  phases: WorkflowPhase[],
+  spawnFn: typeof runSubagent = runSubagent,
+): Promise<void> {
+  if (!phase) {
+    ctx.ui.notify("kstack: the parked phase is unknown — nothing to repair.", "error");
+    return;
   }
-  const flagged = (phase.steps ?? []).filter(
+  const verdictSteps = (phase.steps ?? []).filter(
     (st) => st.signal?.kind === "verdict" && state.results[`${phase.id}.${st.id}`]?.status !== "skipped",
   );
-  const writes: Array<{ step: WorkflowStep; key: string; value: string }> = [];
-  for (const step of flagged) {
-    const key = step.signal!.value;
-    const value = await ctx.ui.select(`Verdict for "${phase.id}.${step.id}" (${key})`, verdictValuesFor(state.workflowId, phase.id, key));
-    if (!value) return false;
-    writes.push({ step, key, value });
+  // Repair the step whose record is actually untrustworthy — not blindly the
+  // first verdict step (the broken record may belong to a later step).
+  const step =
+    verdictSteps.find(
+      (st) => !evaluateStepRecordTrust(state.workflowId, phase, st, stepRecordFor(ctx.cwd, state.workflowId, state.runId, phase, st)).ok,
+    ) ?? verdictSteps[0];
+  if (!step) {
+    ctx.ui.notify("kstack: the parked phase has no verdict step to repair.", "error");
+    return;
   }
-  for (const { step, key, value } of writes) {
-    writeStepRecord(ctx.cwd, {
-      workflow: state.workflowId,
-      runId: state.runId,
-      phase: phase.id,
-      step: step.id,
-      summary: `Verdict ${key}==${value} set manually by the user via /kstack.`,
-      verdicts: { [key]: value },
-      ...(step.signal?.kind === "marker" ? { markers: [step.signal.value] } : {}),
-    });
+  const trust = evaluateStepRecordTrust(
+    state.workflowId,
+    phase,
+    step,
+    stepRecordFor(ctx.cwd, state.workflowId, state.runId, phase, step),
+  );
+  if (step.execution === "subagent" && deterministicSubagents()) {
+    const repair = await runRecordRepair(
+      {
+        workflowId: state.workflowId,
+        runId: state.runId,
+        phase,
+        step,
+        cwd: ctx.cwd,
+        agent: step.agent ?? "worker",
+        env: stepSpawnEnv(state.workflowId, state.runId, phase, step, ctx.cwd),
+        modelOverride: modelTierFor(phase.id),
+        cause: trust.cause ?? "no-verdict",
+        defect: trust.defect ?? "the record cannot be trusted",
+        excerpt: state.pendingVerdict?.excerpt,
+        artifactPaths: stepArtifactPaths(phase, step, ctx.cwd, state.sprintNumber),
+      },
+      spawnFn,
+    );
+    if (!repair.ok) {
+      ctx.ui.notify(
+        `kstack: the record repair did not update the record (${repair.reason}) — the workflow stays parked.`,
+        "warning",
+      );
+      return;
+    }
+  } else {
+    // Main-session step: the main agent owns the record it wrote — it is
+    // told exactly what to fix and re-delivers the step's kstack_advance.
+    pi.sendUserMessage(
+      `[kstack] The record of step "${phase.id}.${step.id}" cannot be trusted: ${trust.defect ?? "the record is not routable"} (park cause: ${trust.cause ?? "no-verdict"}). Fix ONLY the step record — re-run the record command from the step instructions with the corrected verdict — then call kstack_advance again. Do NOT redo the review and do NOT delete the record.`,
+      { deliverAs: "followUp" },
+    );
+    return;
   }
-  return true;
+  // The record was really rewritten: re-route through the normal merge.
+  const summary = state.results[`${phase.id}.${step.id}`]?.summary ?? "Verdict record repaired via /kstack.";
+  const next = advancePhase(
+    state,
+    phase.id,
+    { status: "completed", summary },
+    phases.length,
+    { phases, cwd: ctx.cwd },
+  );
+  auditGateDecision(ctx, state, "run");
+  saveState(pi, next);
+  if (next.status === "active" || next.status === "completed") {
+    ctx.ui.notify(`kstack: the record of "${phase.id}.${step.id}" was repaired — the phase re-routed.`, "info");
+    launchPhase(pi, ctx, next);
+  } else {
+    ctx.ui.notify(
+      `kstack: the repaired verdict routed to a new park — ${next.pausedReason ?? next.status}. Run /kstack to decide.`,
+      "warning",
+    );
+  }
 }
 
 /**

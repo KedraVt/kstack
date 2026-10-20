@@ -1238,7 +1238,7 @@ The orchestrator never accepts HANDOFF text as a completion signal — the recor
 /**
  * Routable values for one verdict key: the phase's expected positives plus
  * the negatives that answer them (approved→rejected, green→red|orange, …).
- * Feeds the record-contract hint and the manual "Set verdict" panel.
+ * Feeds the record-contract hint and the manual advance panel.
  */
 export function verdictValuesFor(workflowId: string, phaseId: string, key: string): string[] {
   const exp = expectationsFor(workflowId, phaseId) ?? {};

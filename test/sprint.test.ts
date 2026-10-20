@@ -780,6 +780,77 @@ describe("D4 park cause distinction", () => {
       assert.match(prompts[0] ?? "", pattern, `panel prompt must name the "${cause}" cause`);
     }
   });
+
+  test("the D4 panel never types a verdict and never skips a security review", async () => {
+    const offered: string[][] = [];
+    const ui = {
+      notify: () => {},
+      setStatus: () => {},
+      input: async () => undefined,
+      select: async (_prompt: string, opts: string[]) => {
+        offered.push(opts);
+        return undefined; // dismissed — no mutating branch runs
+      },
+      confirm: async () => false,
+    };
+    const cmdCtx: any = { ui, cwd: tmpDir("kstack-panel-") };
+    const pi: any = { appendEntry: () => {} };
+
+    // A SECURITY verdict phase: the verdict can never be skipped.
+    const security = parkForUnreadableVerdict(sprintState(9), "devsecops-review", "no-verdict");
+    assert.equal(await handleSprintPanel(security, cmdCtx, pi), true);
+    const securityOptions = offered.at(-1)!;
+    assert.ok(!securityOptions.includes("Continue as approved"), "a security verdict can never be skipped");
+    assert.ok(!securityOptions.includes("Set verdict manually…"), "a verdict is never typed by hand");
+    assert.ok(!securityOptions.includes("Re-run the step"), "the step is never re-run — only its record is repaired");
+    assert.ok(securityOptions.includes("Repair the step record"));
+    assert.ok(securityOptions.includes("View report excerpt"));
+    assert.ok(securityOptions.includes("Abort workflow"));
+
+    // A NON-security verdict phase: the human may still continue as approved.
+    const qa = parkForUnreadableVerdict(sprintState(8), "qa-browsing", "no-verdict");
+    assert.equal(await handleSprintPanel(qa, cmdCtx, pi), true);
+    const qaOptions = offered.at(-1)!;
+    assert.ok(qaOptions.includes("Continue as approved"), "a non-security verdict may be continued");
+    assert.ok(qaOptions.includes("Repair the step record"));
+  });
+
+  test("the panel's 'Repair the step record' re-routes through the repaired record", async () => {
+    const cwd = tmpDir("kstack-panel-repair-");
+    const state = sprintState(9, { runId: "panel-repair-1" });
+    // the code-review step passed; the security step's record lacks a severity
+    writeRec(cwd, state, "devsecops-review", "code-review", { "code-review": "approved" });
+    writeRec(cwd, state, "devsecops-review", "security", { "security-review": "rejected" });
+    const parked = parkForUnreadableVerdict(state, "devsecops-review", "no-verdict");
+    const spawns: any[] = [];
+    const spawnFn = async (req: any) => {
+      spawns.push(req);
+      // the repairing agent rewrites the record with the severity it reported
+      writeRec(cwd, state, "devsecops-review", "security", { "security-review": "rejected", severity: "critical" });
+      return { ok: true, output: "record rewritten", rawOutput: "record rewritten", exitCode: 0, durationMs: 1, toolCalls: 1, turns: 1 };
+    };
+    const saved: any[] = [];
+    const cmdCtx: any = {
+      cwd,
+      ui: {
+        notify: () => {},
+        setStatus: () => {},
+        select: async () => "Repair the step record",
+        confirm: async () => false,
+      },
+    };
+    const pi: any = { appendEntry: (_t: string, d: any) => saved.push(d) };
+
+    assert.equal(await handleSprintPanel(parked, cmdCtx, pi, { spawnFn }), true);
+    assert.equal(spawns.length, 1, "the repair re-invokes the step's own agent");
+    assert.match(spawns[0].task, /RECORD REPAIR/);
+    assert.equal(spawns[0].agent, "devsecops-reviewer");
+    // the repaired record routes through the NORMAL merge: a critical
+    // rejection freezes the sprint (no hand-made verdict, no silent advance)
+    const next = saved.at(-1);
+    assert.ok(next.frozenUntilHuman, "the repaired verdict re-routed through the normal verdict merge");
+    assert.equal(next.freezeInfo?.severity, "critical");
+  });
 });
 
 // --- State migration ---------------------------------------------------------------
@@ -1466,14 +1537,14 @@ describe("in-flight decision guards (2026-09 fix 4)", () => {
 
   test("every mutating sprint-panel branch is guarded (F4)", () => {
     // Static wiring check: the mutating/launching choices of handleSprintPanel
-    // (freeze: reviewer fix + own fix; D4 continue + return; gate accept +
-    // re-run; kill-switch accept + re-run; pause resume/re-issue) must consult
-    // panelGuard before touching state. A refused decision still returns
-    // true — the user stays parked, never falling through to the generic
-    // resume path.
+    // (freeze: reviewer fix + own fix; D4 continue + return + repair; gate
+    // accept + re-run; kill-switch accept + re-run; pause resume/re-issue)
+    // must consult panelGuard before touching state. A refused decision
+    // still returns true — the user stays parked, never falling through to
+    // the generic resume path.
     const source = readFileSync(new URL("../orchestrator/command.ts", import.meta.url), "utf-8");
     const guardCount = (source.match(/if \(panelGuard\(ctx, state\)\) return true;/g) ?? []).length;
-    assert.equal(guardCount, 11, "all 11 mutating park-panel branches must be guarded");
+    assert.equal(guardCount, 10, "all 10 mutating park-panel branches must be guarded");
   });
 
   test("sprint panel refuses a mutating decision while the chain runs, allows it after (F4)", async () => {

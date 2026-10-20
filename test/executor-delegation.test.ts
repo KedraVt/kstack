@@ -18,6 +18,8 @@ import { runDeterministicDelegation, executeCurrentPhase } from "../orchestrator
 import { getWorkflow } from "../orchestrator/workflows.ts";
 import { beginRun, resetTelemetry } from "../orchestrator/telemetry.ts";
 import { resolveTimeoutMs } from "../orchestrator/spawn.ts";
+import { writeStepRecord } from "../orchestrator/records.ts";
+import { advancePhase } from "../orchestrator/state.ts";
 import type { SpawnRequest, SpawnResult } from "../orchestrator/spawn.ts";
 import type { WorkflowContext, WorkflowPhase } from "../orchestrator/types.ts";
 
@@ -438,6 +440,158 @@ describe("branch enforcement at sprint verdict gates", () => {
     } finally {
       if (original === undefined) delete process.env[NAME];
       else process.env[NAME] = original;
+    }
+  });
+});
+
+describe("verdict-record repair (delegated step)", () => {
+  const RUN_ID = "repair-run-1";
+  const PHASE = "devsecops-review";
+  const SPRINT_PHASES = getWorkflow("sprint")!.phases;
+
+  /** A host whose session entries carry the workflow state (the B7 staleness check reads them). */
+  function repairHost(cwd: string, state: unknown) {
+    const entries: any[] = [{ type: "custom", customType: "kstack-wf-state", data: state }];
+    const notifications: string[] = [];
+    const sent: string[] = [];
+    const ctx: any = {
+      cwd,
+      ui: { notify: (m: string) => notifications.push(m), setStatus: () => {} },
+      sessionManager: { getEntries: () => entries },
+    };
+    const pi: any = {
+      appendEntry: (type: string, data: any) => entries.push({ type: "custom", customType: type, data }),
+      sendUserMessage: (m: string) => sent.push(m),
+    };
+    return { ctx, pi, entries, notifications, sent };
+  }
+
+  /** The sprint state parked on the security step of devsecops-review. */
+  function securityState(): any {
+    return {
+      workflowId: "sprint",
+      phaseIndex: 9, // devsecops-review
+      stepIndex: 1, // the security step
+      status: "active",
+      goal: "ship the cart",
+      results: {},
+      runId: RUN_ID,
+      sprintNumber: 7,
+      version: 5,
+    };
+  }
+
+  const execGit = async (_cmd: string, args: string[]) => ({
+    code: 0,
+    stdout: args.includes("--show-current") ? "task/cart\n" : "",
+    stderr: "",
+  });
+
+  const writeSecurity = (cwd: string, verdicts: Record<string, string>) =>
+    writeStepRecord(cwd, {
+      workflow: "sprint",
+      runId: RUN_ID,
+      phase: PHASE,
+      step: "security",
+      summary: "one injection found",
+      verdicts,
+    });
+
+  test("a rejection record without 'severity' is repaired by the step's own agent — the run routes, no park", async () => {
+    const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-repair-"));
+    try {
+      const state = securityState();
+      const host = repairHost(cwd, state);
+      // the earlier step's record is on disk (the code review passed)
+      writeStepRecord(cwd, {
+        workflow: "sprint",
+        runId: RUN_ID,
+        phase: PHASE,
+        step: "code-review",
+        summary: "clean",
+        verdicts: { "code-review": "approved" },
+      });
+      const repairs: SpawnRequest[] = [];
+      const stepOutput = "## REPORT\nreviewed the diff\n\n## HANDOFF\nVERIFIED FACTS:\n- SQL injection in src/cart.ts:42\nDECISIONS: none";
+      const spawnFn = async (req: SpawnRequest) => {
+        if (req.task.includes("RECORD REPAIR")) {
+          repairs.push(req);
+          // the repairing agent rewrites the record with the severity it reported
+          writeSecurity(cwd, { "security-review": "rejected", severity: "medium" });
+          return ok("record rewritten");
+        }
+        // the step's own delegation: a rejection WITHOUT a severity
+        writeSecurity(cwd, { "security-review": "rejected" });
+        return ok(stepOutput);
+      };
+      beginRun("sprint");
+      await executeCurrentPhase(host.pi, host.ctx, state, { spawnFn, execGit });
+
+      assert.equal(repairs.length, 1, "exactly one repair spawn");
+      assert.match(repairs[0].task, /RECORD REPAIR/);
+      assert.match(repairs[0].task, /severity/, "the repair names the missing verdict");
+      assert.match(repairs[0].task, /do not redo the review/i, "the repair never redoes the work");
+      assert.match(repairs[0].task, /SQL injection/, "the repair carries the step's own report");
+      assert.equal(repairs[0].agent, "devsecops-reviewer", "the repair runs as the step's own agent");
+      assert.match(String(repairs[0].env?.KSTACK_PROJECT_ROOT), /kstack-repair/);
+      assert.match(String(repairs[0].env?.KSTACK_VERDICT_KEYS), /security-review/);
+
+      // no park — the phase routes on the repaired record
+      const parked = host.entries.filter((e) => e.data?.status === "paused");
+      assert.equal(parked.length, 0, "a successful repair must not park the run");
+      const routed = advancePhase(state, PHASE, { status: "completed", summary: "reviewed" }, SPRINT_PHASES.length, {
+        phases: SPRINT_PHASES,
+        cwd,
+      });
+      assert.equal(routed.status, "active");
+      assert.equal(routed.phaseIndex, 7, "a medium-severity rejection loops back to implement");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("a repair that does not touch the record fails — the phase parks as before and no second repair runs", async () => {
+    const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-repair-"));
+    try {
+      const state = securityState();
+      const host = repairHost(cwd, state);
+      writeStepRecord(cwd, {
+        workflow: "sprint",
+        runId: RUN_ID,
+        phase: PHASE,
+        step: "code-review",
+        summary: "clean",
+        verdicts: { "code-review": "approved" },
+      });
+      const repairs: SpawnRequest[] = [];
+      const spawnFn = async (req: SpawnRequest) => {
+        if (req.task.includes("RECORD REPAIR")) {
+          repairs.push(req);
+          return ok("I did not touch the record"); // the stale record stays on disk
+        }
+        writeSecurity(cwd, { "security-review": "rejected" });
+        return ok("security review done");
+      };
+      beginRun("sprint");
+      await executeCurrentPhase(host.pi, host.ctx, state, { spawnFn, execGit });
+
+      assert.equal(repairs.length, 1, "one repair attempt");
+      // the record is still untrusted ⇒ the phase parks as before (no attempt burned)
+      const routed = advancePhase(state, PHASE, { status: "completed", summary: "reviewed" }, SPRINT_PHASES.length, {
+        phases: SPRINT_PHASES,
+        cwd,
+      });
+      assert.equal(routed.status, "paused");
+      assert.equal(routed.verdictPark, PHASE);
+      assert.match(routed.pausedReason ?? "", /verdict-unreadable:devsecops-review:no-verdict/);
+
+      // a second pass over the same step must not repair again (one per step per park)
+      const live = host.entries.filter((e) => e.data?.verdictRepairTried).at(-1)!.data;
+      assert.equal(live.verdictRepairTried, `${PHASE}.security`);
+      await executeCurrentPhase(host.pi, host.ctx, live, { spawnFn, execGit });
+      assert.equal(repairs.length, 1, "no second repair for the same step/park");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
     }
   });
 });

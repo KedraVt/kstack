@@ -344,9 +344,34 @@ describe("loop breakers", () => {
     const h = harness(parked, { select: async (_t: string, opts: string[]) => { offered = opts; return undefined; } });
     const handled = await handleSprintPanel(parked, h.ctx, h.pi);
     assert.equal(handled, true, "never falls through to the generic Resume");
-    assert.ok(offered.includes("Set verdict manually…"));
-    assert.ok(offered.includes("Re-run the step"));
+    assert.ok(!offered.includes("Set verdict manually…"), "a verdict is never typed by hand");
+    assert.ok(!offered.includes("Re-run the step"), "the step is never re-run — only its record is repaired");
+    assert.ok(offered.includes("Repair the step record"));
     assert.ok(offered.includes("Return phase with context"), "verify returns through its loopBackOn edges");
+  });
+
+  test("a main-session step with an untrusted record asks for a record fix once, then parks", async () => {
+    const idx = indexOf("sprint", "devsecops-review");
+    const state: any = { ...createState("sprint", "g"), phaseIndex: idx, stepIndex: 1, runId: "main-repair-1", sprintNumber: 7 };
+    const h = harness(state);
+    // the code-review step's record is on disk (the earlier step passed)
+    writeStepRecord(h.ctx.cwd, { workflow: "sprint", runId: state.runId, phase: "devsecops-review", step: "code-review", summary: "clean", verdicts: { "code-review": "approved" } });
+    // the security step's record is untrustworthy: a rejection without a severity
+    writeStepRecord(h.ctx.cwd, { workflow: "sprint", runId: state.runId, phase: "devsecops-review", step: "security", summary: "one injection found", verdicts: { "security-review": "rejected" } });
+
+    const first = await h.advance("security review done");
+    assert.match(first.content[0].text, /cannot be trusted/, "the tool result names the defect");
+    assert.match(first.content[0].text, /severity/, "the tool result names the missing verdict");
+    let s = h.last();
+    assert.equal(s.status, "active", "the agent may fix its record — no park yet");
+    assert.equal(s.verdictRepairTried, "devsecops-review.security", "one repair attempt per step per park");
+
+    // the SECOND attempt with the same broken record parks for a human
+    await h.advance("security review done");
+    s = h.last();
+    assert.equal(s.status, "paused");
+    assert.equal(s.verdictPark, "devsecops-review");
+    assert.match(s.pausedReason ?? "", /verdict-unreadable:devsecops-review:no-verdict/);
   });
 
   test("manual advance completes the current step on the human's word (verdict chosen by the user)", async () => {

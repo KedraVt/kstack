@@ -15,7 +15,8 @@ import { extractHandoff } from "./handoff.ts";
 import { isRefutedStrategy, isValidatedStrategy } from "./skip.ts";
 import { replaceExact } from "./text.ts";
 import { appendLedger } from "./ledger.ts";
-import { reportCliPath, projectRootFor, verdictKeysFor, clearPhaseRecords } from "./records.ts";
+import { clearPhaseRecords } from "./records.ts";
+import { evaluateStepRecordTrust, repairKey, runRecordRepair, stepArtifactPaths, stepRecordFor, stepSpawnEnv } from "./repair.ts";
 import { cleanupRunArtifacts } from "./runcleanup.ts";
 import { newStepRun, feedStepEvent, detectStuck, checkStepBudgets, stepBudgetDefaults, beginStepWatch, endStepWatch } from "./stuck.ts";
 import { cleanupEphemeralArtifacts, sprintGateEphemerals, artifactSignalFiles, runStartMs } from "./artifacts.ts";
@@ -248,7 +249,7 @@ export function advanceBlockReason(state: WorkflowState): string | null {
       return `the sprint is FROZEN by a critical/high security rejection — only the user may resolve it via the /kstack freeze panel (pick a reviewer fix, write your own fix, abort)`;
     }
     if (state.verdictPark) {
-      return `the phase's verdict was unreadable — only the /kstack panel may continue, return or abort (no attempt was burned)`;
+      return `the phase's verdict was unreadable — only the /kstack panel may continue, repair the record, return or abort (no attempt was burned)`;
     }
     return `the workflow is PAUSED${reason ? ` (${reason})` : ""} — a human decision is pending; only /kstack may resume, re-run or abort it`;
   }
@@ -653,6 +654,18 @@ export async function executeCurrentPhase(
     // TASK_04: quota/interruption flag returned by the delegation loop —
     // budget-exceeded marks it, the park below is the clean interruption stop.
     const interruption: { kind?: "quota-parked" | "run-interrupted" } = {};
+    // The step's spawn env + timeout — shared by the step's own spawn and by
+    // the verdict-record REPAIR below (the repair runs as the SAME agent
+    // with the SAME env: run/phase/step ids, the report CLI, the project
+    // root and the verdict keys the step owns).
+    const stepEnv: Record<string, string> | undefined = delegatedStep && step
+      ? stepSpawnEnv(state.workflowId, state.runId, phase, step, ctx.cwd,
+          Object.fromEntries(Object.entries(step.env ?? {}).map(([k, v]) => [k, interpolateStepTask(v, phase, stepIndex!, wfCtx)])))
+      : undefined;
+    const stepTimeoutMs: number | undefined =
+      delegatedStep && step?.timeoutSec
+        ? (numberEnv(`KSTACK_PI_TIMEOUT_STEP_${step.id.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`, step.timeoutSec) as number) * 1000
+        : undefined;
     const results = await runDeterministicDelegation(
       phase,
       wfCtx,
@@ -683,27 +696,13 @@ export async function executeCurrentPhase(
             // Already interpolated — runSteps' own {previous} pass would
             // rewrite the literal token inside the embedded skill digest.
             interpolated: true,
-            ...(step.timeoutSec ? { timeoutMs: numberEnv(`KSTACK_PI_TIMEOUT_STEP_${step.id.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`, step.timeoutSec) as number * 1000 } : {}),
+            ...(stepTimeoutMs ? { timeoutMs: stepTimeoutMs } : {}),
             // Per-step budget override (WorkflowStep.budget) — beats the
             // phase-class defaults resolved in the delegation loop.
             ...(step.budget ? { budget: step.budget } : {}),
             // ADR-23: the child learns run/phase/step ids + the report CLI
             // path from env — it can emit its own canonical record.
-            env: {
-              KSTACK_WORKFLOW: state.workflowId,
-              KSTACK_RUN_ID: state.runId ?? "",
-              KSTACK_PHASE: phase.id,
-              KSTACK_STEP: step.id,
-              KSTACK_REPORT: reportCliPath(),
-              // The project that owns .kstack/ — the child may cd elsewhere
-              // before reporting, so the record path is pinned twice (env
-              // fallback + the contract's --root).
-              KSTACK_PROJECT_ROOT: projectRootFor(ctx.cwd),
-              // kstack-report drops verdict keys outside this list (empty = none owned).
-              KSTACK_VERDICT_KEYS: verdictKeysFor(state.workflowId, phase, step).join(" "),
-              // Step-declared env (e.g. a skill's working dir under the run folder).
-              ...Object.fromEntries(Object.entries(step.env ?? {}).map(([k, v]) => [k, interpolateStepTask(v, phase, stepIndex!, wfCtx)])),
-            },
+            env: stepEnv!,
           }]
         : undefined,
       stepGuard,
@@ -745,6 +744,76 @@ export async function executeCurrentPhase(
       }
       notify(`kstack: ${reason} — step paused for a human decision; resume via /kstack re-runs the step in resume mode.`, "warning");
       return;
+    }
+
+    // S4 rider — verdict-record REPAIR (one attempt per step per park).
+    // The agent that produced the step fixes its RECORD, it does not redo
+    // the work: a record that cannot be trusted (a security rejection
+    // without a severity, a value off the expectation map, a record that
+    // never landed) gets ONE repair spawn before the run parks. The repair
+    // is accepted only when the record file really changed — a repair that
+    // did not touch the record leaves the stale one in place and the phase
+    // parks as usual.
+    if (delegatedStep && step && step.signal?.kind === "verdict" && state.runId) {
+      // A step whose own spawn produced NOTHING has no record to repair —
+      // asking it to write one would fabricate a verdict it never reached.
+      const delegatedOk = results.length > 0 && results.every((r) => r.result.ok);
+      const key = repairKey(phase.id, step.id);
+      const trust = delegatedOk
+        ? evaluateStepRecordTrust(
+            state.workflowId,
+            phase,
+            step,
+            stepRecordFor(ctx.cwd, state.workflowId, state.runId, phase, step),
+          )
+        : null;
+      if (trust && !trust.ok && trust.repairable && state.verdictRepairTried !== key) {
+        const marked: WorkflowState = { ...state, verdictRepairTried: key };
+        saveState(pi, marked);
+        state = marked;
+        wfCtx.state = marked;
+        appendLedger(
+          ctx.cwd,
+          state,
+          {
+            kind: "run-interrupted",
+            phaseId: phase.id,
+            stepId: step.id,
+            payload: { summary: `verdict record untrusted (${trust.cause}): ${trust.defect} — record repair requested` },
+          },
+          (m) => notify(m, "warning"),
+        );
+        const repair = await runRecordRepair(
+          {
+            workflowId: state.workflowId,
+            runId: state.runId,
+            phase,
+            step,
+            cwd: ctx.cwd,
+            agent: step.agent ?? "worker",
+            env: stepEnv ?? stepSpawnEnv(state.workflowId, state.runId, phase, step, ctx.cwd),
+            timeoutMs: stepTimeoutMs,
+            modelOverride: modelTierFor(phase.id),
+            cause: trust.cause!,
+            defect: trust.defect!,
+            // The step's own HANDOFF — the repair agent is a fresh process
+            // and must NOT redo the review: it re-derives the record from
+            // the report the step already produced.
+            report: extractHandoff(results[0]?.result.rawOutput ?? results[0]?.result.output ?? "").text,
+            artifactPaths: stepArtifactPaths(phase, step, ctx.cwd, state.sprintNumber),
+            shouldAbort: () => !alive(),
+          },
+          opts?.spawnFn ?? runSubagent,
+        );
+        if (repair.ok) {
+          notify(`kstack: the record of "${phase.id}.${step.id}" was repaired — the verdict is trusted again.`, "info");
+        } else {
+          notify(
+            `kstack: the record repair for "${phase.id}.${step.id}" did not fix the record (${repair.reason}). The verdict stays untrusted.`,
+            "warning",
+          );
+        }
+      }
     }
 
     // Sprint verdict parsing at DELEGATION time (plan B4 / D1): the raw
@@ -1274,7 +1343,7 @@ export function activeConstraintLines(state: WorkflowState, phase?: WorkflowPhas
   }
   if (state.verdictPark) {
     lines.push(
-      "CONSTRAINT: the phase's verdict was UNREADABLE. Do not start new work and do NOT call kstack_advance — the user decides via /kstack (continue / return / abort).",
+      "CONSTRAINT: the phase's verdict was UNREADABLE. Do not start new work and do NOT call kstack_advance — the user decides via /kstack (repair the step record / continue / return / abort).",
     );
   }
   if (state.status === "paused" && state.pausedReason && lines.length === 0) {
