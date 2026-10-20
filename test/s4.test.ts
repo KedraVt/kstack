@@ -451,7 +451,7 @@ describe("S4 quota/interruption ledger events (TASK_04)", () => {
     const cwd = mkdtempSync(path.join(os.tmpdir(), "s4-"));
     const NAME = "KSTACK_PI_DELEGATION_BUDGET_SEC";
     const original = process.env[NAME];
-    process.env[NAME] = "0.05"; // 50ms — first step runs, second never starts
+    process.env[NAME] = "1"; // 1s — first step runs, second never starts
     try {
       const wfCtx: any = {
         state: { workflowId: "investigate", phaseIndex: 1, status: "active", goal: "g", results: {}, runId: "run-1", attempts: {} },
@@ -470,7 +470,7 @@ describe("S4 quota/interruption ledger events (TASK_04)", () => {
         () => true,
         pi,
         async () => {
-          await new Promise((r) => setTimeout(r, 80));
+          await new Promise((r) => setTimeout(r, 1100));
           return { ok: true, output: "x", rawOutput: "x", exitCode: 0, durationMs: 80, toolCalls: 0, turns: 1 };
         },
         // two-step plan via planOverride so the budget break fires on step 2

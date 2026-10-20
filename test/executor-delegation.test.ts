@@ -9,7 +9,7 @@
  * delegation engine end-to-end with an injected `spawnFn` (the trailing
  * parameter on runDeterministicDelegation) instead of child processes.
  */
-import { test, describe } from "node:test";
+import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
@@ -23,6 +23,13 @@ import type { WorkflowContext, WorkflowPhase } from "../orchestrator/types.ts";
 
 const INVESTIGATE = getWorkflow("investigate")!;
 const DEVELOP = getWorkflow("develop")!;
+
+// The delegation engine writes state/ledger files under ctx.cwd — point the
+// harness at a temp dir so the suite never writes into the repo's .kstack/.
+const TMP_CWD = mkdtempSync(path.join(os.tmpdir(), "kstack-deleg-cwd-"));
+after(() => {
+  rmSync(TMP_CWD, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+});
 
 const ROOT_CAUSE_CHAIN_PHASE: WorkflowPhase = {
   id: "root-cause",
@@ -40,7 +47,7 @@ function findPhase(wf: { phases: WorkflowPhase[] }, phaseId: string): WorkflowPh
   return phase;
 }
 
-function makeCtx(workflowId: string, phaseIndex = 0, cwd = process.cwd()): WorkflowContext {
+function makeCtx(workflowId: string, phaseIndex = 0, cwd = TMP_CWD): WorkflowContext {
   return {
     state: { workflowId, phaseIndex, status: "active", goal: "fix the flaky logout bug", results: {} },
     git: {
@@ -83,7 +90,7 @@ async function delegate(
   phase: WorkflowPhase,
   wfCtx: WorkflowContext,
   spawnFn: (req: SpawnRequest) => Promise<SpawnResult>,
-  opts: { alive?: () => boolean } = {},
+  opts: { alive?: () => boolean; interruption?: { kind?: "quota-parked" | "run-interrupted" } } = {},
 ) {
   const host = fakeHost(wfCtx.cwd);
   // Fresh accumulator per run: beginRun also zeroes the token-breaker counter
@@ -96,6 +103,9 @@ async function delegate(
     opts.alive ?? (() => true),
     host.pi,
     spawnFn,
+    undefined,
+    undefined,
+    opts.interruption,
   );
   return { results, ...host };
 }
@@ -177,13 +187,13 @@ describe("runDeterministicDelegation — fake-spawn integration", () => {
   test("the wall-clock budget stops the chain before later steps and reports budget-exceeded", async () => {
     const NAME = "KSTACK_PI_DELEGATION_BUDGET_SEC";
     const original = process.env[NAME];
-    process.env[NAME] = "0.05"; // 50ms: the first step runs, the second never starts
+    process.env[NAME] = "1"; // 1s: the first step runs, the second never starts
     try {
       const phase = ROOT_CAUSE_CHAIN_PHASE;
       const calls: SpawnRequest[] = [];
       const { results, events, notifications } = await delegate(phase, makeCtx("investigate", 1), async (req) => {
         calls.push(req);
-        await new Promise((r) => setTimeout(r, 80)); // every step burns past the budget
+        await new Promise((r) => setTimeout(r, 1100)); // every step burns past the budget
         return ok("scout report");
       });
 
@@ -206,6 +216,7 @@ describe("runDeterministicDelegation — fake-spawn integration", () => {
     const NAME = "KSTACK_PI_MAX_RUN_TOKENS";
     const original = process.env[NAME];
     process.env[NAME] = "100";
+    const interruption: { kind?: "quota-parked" | "run-interrupted" } = {};
     try {
       const phase = ROOT_CAUSE_CHAIN_PHASE;
       const calls: SpawnRequest[] = [];
@@ -213,14 +224,38 @@ describe("runDeterministicDelegation — fake-spawn integration", () => {
         calls.push(req);
         // input + output = 110 > 100 → circuit-breaker trips after step 1.
         return ok("scout report", { usage: { input: 60, output: 50, cacheRead: 0, cacheWrite: 0 } });
-      });
+      }, { interruption });
 
       assert.equal(calls.length, 1, "the breaker must stop the chain after the over-budget step");
       assert.equal(results.length, 1);
+      assert.equal(interruption.kind, "quota-parked", "the chain PARKS — it never completes on partial results");
       assert.ok(
         notifications.some((n) => n.level === "warning" && n.msg.includes("MAX_RUN_TOKENS exceeded")),
         "token-breaker warning missing",
       );
+    } finally {
+      if (original === undefined) delete process.env[NAME];
+      else process.env[NAME] = original;
+      resetTelemetry();
+    }
+  });
+
+  test("the token breaker counts SPEND only — a re-read cached prompt never trips it", async () => {
+    const NAME = "KSTACK_PI_MAX_RUN_TOKENS";
+    const original = process.env[NAME];
+    process.env[NAME] = "1000";
+    try {
+      const phase = ROOT_CAUSE_CHAIN_PHASE;
+      const calls: SpawnRequest[] = [];
+      const { results } = await delegate(phase, makeCtx("investigate", 1), async (req) => {
+        calls.push(req);
+        // 60 in + 30 out = 90 spend; the 70k cached prompt is re-reported by
+        // every turn and must NOT count — it made the total grow quadratically.
+        return ok("scout report", { usage: { input: 60, output: 30, cacheRead: 70_000, cacheWrite: 0 } });
+      });
+
+      assert.equal(calls.length, 2, "cached prompt tokens must not trip the breaker");
+      assert.equal(results.length, 2);
     } finally {
       if (original === undefined) delete process.env[NAME];
       else process.env[NAME] = original;
@@ -342,7 +377,7 @@ describe("runDeterministicDelegation — fake-spawn integration", () => {
 
 describe("branch enforcement at sprint verdict gates", () => {
   test("a verdict-bearing gate on main parks fail-closed before any delegation runs", async () => {
-    const host = fakeHost(process.cwd());
+    const host = fakeHost(TMP_CWD);
     // detectGitContext no longer uses pi.exec (pi's internal spawn omits
     // windowsHide) — it takes an injectable ExecFn seam. Fake git on "main".
     const execGit = async (_cmd: string, args: string[]) => ({
@@ -381,7 +416,7 @@ describe("branch enforcement at sprint verdict gates", () => {
     const original = process.env[NAME];
     process.env[NAME] = "off"; // skip real delegation; flow straight to instructions
     try {
-      const host = fakeHost(process.cwd());
+      const host = fakeHost(TMP_CWD);
       const sent: string[] = [];
       const pi: any = {
         appendEntry: host.pi.appendEntry,

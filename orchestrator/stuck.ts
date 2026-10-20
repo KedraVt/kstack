@@ -15,12 +15,20 @@
  *   alternating        — action keys alternating A,B,A,B,A,B (≥6)
  *   context-errors     — ≥3 context-window/provider context errors
  *
- * Budgets are multi-dimensional (turns/tokens/usd/ms/usdPerMin): a dim at ≥80%
- * soft-warns ONCE; at ≥100% it trips. A trip means PARK, never a silent kill —
- * the caller persists `paused` + `pausedReason`.
+ * Budgets are multi-dimensional (turns/tokens/context/usd/ms/usdPerMin): a dim
+ * at ≥80% soft-warns ONCE; at ≥100% it trips. A trip means PARK, never a
+ * silent kill — the caller persists `paused` + `pausedReason`.
+ *
+ * Two token dims, deliberately disjoint:
+ *   tokens  — SPEND: sum over turns of (input + output). pi's Usage fields are
+ *             disjoint (input EXCLUDES cache), and every turn re-reports the
+ *             whole prompt as cacheRead/cacheWrite — counting those here would
+ *             grow the counter quadratically and trip the cap after 3-4 turns.
+ *   context — PEAK single-turn prompt: max over turns of
+ *             (input + cacheRead + cacheWrite) — the real context pressure.
  */
 
-import { numberEnv } from "./config.ts";
+import { numberEnv, timeoutClassFor, type TimeoutClass } from "./config.ts";
 
 export type StuckRule =
   | "identical-action"
@@ -33,7 +41,10 @@ export interface StepRun {
   startedAtMs: number;
   turns: number;
   toolCalls: number;
+  /** SPEND — sum over turns of (input + output). Cache tokens are NOT counted. */
   tokens: number;
+  /** PEAK single-turn prompt size — max over turns of (input + cacheRead + cacheWrite). */
+  contextTokens: number;
   /** Cache-hit and cache-write tokens — the D28 byte-stable-prefix measure. */
   cacheRead: number;
   cacheWrite: number;
@@ -59,6 +70,7 @@ export function newStepRun(startedAtMs = Date.now()): StepRun {
     turns: 0,
     toolCalls: 0,
     tokens: 0,
+    contextTokens: 0,
     cacheRead: 0,
     cacheWrite: 0,
     costUsd: 0,
@@ -100,10 +112,22 @@ function isContextErrorText(text: string): boolean {
   return CONTEXT_ERROR_RE.test(text);
 }
 
-function usageTokens(u: any): number {
+/** Turn SPEND — pi's `input` EXCLUDES the cached prompt part. */
+function usageSpend(u: any): number {
   if (!u) return 0;
   const n = (v: any) => Number(v ?? 0) || 0;
-  return n(u.input ?? u.inputTokens) + n(u.output ?? u.outputTokens) + n(u.cacheRead ?? u.cacheReadTokens) + n(u.cacheWrite ?? u.cacheWriteTokens);
+  return n(u.input ?? u.inputTokens) + n(u.output ?? u.outputTokens);
+}
+
+/** Single-turn PROMPT size — the fresh input plus the cached prompt prefix. */
+function usageContext(u: any): number {
+  if (!u) return 0;
+  const n = (v: any) => Number(v ?? 0) || 0;
+  return (
+    n(u.input ?? u.inputTokens) +
+    n(u.cacheRead ?? u.cacheReadTokens) +
+    n(u.cacheWrite ?? u.cacheWriteTokens)
+  );
 }
 
 function usageCost(u: any): number {
@@ -189,7 +213,11 @@ export function feedStepEvent(run: StepRun, event: StepWatchEvent): void {
       }
       run.turns++;
       run.monologueStreak++;
-      run.tokens += usageTokens(msg.usage);
+      // SPEND counts the fresh input+output only; the cached prompt prefix is
+      // re-reported every turn and would inflate the total quadratically.
+      run.tokens += usageSpend(msg.usage);
+      const promptSize = usageContext(msg.usage);
+      if (promptSize > run.contextTokens) run.contextTokens = promptSize;
       run.cacheRead += Number(msg.usage?.cacheRead ?? msg.usage?.cacheReadTokens ?? 0) || 0;
       run.cacheWrite += Number(msg.usage?.cacheWrite ?? msg.usage?.cacheWriteTokens ?? 0) || 0;
       run.costUsd += usageCost(msg.usage);
@@ -221,7 +249,10 @@ export function detectStuck(run: StepRun): StuckRule | null {
 
 export interface StepBudgets {
   turns: number;
+  /** SPEND cap (input + output across the step's turns). */
   tokens: number;
+  /** PEAK single-turn prompt cap (input + cacheRead + cacheWrite). */
+  context: number;
   usd: number;
   ms: number;
   usdPerMin: number;
@@ -231,11 +262,34 @@ function limit(v: number | "off"): number {
   return v === "off" ? Number.POSITIVE_INFINITY : v;
 }
 
-/** Env-resolved per-step budget limits. Unset envs → conservative defaults; "off" disables a dim. */
-export function stepBudgetDefaults(): StepBudgets {
+/**
+ * Per-timeout-class SPEND caps. A class's steps do more work than a generic
+ * one (WORK implements, VERIFY reviews), so the generic 250k cap tripped
+ * healthy steps. An unmapped phase id falls back to the generic default.
+ */
+const CLASS_TOKEN_LIMITS: Record<TimeoutClass, number> = {
+  EXPLORE: 400_000,
+  WORK: 600_000,
+  VERIFY: 300_000,
+};
+
+const DEFAULT_TOKEN_LIMIT = 250_000;
+/** Peak-prompt cap — the same for every class (context pressure is uniform). */
+const DEFAULT_CONTEXT_LIMIT = 180_000;
+
+/**
+ * Env-resolved per-step budget limits. Unset envs → conservative defaults
+ * ("off" disables a dim). The SPEND cap defaults to the phase's timeout
+ * class (timeoutClassFor); an explicit KSTACK_PI_STEP_MAX_TOKENS /
+ * KSTACK_PI_STEP_MAX_CONTEXT always wins over the class default.
+ */
+export function stepBudgetDefaults(phaseId?: string): StepBudgets {
+  const cls = phaseId ? timeoutClassFor(phaseId) : null;
+  const tokenDefault = cls ? CLASS_TOKEN_LIMITS[cls] : DEFAULT_TOKEN_LIMIT;
   return {
     turns: limit(numberEnv("KSTACK_PI_STEP_MAX_TURNS", 60, { allowOff: true })),
-    tokens: limit(numberEnv("KSTACK_PI_STEP_MAX_TOKENS", 250_000, { allowOff: true })),
+    tokens: limit(numberEnv("KSTACK_PI_STEP_MAX_TOKENS", tokenDefault, { allowOff: true })),
+    context: limit(numberEnv("KSTACK_PI_STEP_MAX_CONTEXT", DEFAULT_CONTEXT_LIMIT, { allowOff: true })),
     // No pricing feed exists in-repo — the USD dims default to off (Infinity,
     // same convention as maxRunTokens). They trip only when an env cap is set.
     usd: limit(numberEnv("KSTACK_PI_STEP_MAX_USD", Number.POSITIVE_INFINITY, { allowOff: true })),
@@ -244,18 +298,19 @@ export function stepBudgetDefaults(): StepBudgets {
   };
 }
 
-const BUDGET_DIMS = ["turns", "tokens", "usd", "ms", "usdPerMin"] as const;
+const BUDGET_DIMS = ["turns", "tokens", "context", "usd", "ms", "usdPerMin"] as const;
 type BudgetDim = (typeof BUDGET_DIMS)[number];
 
 function usageFor(run: StepRun, dim: BudgetDim, now: number): number {
   switch (dim) {
     case "turns": return run.turns;
     case "tokens": return run.tokens;
+    case "context": return run.contextTokens;
     case "usd": return run.costUsd;
     case "ms":
       // Evaluated per-event only — a silently-hung child emits no events, so
       // this dim can never trip during a stall; the spawn wall-clock timeout
-      // (GSTACK_PI_STEP_MAX_SEC check-in cap) covers that case by design.
+      // (KSTACK_PI_STEP_MAX_SEC check-in cap) covers that case by design.
       return Math.max(0, now - run.startedAtMs);
     case "usdPerMin": {
       const elapsedMin = (now - run.startedAtMs) / 60_000;
@@ -313,11 +368,11 @@ let watch: StepWatch | null = null;
 export function beginStepWatch(phaseId: string, stepId: string): void {
   // Budgets are OFF for main-session watches: a main step is a conversation
   // with the user (planning continues until the user is satisfied), so turns,
-  // tokens and wall clock measure the discussion, not a stall. Only the stuck
-  // RULES (repeated/alternating actions, error streaks) still guard it. The
-  // delegated-step path keeps its budgets — a subagent has no human on the wire.
+  // spend, context and wall clock measure the discussion, not a stall. Only the
+  // stuck RULES (repeated/alternating actions, error streaks) still guard it.
+  // The delegated-step path keeps its budgets — a subagent has no human on the wire.
   const off = Number.POSITIVE_INFINITY;
-  watch = { run: newStepRun(), phaseId, stepId, budgets: { turns: off, tokens: off, usd: off, ms: off, usdPerMin: off } };
+  watch = { run: newStepRun(), phaseId, stepId, budgets: { turns: off, tokens: off, context: off, usd: off, ms: off, usdPerMin: off } };
 }
 
 export function endStepWatch(): void {

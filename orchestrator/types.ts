@@ -65,6 +65,8 @@ export interface WorkflowStep {
   needsUser?: true;
   /** Delegated-step timeout (seconds) overriding the phase's class — for steps known to outlast it. */
   timeoutSec?: number;
+  /** Per-step budget override — `tokens` caps the step's spend, `context` its peak prompt. */
+  budget?: { tokens?: number; context?: number };
   /** Extra env for a delegated step's child; values interpolate like the task ({runId}, {phase}, {step}). */
   env?: Record<string, string>;
   /**

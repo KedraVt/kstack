@@ -3312,7 +3312,7 @@ describe("S3 stuck detector (TASK_08)", () => {
   });
 
   test("budgets — soft-warn at 80%, hard trip at 100%, warn fires once per dimension", () => {
-    const limits = { turns: 10, tokens: 1000, usd: 1, ms: 60_000, usdPerMin: 10 };
+    const limits = { turns: 10, tokens: 1000, context: 10_000, usd: 1, ms: 60_000, usdPerMin: 10 };
     const run = newStepRun(1_000_000);
     run.turns = 8; // exactly 80%
     let r = checkStepBudgets(run, limits, 1_000_000);
@@ -3358,6 +3358,45 @@ describe("S3 stuck detector (TASK_08)", () => {
     assert.ok(run.costUsd > 0.29 && run.costUsd < 0.31, `object cost must land (${run.costUsd})`);
     const limits = { ...stepBudgetDefaults(), usd: 0.2 };
     assert.equal(checkStepBudgets(run, limits, 60_000).exceeded, "usd");
+  });
+
+  test("budgets — spend counts input+output only; the re-read prompt is a separate peak-context dim", () => {
+    // pi re-reports the WHOLE prompt as cacheRead on every turn: counting it
+    // per turn made the step total grow quadratically (10 turns × 71k = 710k)
+    // and tripped the 250k cap after 3-4 perfectly healthy turns.
+    const run = newStepRun();
+    for (let i = 0; i < 10; i++) {
+      feedStepEvent(run, msgEnd("turn", { input: 1000, output: 500, cacheRead: 70_000, cacheWrite: 0 }));
+    }
+    assert.equal(run.tokens, 15_000, "spend = sum of input+output");
+    assert.equal(run.contextTokens, 71_000, "context = peak single-turn prompt");
+    const limits = { ...stepBudgetDefaults(), tokens: 250_000, context: 180_000 };
+    assert.equal(checkStepBudgets(run, limits).exceeded, null, "cached turns must not trip the spend budget");
+  });
+
+  test("budgets — defaults follow the phase's timeout class; an env cap beats it", () => {
+    assert.equal(stepBudgetDefaults("explore").tokens, 400_000, "EXPLORE class");
+    assert.equal(stepBudgetDefaults("implement").tokens, 600_000, "WORK class");
+    assert.equal(stepBudgetDefaults("review").tokens, 300_000, "VERIFY class");
+    assert.equal(stepBudgetDefaults("no-such-phase").tokens, 250_000, "unmapped phase → generic default");
+    assert.equal(stepBudgetDefaults("explore").context, 180_000, "context cap is class-independent");
+
+    const TOKENS = "KSTACK_PI_STEP_MAX_TOKENS";
+    const CONTEXT = "KSTACK_PI_STEP_MAX_CONTEXT";
+    const originalTokens = process.env[TOKENS];
+    const originalContext = process.env[CONTEXT];
+    process.env[TOKENS] = "1234";
+    process.env[CONTEXT] = "4321";
+    try {
+      assert.equal(stepBudgetDefaults("explore").tokens, 1234, "explicit env wins over the class default");
+      assert.equal(stepBudgetDefaults("no-such-phase").tokens, 1234);
+      assert.equal(stepBudgetDefaults("explore").context, 4321);
+    } finally {
+      if (originalTokens === undefined) delete process.env[TOKENS];
+      else process.env[TOKENS] = originalTokens;
+      if (originalContext === undefined) delete process.env[CONTEXT];
+      else process.env[CONTEXT] = originalContext;
+    }
   });
 
   test("env defaults are conservative and 'off' disables a dimension", () => {

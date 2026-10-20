@@ -627,6 +627,9 @@ export async function executeCurrentPhase(
             // rewrite the literal token inside the embedded skill digest.
             interpolated: true,
             ...(step.timeoutSec ? { timeoutMs: numberEnv(`KSTACK_PI_TIMEOUT_STEP_${step.id.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`, step.timeoutSec) as number * 1000 } : {}),
+            // Per-step budget override (WorkflowStep.budget) — beats the
+            // phase-class defaults resolved in the delegation loop.
+            ...(step.budget ? { budget: step.budget } : {}),
             // ADR-23: the child learns run/phase/step ids + the report CLI
             // path from env — it can emit its own canonical record.
             env: {
@@ -832,7 +835,7 @@ export async function runDeterministicDelegation(
   // S3 delegated step: a prebuilt one-entry plan built from buildStepTask
   // (steps never route through buildDeterministicPlan). S4/ADR-23: `env`
   // carries run/phase/step ids + the kstack-report CLI path into the child.
-  planOverride?: Array<{ agent: string; task: string; interpolated?: boolean; env?: Record<string, string>; timeoutMs?: number }>,
+  planOverride?: Array<{ agent: string; task: string; interpolated?: boolean; env?: Record<string, string>; timeoutMs?: number; budget?: { tokens?: number; context?: number } }>,
   // S3/D28 out-param: when set (delegated-step runs only) a StepRun watches the
   // child event stream; a detector trip lands in .trip and aborts the spawn.
   stepGuard?: { stepId: string; trip?: string },
@@ -855,7 +858,7 @@ export async function runDeterministicDelegation(
   const delegationStart = Date.now();
 
   const runSteps = async (
-    steps: Array<{ agent: string; task: string; interpolated?: boolean; env?: Record<string, string>; timeoutMs?: number }>,
+    steps: Array<{ agent: string; task: string; interpolated?: boolean; env?: Record<string, string>; timeoutMs?: number; budget?: { tokens?: number; context?: number } }>,
   ): Promise<Array<{ agent: string; result: SpawnResult }>> => {
     const out: Array<{ agent: string; result: SpawnResult }> = [];
     let previous = "";
@@ -929,9 +932,13 @@ export async function runDeterministicDelegation(
       setStatus("starting…");
 
       // S3/D28: delegated STEP runs carry a transient detector — its counters
-      // die with the step, never persist.
-      const stepRun = stepGuard ? newStepRun() : null;
-      const stepLimits = stepRun ? stepBudgetDefaults() : null;
+      // die with the step, never persist. `let` because a RETRY restarts the
+      // attempt with a fresh run (the failed attempt's counters must not
+      // count twice against the step budgets).
+      let stepRun = stepGuard ? newStepRun() : null;
+      // The SPEND/context caps default to the phase's timeout class; a
+      // step-declared budget overrides them.
+      const stepLimits = stepRun ? { ...stepBudgetDefaults(phase.id), ...(step.budget ?? {}) } : null;
 
       const req: SpawnRequest = {
         agent: step.agent,
@@ -949,14 +956,15 @@ export async function runDeterministicDelegation(
         onActivity: setStatus,
         onEvent: stepRun
           ? (event: any) => {
-              if (!stepGuard || stepGuard.trip) return;
-              feedStepEvent(stepRun, event);
-              const rule = detectStuck(stepRun);
+              const run = stepRun;
+              if (!stepGuard || stepGuard.trip || !run) return;
+              feedStepEvent(run, event);
+              const rule = detectStuck(run);
               if (rule) {
                 stepGuard.trip = `stuck:${rule}:${phase.id}.${stepGuard.stepId}`;
                 return;
               }
-              const budget = checkStepBudgets(stepRun, stepLimits!);
+              const budget = checkStepBudgets(run, stepLimits!);
               for (const dim of budget.warn) {
                 try {
                   ctx.ui.notify(`kstack: step "${stepGuard.stepId}" at ~80% of its ${dim} budget`, "warning");
@@ -988,6 +996,10 @@ export async function runDeterministicDelegation(
       // A detector trip is NOT a transient failure — retrying would re-run the
       // same looping/budget-blown step, so the single-retry path is skipped.
       if (decision.retry && alive() && !stepGuard?.trip) {
+        // The failed attempt burned real tokens — account for them NOW: the
+        // retry overwrites `result`, so the post-step accounting below never
+        // sees attempt #1's usage.
+        recordTokens((result.usage?.input ?? 0) + (result.usage?.output ?? 0));
         delegationEvent(pi, {
           phaseId: phase.id,
           step: index,
@@ -1006,6 +1018,10 @@ export async function runDeterministicDelegation(
         }
         await delay(decision.delayMs);
         if (alive()) {
+          // A retry is a FRESH attempt: the transient StepRun's counters
+          // (turns/spend/context) restart — otherwise the failed attempt's
+          // usage would count twice against the step budgets.
+          if (stepRun) stepRun = newStepRun();
           result = await spawnFn({
             ...req,
             timeoutMs: retryTimeoutMs(req, decision.timeoutScale),
@@ -1027,10 +1043,10 @@ export async function runDeterministicDelegation(
       previous = result.rawOutput ?? (result.output || result.error || "");
       prevIncomplete = !result.ok || result.incomplete === true;
       // STEP 5c: token budget circuit-breaker — notify + orderly stop, no kill.
+      // Only SPEND counts (input + output): the cached prompt prefix is
+      // re-reported every turn and would grow the counter quadratically.
       const used =
         (result.usage?.input ?? 0) +
-        (result.usage?.cacheRead ?? 0) +
-        (result.usage?.cacheWrite ?? 0) +
         (result.usage?.output ?? 0);
       recordTokens(used);
       if (totalTokensUsed() > maxRunTokens()) {
@@ -1042,6 +1058,27 @@ export async function runDeterministicDelegation(
         } catch {
           /* stale ctx */
         }
+        // Same shape as the wall-clock budget trip: the chain PARKS (quota
+        // parked) instead of completing the phase on partial chain results.
+        delegationEvent(pi, {
+          phaseId: phase.id,
+          step: index,
+          agent: step.agent,
+          event: "budget-exceeded",
+          tokens: totalTokensUsed(),
+        });
+        if (interruption) interruption.kind = "quota-parked";
+        appendLedger(
+          ctx.cwd,
+          wfCtx.state,
+          {
+            kind: "quota-parked",
+            phaseId: phase.id,
+            stepId: stepGuard?.stepId,
+            payload: { summary: `run token budget (${totalTokensUsed()} tokens) exhausted after "${step.agent}"` },
+          },
+          () => { /* ledger failures never block the park path */ },
+        );
         break;
       }
       // A failed step's error text is not a usable handoff for downstream

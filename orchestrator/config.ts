@@ -251,6 +251,8 @@ export function maxRunTokens(): number {
  * 45 min; "off" disables.
  */
 export function delegationBudgetMs(): number | "off" {
-  const sec = numberEnv("KSTACK_PI_DELEGATION_BUDGET_SEC", 2700, { allowOff: true });
+  // min: 1 — a sub-second budget is below the spawn floor and trips the
+  // budget before the first step could ever run.
+  const sec = numberEnv("KSTACK_PI_DELEGATION_BUDGET_SEC", 2700, { allowOff: true, min: 1 });
   return sec === "off" ? "off" : sec * 1000;
 }
