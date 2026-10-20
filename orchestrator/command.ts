@@ -26,7 +26,7 @@ import type { GitContext, WorkflowPhase, WorkflowState, WorkflowStep } from "./t
  * again instead of running the phase.
  */
 function launchApprovedOptional(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: WorkflowState): void {
-  launchPhase(pi, ctx, state, (p, c, s) => executeCurrentPhase(p, c, s, { approvedOptional: true }));
+  launchPhase(pi, ctx, state, (p, c, s, o) => executeCurrentPhase(p, c, s, { approvedOptional: true, launchId: o?.launchId }));
 }
 
 /**

@@ -166,25 +166,52 @@ export function annotateOrphanedDelegation(pi: ExtensionAPI, ctx: ExtensionConte
  * concurrent chains: the in-flight registry refuses any relaunch while one is
  * still running in this process.
  *
- * In-flight key is `wf:phaseIndex` (design §117-120 sketched
- * `wf:phaseIndex:stepIndex` — equivalent here: a stepped phase's whole
- * step lifecycle sits inside ONE launchPhase hold, so the phase-level key
- * already blocks every mid-delegation duplicate).
+ * ONE live chain per workflow (design §117-120 sketched `wf:phaseIndex` —
+ * a stepped phase's whole step lifecycle sits inside ONE launchPhase hold).
+ *
+ * The entry carries TWO things:
+ * - `launchId` — the id of the launch that owns it. A dying chain must never
+ *   touch a NEWER run's entry: the abort releases the entry, a restart
+ *   re-registers it, and the old chain's late `finally` would otherwise
+ *   delete the new run's guard (the entry used to be a bare string key).
+ * - `phaseIndex` — the phase the chain is CURRENTLY working on. The chain
+ *   walks into the NEXT phase by itself when a phase is auto-skipped
+ *   (`enabled:"off"`, `skipWhen`, optional-skip): a registry frozen at the
+ *   launch phase would report the new phase as free while its chain runs —
+ *   a second chain (or a kstack_advance) would slip through.
  */
-const inFlightPhases = new Set<string>();
+type InFlightEntry = { launchId: number; phaseIndex: number };
+const inFlightPhases = new Map<string, InFlightEntry>();
+/** Monotonic launch counter — every launch gets a unique id. */
+let launchSeq = 0;
 
 /** Test hook: observe whether a phase currently has a running chain. */
 export function isPhaseInFlight(workflowId: string, phaseIndex: number): boolean {
-  return inFlightPhases.has(`${workflowId}:${phaseIndex}`);
+  const entry = inFlightPhases.get(workflowId);
+  return entry !== undefined && entry.phaseIndex === phaseIndex;
 }
 
 /**
  * Abort support: drop the in-flight marker so a restarted workflow of the same
  * id can launch its phases immediately instead of being refused by the
  * duplicate-chain guard until the aborted run's orphaned chain settles.
+ * The whole workflow is released — the aborting chain may already have
+ * walked into the next phase (its index moved on), and the run is over
+ * either way.
  */
-export function releasePhaseInFlight(workflowId: string, phaseIndex: number): void {
-  inFlightPhases.delete(`${workflowId}:${phaseIndex}`);
+export function releasePhaseInFlight(workflowId: string, _phaseIndex?: number): void {
+  inFlightPhases.delete(workflowId);
+}
+
+/**
+ * The chain walked into a new phase (an auto-skipped phase recurses into the
+ * next one inside the SAME launch): the registry follows it — but only while
+ * this launch still owns the entry. A newer run's entry (the workflow was
+ * aborted and restarted meanwhile) is never touched by the dying chain.
+ */
+function updateInFlightPhase(workflowId: string, launchId: number, phaseIndex: number): void {
+  const entry = inFlightPhases.get(workflowId);
+  if (entry && entry.launchId === launchId) entry.phaseIndex = phaseIndex;
 }
 
 /**
@@ -267,13 +294,19 @@ export function launchPhase(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   state: WorkflowState,
-  run: (pi: ExtensionAPI, ctx: ExtensionContext, state: WorkflowState) => Promise<void> = executeCurrentPhase,
+  run: (
+    pi: ExtensionAPI,
+    ctx: ExtensionContext,
+    state: WorkflowState,
+    opts?: { launchId?: number },
+  ) => Promise<void> = executeCurrentPhase,
 ): void {
-  const key = `${state.workflowId}:${state.phaseIndex}`;
-  if (inFlightPhases.has(key)) {
+  const workflowId = state.workflowId;
+  const running = inFlightPhases.get(workflowId);
+  if (running) {
     try {
       ctx.ui.notify(
-        `kstack: a chain for workflow "${state.workflowId}" phase ${state.phaseIndex + 1} is already running — ignoring the duplicate launch.`,
+        `kstack: a chain for workflow "${workflowId}" phase ${running.phaseIndex + 1} is already running — ignoring the duplicate launch.`,
         "warning",
       );
     } catch {
@@ -281,8 +314,9 @@ export function launchPhase(
     }
     return;
   }
-  inFlightPhases.add(key);
-  void run(pi, ctx, state)
+  const launchId = ++launchSeq;
+  inFlightPhases.set(workflowId, { launchId, phaseIndex: state.phaseIndex });
+  void run(pi, ctx, state, { launchId })
     .catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       if (/stale/i.test(msg)) return;
@@ -293,7 +327,10 @@ export function launchPhase(
       }
     })
     .finally(() => {
-      inFlightPhases.delete(key);
+      // Only THIS launch's entry may be removed: an aborted chain's late
+      // finally must not delete the NEWER run's entry (same workflow id).
+      const entry = inFlightPhases.get(workflowId);
+      if (entry && entry.launchId === launchId) inFlightPhases.delete(workflowId);
     });
 }
 
@@ -301,7 +338,7 @@ export async function executeCurrentPhase(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   state: WorkflowState,
-  opts?: { approvedOptional?: boolean; execGit?: ExecFn; spawnFn?: typeof runSubagent },
+  opts?: { approvedOptional?: boolean; execGit?: ExecFn; spawnFn?: typeof runSubagent; launchId?: number },
 ): Promise<void> {
   const startEpoch = runtimeEpoch;
   const alive = (): boolean => runtimeEpoch === startEpoch && ctxAlive(ctx);
@@ -314,6 +351,19 @@ export async function executeCurrentPhase(
   };
 
   if (!alive()) return;
+
+  // The chain walked into a NEW phase (an auto-skipped phase recurses into
+  // the next one inside the same launch): the in-flight registry follows it,
+  // or the new phase looks free while its chain is running.
+  if (opts?.launchId !== undefined) {
+    updateInFlightPhase(state.workflowId, opts.launchId, state.phaseIndex);
+  }
+
+  // Recursion into the next phase/step stays INSIDE this launch: the
+  // registry must follow the chain, and the launch's `finally` must only
+  // ever clean up its own entry.
+  const recurse = (next: WorkflowState): Promise<void> =>
+    executeCurrentPhase(pi, ctx, next, opts?.launchId === undefined ? undefined : { launchId: opts.launchId });
 
   const workflow = getWorkflow(state.workflowId);
   if (!workflow) {
@@ -400,14 +450,14 @@ export async function executeCurrentPhase(
       const skipped = advancePhase(state, phase.id, { status: "skipped", summary }, workflow.phases.length, { phases: workflow.phases, cwd: ctx.cwd });
       saveState(pi, skipped);
       appendLedger(ctx.cwd, state, { kind: "gate", phaseId: phase.id, payload: { gateId: phase.id, decision: "skip", summary } }, (m) => notify(m, "warning"));
-      return executeCurrentPhase(pi, ctx, skipped);
+      return recurse(skipped);
     }
   }
 
   if (!insidePhase && phase.skipWhen?.(wfCtx)) {
     const skipped = advancePhase(state, phase.id, { status: "skipped", summary: "Auto-skipped by condition" }, workflow.phases.length);
     saveState(pi, skipped);
-    return executeCurrentPhase(pi, ctx, skipped);
+    return recurse(skipped);
   }
 
   if (phase.optional && !insidePhase) {
@@ -444,7 +494,7 @@ export async function executeCurrentPhase(
       );
       saveState(pi, skipped);
       appendLedger(ctx.cwd, state, { kind: "gate", phaseId: phase.id, payload: { gateId: phase.id, decision: "skip" } }, (m) => notify(m, "warning"));
-      return executeCurrentPhase(pi, ctx, skipped);
+      return recurse(skipped);
     }
     // mode === "auto", or the user explicitly approved this phase via the
     // /kstack decision panel (approvedOptional) — fall through and run it.
@@ -515,11 +565,11 @@ export async function executeCurrentPhase(
     if (!rec) return;
     saveState(pi, rec.state);
     appendLedger(ctx.cwd, state, { kind: "step", phaseId: phase.id, stepId: step!.id, payload: { summary: note } }, (m) => notify(m, "warning"));
-    if (!rec.isLast) return executeCurrentPhase(pi, ctx, rec.state);
+    if (!rec.isLast) return recurse(rec.state);
     const ran = Object.entries(rec.state.results).some(([k, r]) => k.startsWith(phase.id + ".") && r.status === "completed");
     const next = advancePhase(rec.state, phase.id, { status: ran ? "completed" : "skipped", summary: note }, workflow.phases.length, { phases: workflow.phases, cwd: ctx.cwd });
     saveState(pi, next);
-    return executeCurrentPhase(pi, ctx, next);
+    return recurse(next);
   };
   if (step && stepSkippedByVars(step, state.vars)) {
     return skipStep(`Auto-skipped: skipWhen ${step.skipWhen!.var}==${step.skipWhen!.equals}`);

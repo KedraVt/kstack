@@ -210,6 +210,90 @@ test("releasePhaseInFlight lets a restarted workflow launch immediately after ab
   assert.equal(launched, true, "restarted workflow must not be blocked by the aborted run's chain");
 });
 
+test("an aborted chain's late finally does not remove the newer run's in-flight entry", async () => {
+  // The registry is keyed by workflow id alone: the abort released the entry,
+  // the restart re-registered it, and the OLD chain's finally deleted the
+  // NEW run's entry — the new chain lost its duplicate-chain guard.
+  const pi = {} as any;
+  const ctx = { ui: { notify() { /* ignored */ } } } as any;
+  const state = { workflowId: "guard-restart", phaseIndex: 0 } as any;
+
+  let settleOld: () => void = () => {};
+  const oldChain = new Promise<void>((r) => { settleOld = r; });
+  launchPhase(pi, ctx, state, async () => { await oldChain; });
+  assert.equal(isPhaseInFlight("guard-restart", 0), true, "the first chain holds the guard");
+
+  // abortWorkflow() releases the entry — the orphaned chain keeps running.
+  releasePhaseInFlight(state.workflowId, state.phaseIndex);
+  assert.equal(isPhaseInFlight("guard-restart", 0), false);
+
+  // Restart: the new chain registers a fresh entry for the SAME workflow.
+  launchPhase(pi, ctx, state, async () => { await new Promise(() => {}); });
+  assert.equal(isPhaseInFlight("guard-restart", 0), true, "the restarted run holds the guard");
+
+  // The old chain settles late — its finally must not touch the new entry.
+  settleOld();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(isPhaseInFlight("guard-restart", 0), true, "the new run's in-flight entry survived the old chain's finally");
+
+  releasePhaseInFlight("guard-restart", 0); // leave no marker behind
+});
+
+test("the in-flight registry follows the chain into the phase it auto-advances into", async () => {
+  // A chain that walks into the NEXT phase by itself (an auto-skipped phase
+  // recurses into the next one) left the registry at the launch phase: the
+  // new phase looked free while its chain was running, so a second chain or
+  // a kstack_advance could slip through.
+  const wf = getWorkflow("review")!;
+  const fixIdx = wf.phases.findIndex((p) => p.id === "fix");
+  const retroIdx = wf.phases.findIndex((p) => p.id === "retro");
+  assert.ok(fixIdx >= 0 && retroIdx === fixIdx + 1, "review: fix is followed by retro");
+
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-inflight-"));
+  try {
+    const seen: Array<{ atLaunch: boolean; atNext: boolean }> = [];
+    const pi: any = {
+      appendEntry: () => {},
+      sendUserMessage: () => {
+        // The chain is STILL in flight here — its finally has not run yet.
+        seen.push({
+          atLaunch: isPhaseInFlight("review", fixIdx),
+          atNext: isPhaseInFlight("review", retroIdx),
+        });
+      },
+    };
+    const ctx: any = {
+      cwd,
+      ui: { notify() { /* ignored */ }, setStatus() { /* ignored */ } },
+      sessionManager: { getEntries: () => [] },
+    };
+
+    // review.fix is enabled:"auto": with target=external its autoWhen is
+    // false ⇒ the phase is auto-skipped and the chain recurses into review.retro.
+    const state = { ...createState("review", "review the diff"), phaseIndex: fixIdx, vars: { target: "external" } };
+    launchPhase(pi, ctx, state as any, (p, c, s, o) =>
+      executeCurrentPhase(p, c, s, {
+        launchId: o?.launchId,
+        execGit: async () => ({ code: 0, stdout: "", stderr: "" }) as any,
+      }),
+    );
+
+    for (let i = 0; i < 200 && seen.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+
+    assert.equal(seen.length, 1, "the chain delivered the next phase's instructions");
+    assert.equal(seen[0].atNext, true, "the phase the chain moved into must be reported in flight");
+    assert.equal(seen[0].atLaunch, false, "the launch phase must no longer be reported in flight");
+
+    for (let i = 0; i < 200 && (isPhaseInFlight("review", fixIdx) || isPhaseInFlight("review", retroIdx)); i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.equal(isPhaseInFlight("review", retroIdx), false, "the registry released after the chain settled");
+  } finally {
+    releasePhaseInFlight("review", retroIdx);
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 function makeCtx(workflowId: string, phaseIndex = 0, skillsDelivered: string[] = []): WorkflowContext {
   return {
     state: { workflowId, phaseIndex, status: "active", goal: "add dark mode toggle", results: {}, skillsDelivered },
