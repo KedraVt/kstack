@@ -7,8 +7,11 @@
  *   - `none`  — no browser tool at all.
  * The control tools (`kstack_advance`, `kstack_phase`) are NEVER masked.
  */
-import { test, describe, beforeEach } from "node:test";
+import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   CONTROL_TOOLS,
   BROWSER_TOOLS,
@@ -256,12 +259,29 @@ function hostPi(names: string[]) {
   return { pi, active: () => active };
 }
 
+/**
+ * The temp roots the fixtures below work in. The orchestrator's terminal
+ * paths (the abort, the run finalisation) DELETE the run's ephemeral
+ * artifacts under `ctx.cwd` — a fixture rooted at the repo would delete the
+ * sprint's own planning artifacts (tasks.md, capability.md, …) every time
+ * the suite runs. Every fixture therefore gets its own temp root.
+ */
+const tmpRoots: string[] = [];
+function tmpCwd(): string {
+  const dir = mkdtempSync(path.join(tmpdir(), "kstack-toolmask-"));
+  tmpRoots.push(dir);
+  return dir;
+}
+afterEach(() => {
+  while (tmpRoots.length) rmSync(tmpRoots.pop()!, { recursive: true, force: true });
+});
+
 /** A fake session context carrying one persisted workflow state. */
-function hostCtx(state: unknown) {
+function hostCtx(state: unknown, cwd: string) {
   const entries = state ? [{ type: "custom", customType: "kstack-wf-state", data: state }] : [];
   const notes: Array<{ msg: string; level: string }> = [];
   const ctx: any = {
-    cwd: process.cwd(),
+    cwd,
     ui: { notify: (msg: string, level: string) => notes.push({ msg, level }), setStatus: () => {} },
     sessionManager: { getEntries: () => entries },
   };
@@ -287,7 +307,7 @@ describe("TASK_02 — the mask wired into the orchestrator", () => {
   test("a masked phase leaves the control tools active", () => {
     asMainSession(() => {
       const { pi, active } = hostPi(ALL);
-      const { ctx } = hostCtx(null);
+      const { ctx } = hostCtx(null, tmpCwd());
       const state = { ...createState("sprint", "g"), runId: "r1" };
       applyPhaseToolMask(pi, ctx, state, nonePhase);
       assert.equal(active().includes("kstack_goto"), false, "the browser tools must be masked");
@@ -299,7 +319,7 @@ describe("TASK_02 — the mask wired into the orchestrator", () => {
     asMainSession(() => {
       const { pi, active } = hostPi(ALL);
       const state = { ...createState("sprint", "g"), runId: "r1", phaseIndex: sprint.phases.findIndex((p) => p.id === "implement") };
-      const { ctx } = hostCtx(state);
+      const { ctx } = hostCtx(state, tmpCwd());
       reassertToolMask(pi, ctx);
       assert.equal(active().includes("kstack_goto"), false, "the `none` phase masks the browser tools");
     });
@@ -308,7 +328,7 @@ describe("TASK_02 — the mask wired into the orchestrator", () => {
   test("no active run resolves the `full` profile and restores the tools", () => {
     asMainSession(() => {
       const { pi, active } = hostPi(ALL);
-      const { ctx } = hostCtx(null);
+      const { ctx } = hostCtx(null, tmpCwd());
       // A masked loadout whose run ended without a terminal restore.
       reconcileToolMask(pi, "none", { runId: "r1" });
       assert.equal(active().includes("kstack_goto"), false);
@@ -320,7 +340,7 @@ describe("TASK_02 — the mask wired into the orchestrator", () => {
   test("a delegated child (env KSTACK_STEP) keeps its own tool set", () => {
     const { pi, active } = hostPi(ALL);
     const state = { ...createState("sprint", "g"), runId: "r1", phaseIndex: sprint.phases.findIndex((p) => p.id === "implement") };
-    const { ctx } = hostCtx(state);
+    const { ctx } = hostCtx(state, tmpCwd());
     const before = [...active()];
     const prev = process.env.KSTACK_STEP;
     process.env.KSTACK_STEP = "backend";
@@ -336,12 +356,17 @@ describe("TASK_02 — the mask wired into the orchestrator", () => {
   test("abort during a masked phase restores the browser tools", () => {
     asMainSession(() => {
       const { pi, active } = hostPi(ALL);
-      const { ctx } = hostCtx(null);
+      const cwd = tmpCwd();
+      // The abort is a TERMINAL status: the run's ephemerals die with it —
+      // inside the run's OWN root, never in the repo the suite runs in.
+      writeFileSync(path.join(cwd, "understand.md"), "ephemeral");
+      const { ctx } = hostCtx(null, cwd);
       const state = { ...createState("sprint", "g"), runId: "r1" };
       applyPhaseToolMask(pi, ctx, state, nonePhase);
       assert.equal(active().includes("kstack_goto"), false);
       abortWorkflow(pi, ctx as any, state as any, "Workflow aborted.");
       assert.ok(active().includes("kstack_goto"), "the abort must restore the browser tools");
+      assert.equal(existsSync(path.join(cwd, "understand.md")), false, "the abort deletes the run's ephemerals");
       // A later `full` phase in the same session has them back.
       applyPhaseToolMask(pi, ctx, state, fullPhase);
       assert.ok(active().includes("kstack_goto"), "a later `full` phase keeps the browser tools");

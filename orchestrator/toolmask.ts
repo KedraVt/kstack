@@ -211,9 +211,9 @@ export function reconcileToolMask(
     const owner = opts?.runId ?? null;
     const ownerChanged = owner !== null && ledger.ownerRunId !== null && ledger.ownerRunId !== owner;
     // A new owner takes over: the previous owner's removals are restored
-    // (they are in `base`) and the new profile is applied on top.
-    const baseForMask = ownerChanged ? base : base;
-    const kept = [...baseForMask].filter((n) => !masked.has(n));
+    // (they are in `base`) and the new profile is applied on top — the
+    // composition below already yields that end state.
+    const kept = [...base].filter((n) => !masked.has(n));
     const next = orderByToolIndex(host, kept, active);
     if (sameSet(next, active)) {
       // Nothing changed: the ledger still describes the masked names (a
