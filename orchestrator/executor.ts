@@ -19,6 +19,7 @@ import { evaluateStepRecordTrust, repairKey, runRecordRepair, stepArtifactPaths,
 import { cleanupRunArtifacts } from "./runcleanup.ts";
 import { newStepRun, feedStepEvent, detectStuck, checkStepBudgets, stepBudgetDefaults, beginStepWatch, endStepWatch } from "./stuck.ts";
 import { cleanupEphemeralArtifacts, sprintGateEphemerals, artifactSignalFiles, runStartMs } from "./artifacts.ts";
+import { reconcileToolMask, restoreAllTools, profileForPhaseId, type ToolMaskHost } from "./toolmask.ts";
 
 // --- Sequential-chain resilience (STEP 2f) -----------------------------------
 
@@ -259,6 +260,42 @@ export function advanceBlockReason(state: WorkflowState): string | null {
 }
 
 /**
+ * S5a/TASK_02 — apply the phase's TOOL PROFILE to the MAIN session.
+ *
+ * The mask is CONTEXT ECONOMY, not a security boundary (ADR-28): every
+ * failure is swallowed and the session continues UNMASKED. The change is
+ * ledgered once per change — the audit trail the C3 baseline reads (the
+ * main-scope rows are the mask's evidence).
+ */
+export function applyPhaseToolMask(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  state: WorkflowState,
+  phase: Pick<WorkflowPhase, "id">,
+): void {
+  try {
+    const profile = profileForPhaseId(state.workflowId, phase.id);
+    reconcileToolMask(pi as unknown as ToolMaskHost, profile, {
+      runId: state.runId ?? null,
+      onChange: (change) => {
+        appendLedger(
+          ctx.cwd,
+          state,
+          {
+            kind: "report",
+            phaseId: phase.id,
+            payload: { summary: `tool-mask ${change.profile}: -${change.removed}/+${change.added}` },
+          },
+          () => {},
+        );
+      },
+    });
+  } catch {
+    /* the mask is an optimisation — it never blocks the run */
+  }
+}
+
+/**
  * Terminal bookkeeping shared by EVERY completion path (executor recursion,
  * kstack_advance on the last phase, the optional-skip panel): flush the run
  * report, delete the run's ephemerals (S4/§10.5 — every failure is
@@ -277,6 +314,14 @@ export function finalizeRun(pi: ExtensionAPI, ctx: ExtensionContext, state: Work
   // The run report is written FIRST: it is the durable record of the run and
   // must not depend on the files deleted below.
   writeRunReport(ctx.cwd, state.workflowId);
+  // S5a/TASK_02: the terminal restore — the browser tools come back before
+  // the run's ephemerals die. The mask ledger is cleared only after the
+  // restore SUCCEEDED (INV-28).
+  try {
+    restoreAllTools(pi as unknown as ToolMaskHost);
+  } catch {
+    /* a completion never dies on a mask restore */
+  }
   if ((state.ephemeralArtifacts ?? []).length > 0) {
     const { deleted, failed } = cleanupEphemeralArtifacts(ctx.cwd, state.ephemeralArtifacts!, warn);
     appendLedger(ctx.cwd, state, {
@@ -393,6 +438,11 @@ export async function executeCurrentPhase(
     notify(`Workflow "${workflow.name}" completed!`, "info");
     return;
   }
+
+  // S5a/TASK_02 (call site 1): the phase's tool profile is applied to the
+  // MAIN session as the phase starts — the eager half of the mask (the
+  // per-turn re-assert in the before_agent_start hook is the safety net).
+  applyPhaseToolMask(pi, ctx, state, phase);
 
   const git = await detectGitContext(ctx.cwd, opts?.execGit);
   if (!alive()) return;

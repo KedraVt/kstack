@@ -349,7 +349,13 @@ describe("generated browse tools", () => {
 
   function collectTools() {
     const tools: Record<string, any> = {};
-    const fakePi = { registerTool: (def: any) => { tools[def.name] = def; } };
+    const fakePi = {
+      registerTool: (def: any) => { tools[def.name] = def; },
+      // S5a/TASK_02: the tool-mask host surface (the fake owns no tool set).
+      getActiveTools: () => [],
+      getAllTools: () => [],
+      setActiveTools: () => {},
+    };
     registerKstackTools(fakePi as any);
     return tools;
   }

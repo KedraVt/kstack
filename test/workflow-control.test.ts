@@ -44,6 +44,10 @@ function harness(initialState: unknown, ui: Record<string, any> = {}) {
     registerCommand: () => {},
     on: () => {},
     exec: async () => ({ stdout: "", stderr: "" }),
+    // S5a/TASK_02: the tool-mask host surface (the fake owns no tool set).
+    getActiveTools: () => [],
+    getAllTools: () => [],
+    setActiveTools: () => {},
     appendEntry: (t: string, d: any) => entries.push({ type: "custom", customType: t, data: d }),
     sendUserMessage: (m: string) => sent.push(m),
   };
@@ -218,7 +222,7 @@ describe("human step gates", () => {
 describe("workflow entry + artifact lifetime", () => {
   test("no programmatic start tool: workflows start only through /kstack", () => {
     const names: string[] = [];
-    initOrchestrator({ registerTool: (t: any) => names.push(t.name), registerCommand: () => {}, on: () => {} } as any);
+    initOrchestrator({ registerTool: (t: any) => names.push(t.name), registerCommand: () => {}, on: () => {}, getActiveTools: () => [], getAllTools: () => [], setActiveTools: () => {} } as any);
     assert.ok(!names.includes("kstack_start"), names.join(","));
     assert.ok(names.includes("kstack_advance"));
   });

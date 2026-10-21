@@ -22,8 +22,12 @@ import {
   resetToolMaskLedger,
   type ToolMaskHost,
 } from "../orchestrator/toolmask.ts";
-import { getStaticWorkflows } from "../orchestrator/workflows.ts";
+import { getStaticWorkflows, getWorkflow } from "../orchestrator/workflows.ts";
 import { TOOLS } from "../tools.generated.ts";
+import { applyPhaseToolMask } from "../orchestrator/executor.ts";
+import { reassertToolMask } from "../orchestrator/index.ts";
+import { abortWorkflow } from "../orchestrator/command.ts";
+import { createState } from "../orchestrator/state.ts";
 
 /** A fake pi that mirrors pi's own rules: unknown names are DROPPED. */
 function fakePi(names: string[], opts?: { dropUnknown?: boolean; failOnSet?: boolean }) {
@@ -228,6 +232,120 @@ describe("reconcileToolMask — the reconcile algebra (INV-2)", () => {
     reconcileToolMask(pi, "none", { runId: "r1", onChange: (i) => seen.push(`${i.profile}:-${i.removed}/+${i.added}`) });
     assert.equal(seen.length, 1);
     assert.ok(seen[0].startsWith("none:-"), seen[0]);
+  });
+});
+
+// --- TASK_02 — the mask wired into the orchestrator ------------------------
+
+/** A fake pi that owns a tool loadout, like the real host. */
+function hostPi(names: string[]) {
+  const all = names.map((n) => ({ name: n }));
+  let active = [...names];
+  const pi: any = {
+    getActiveTools: () => [...active],
+    getAllTools: () => all,
+    setActiveTools: (n: string[]) => {
+      active = [...n];
+    },
+    registerTool: () => {},
+    registerCommand: () => {},
+    on: () => {},
+    exec: async () => ({ stdout: "", stderr: "" }),
+    appendEntry: () => {},
+  };
+  return { pi, active: () => active };
+}
+
+/** A fake session context carrying one persisted workflow state. */
+function hostCtx(state: unknown) {
+  const entries = state ? [{ type: "custom", customType: "kstack-wf-state", data: state }] : [];
+  const notes: Array<{ msg: string; level: string }> = [];
+  const ctx: any = {
+    cwd: process.cwd(),
+    ui: { notify: (msg: string, level: string) => notes.push({ msg, level }), setStatus: () => {} },
+    sessionManager: { getEntries: () => entries },
+  };
+  return { ctx, notes };
+}
+
+describe("TASK_02 — the mask wired into the orchestrator", () => {
+  const sprint = getWorkflow("sprint")!;
+  const nonePhase = sprint.phases.find((p) => p.id === "implement")!;
+  const fullPhase = sprint.phases.find((p) => p.id === "qa-browsing")!;
+
+  /** The main session never carries KSTACK_STEP (only delegated children do). */
+  function asMainSession(fn: () => void): void {
+    const prev = process.env.KSTACK_STEP;
+    delete process.env.KSTACK_STEP;
+    try {
+      fn();
+    } finally {
+      if (prev !== undefined) process.env.KSTACK_STEP = prev;
+    }
+  }
+
+  test("a masked phase leaves the control tools active", () => {
+    asMainSession(() => {
+      const { pi, active } = hostPi(ALL);
+      const { ctx } = hostCtx(null);
+      const state = { ...createState("sprint", "g"), runId: "r1" };
+      applyPhaseToolMask(pi, ctx, state, nonePhase);
+      assert.equal(active().includes("kstack_goto"), false, "the browser tools must be masked");
+      for (const c of CONTROL_TOOLS) assert.ok(active().includes(c), `${c} must stay active`);
+    });
+  });
+
+  test("the per-turn re-assert resolves the profile from the persisted state", () => {
+    asMainSession(() => {
+      const { pi, active } = hostPi(ALL);
+      const state = { ...createState("sprint", "g"), runId: "r1", phaseIndex: sprint.phases.findIndex((p) => p.id === "implement") };
+      const { ctx } = hostCtx(state);
+      reassertToolMask(pi, ctx);
+      assert.equal(active().includes("kstack_goto"), false, "the `none` phase masks the browser tools");
+    });
+  });
+
+  test("no active run resolves the `full` profile and restores the tools", () => {
+    asMainSession(() => {
+      const { pi, active } = hostPi(ALL);
+      const { ctx } = hostCtx(null);
+      // A masked loadout whose run ended without a terminal restore.
+      reconcileToolMask(pi, "none", { runId: "r1" });
+      assert.equal(active().includes("kstack_goto"), false);
+      reassertToolMask(pi, ctx);
+      assert.ok(active().includes("kstack_goto"), "a `full` profile restores the browser tools");
+    });
+  });
+
+  test("a delegated child (env KSTACK_STEP) keeps its own tool set", () => {
+    const { pi, active } = hostPi(ALL);
+    const state = { ...createState("sprint", "g"), runId: "r1", phaseIndex: sprint.phases.findIndex((p) => p.id === "implement") };
+    const { ctx } = hostCtx(state);
+    const before = [...active()];
+    const prev = process.env.KSTACK_STEP;
+    process.env.KSTACK_STEP = "backend";
+    try {
+      reassertToolMask(pi, ctx);
+    } finally {
+      if (prev === undefined) delete process.env.KSTACK_STEP;
+      else process.env.KSTACK_STEP = prev;
+    }
+    assert.deepEqual(active(), before, "the child keeps its own tool set");
+  });
+
+  test("abort during a masked phase restores the browser tools", () => {
+    asMainSession(() => {
+      const { pi, active } = hostPi(ALL);
+      const { ctx } = hostCtx(null);
+      const state = { ...createState("sprint", "g"), runId: "r1" };
+      applyPhaseToolMask(pi, ctx, state, nonePhase);
+      assert.equal(active().includes("kstack_goto"), false);
+      abortWorkflow(pi, ctx as any, state as any, "Workflow aborted.");
+      assert.ok(active().includes("kstack_goto"), "the abort must restore the browser tools");
+      // A later `full` phase in the same session has them back.
+      applyPhaseToolMask(pi, ctx, state, fullPhase);
+      assert.ok(active().includes("kstack_goto"), "a later `full` phase keeps the browser tools");
+    });
   });
 });
 

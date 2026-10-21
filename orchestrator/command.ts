@@ -21,6 +21,7 @@ import { endStepWatch } from "./stuck.ts";
 import { verdictKeysFor, writeStepRecord } from "./records.ts";
 import { evaluateStepRecordTrust, runRecordRepair, stepArtifactPaths, stepRecordFor, stepSpawnEnv } from "./repair.ts";
 import { runSubagent } from "./spawn.ts";
+import { restoreAllTools, type ToolMaskHost } from "./toolmask.ts";
 import { verdictValuesFor } from "./templates.ts";
 import type { GitContext, WorkflowPhase, WorkflowState, WorkflowStep } from "./types.ts";
 
@@ -102,7 +103,16 @@ function auditGateDecision(
   );
 }
 
-function abortWorkflow(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: WorkflowState, message: string): void {
+export function abortWorkflow(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: WorkflowState, message: string): void {
+  // S5a/TASK_02 (call site 3): the terminal restore runs BEFORE
+  // invalidateRuntime() — the browser tools come back and the mask ledger is
+  // cleared (only after the restore succeeded, INV-28). A later `full` phase
+  // in the same session has its browser tools.
+  try {
+    restoreAllTools(pi as unknown as ToolMaskHost);
+  } catch {
+    /* an abort never dies on a mask restore */
+  }
   // Invalidate first: any in-flight delegation's shouldAbort() flips false→
   // true and the spawn loop terminates the child (SIGKILL). Previously the
   // orphaned chain kept running to completion, burning tokens after "aborted"

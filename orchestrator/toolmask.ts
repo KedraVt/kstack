@@ -146,6 +146,11 @@ export function profileFor(workflowId: string, phase: Pick<WorkflowPhase, "id">)
   return PHASE_TOOL_PROFILE[`${workflowId}:${phase.id}`] ?? "full";
 }
 
+/** The profile of a (workflow, phase-id) pair — the id form of `profileFor`. */
+export function profileForPhaseId(workflowId: string, phaseId: string): ToolProfile {
+  return PHASE_TOOL_PROFILE[`${workflowId}:${phaseId}`] ?? "full";
+}
+
 /** The names a profile removes — never a control tool. */
 export function maskedFor(profile: ToolProfile): ReadonlySet<string> {
   if (profile === "full") return new Set<string>();

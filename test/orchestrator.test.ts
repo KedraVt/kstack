@@ -1889,6 +1889,10 @@ describe("kstack_phase tool", () => {
       registerCommand: () => {},
       on: () => {},
       exec: async () => ({ stdout: "", stderr: "" }),
+      // S5a/TASK_02: the tool-mask host surface (the fake owns no tool set).
+      getActiveTools: () => [],
+      getAllTools: () => [],
+      setActiveTools: () => {},
       appendEntry: () => {},
     };
     const ctx: any = {
@@ -2544,6 +2548,10 @@ function fakeHarness(initialState: unknown) {
     registerCommand: () => {},
     on: (ev: string, fn: any) => handlers.set(ev, fn),
     exec: async () => ({ stdout: "", stderr: "" }),
+    // S5a/TASK_02: the tool-mask host surface (the fake owns no tool set).
+    getActiveTools: () => [],
+    getAllTools: () => [],
+    setActiveTools: () => {},
     appendEntry: (_t: string, d: any) => entries.push({ type: "custom", customType: _t, data: d }),
     sendUserMessage: (m: string) => sent.push(m),
   };

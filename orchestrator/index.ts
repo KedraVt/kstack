@@ -20,9 +20,48 @@ import { appendLedger } from "./ledger.ts";
 import { feedWatchEvent, endStepWatch, stepWatchStats, type StepWatchEvent } from "./stuck.ts";
 import { SECURITY_SECTION } from "../lib/content-security.ts";
 import { EXTENSION_ROOT } from "./skills.ts";
+import { reconcileToolMask, restoreAllTools, profileForPhaseId, type ToolMaskHost } from "./toolmask.ts";
 
 /** Automatic re-deliveries of a main step whose completion signal is missing. */
 const MAX_AUTO_REISSUES = 2;
+
+/**
+ * S5a/TASK_02 (call site 2) — the per-turn re-assert of the tool mask.
+ *
+ * The profile comes from the PERSISTED state, so it survives a resume, a
+ * loop-back, a compaction and an extension reload:
+ *  - a run that is active ⇒ the current phase's profile;
+ *  - no run, or a terminal/aborted run ⇒ `full` (the browser tools come
+ *    back — a run that ended without its terminal restore still owes one).
+ *
+ * The reconcile is idempotent: an unchanged profile is a no-op, so the
+ * per-turn hook costs nothing and never churns the prompt-cache prefix.
+ */
+export function reassertToolMask(pi: ExtensionAPI, ctx: ExtensionContext): void {
+  // INV-29: the mask is MAIN-SESSION ONLY. A delegated child carries
+  // KSTACK_STEP (repair.ts) and runs --no-session (spawn.ts): it keeps its
+  // own tool set, whatever the phase profile says.
+  if (process.env.KSTACK_STEP) return;
+  try {
+    const state = loadActiveState(ctx);
+    const terminal = !state || state.status === "completed" || state.status === "aborted";
+    if (terminal) {
+      restoreAllTools(pi as unknown as ToolMaskHost);
+      return;
+    }
+    const workflow = getWorkflow(state.workflowId);
+    const phase = workflow?.phases[state.phaseIndex];
+    if (!phase) {
+      restoreAllTools(pi as unknown as ToolMaskHost);
+      return;
+    }
+    reconcileToolMask(pi as unknown as ToolMaskHost, profileForPhaseId(state.workflowId, phase.id), {
+      runId: state.runId ?? null,
+    });
+  } catch {
+    /* the mask is an optimisation — a stale context must never crash the hook */
+  }
+}
 
 export function initOrchestrator(pi: ExtensionAPI): void {
   // Skills reach runtime helpers as "$KSTACK_EXTENSION_DIR/runtime/..." — one
@@ -35,9 +74,16 @@ export function initOrchestrator(pi: ExtensionAPI): void {
   // The try/catch stays: older pi versions without before_agent_start throw
   // at registration and simply skip the injection.
   try {
-    pi.on("before_agent_start", (event) => ({
-      systemPrompt: event.systemPrompt + "\n\n" + SECURITY_SECTION,
-    }));
+    pi.on("before_agent_start", (event, evCtx) => {
+      // S5a/TASK_02 (call site 2): the tool mask is re-asserted on every
+      // turn of the MAIN session. A delegated child (KSTACK_STEP) keeps its
+      // own tool set — the guard lives in reassertToolMask, the only code
+      // path that touches the tool set.
+      reassertToolMask(pi, evCtx);
+      return {
+        systemPrompt: event.systemPrompt + "\n\n" + SECURITY_SECTION,
+      };
+    });
   } catch {
     /* event not supported by this pi version */
   }
