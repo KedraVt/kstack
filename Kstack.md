@@ -54,9 +54,9 @@ detailed via grilling before execution and this file is updated.
 |--------|-------|--------|
 | S1 | Single skill catalog | **executed** |
 | S2 | Independence + rebrand | **executed** (GitHub repo rename + extension dir remain — manual, D16) |
-| S3 | Step model + pilot | **detailed** |
-| S4 | Review + workflow migration | **detailed** |
-| S5a | Evolution — foundation hardening | **detailed** |
+| S3 | Step model + pilot | **executed** (step model, gates, ledger, stuck, resume and the `develop.plan` pilot are in the code) |
+| S4 | Review + workflow migration | **executed** (6 workflows on `steps[]`; hardening follow-ups landed after the retro) |
+| S5a | Evolution — foundation hardening | **detailed — NEXT** |
 | S5b | Evolution — structural upgrades | **detailed** |
 | S6 | Expansion backlog | parking lot |
 
@@ -404,6 +404,14 @@ into steps, skill assigned per task (step-first: gap → new skill, D25),
 verdict loops where natural (D23). Sprint = reference with light review
 (D24). Draft decompositions: `Kstack/workflow-redesign.md`.
 
+> **STATUS (2026-10-21):** executed. Post-retro hardening: `kstack-report`
+> rejects off-map verdicts at write time; `orchestrator/README.md` is a
+> generated workflow/step table guarded by a test; the dead HANDOFF
+> verdict channel is removed (ADR-1 retirement done). Open residue,
+> carried into S5a: the unreachable `artifact-mismatch` park cause
+> (`types.ts`/`command.ts`), the producer-less ledger `verdict` event,
+> and the non-flagged branch of `advancePhase`/`state.pendingVerdict`.
+
 ### Method — one workflow at a time (D26)
 
 ```
@@ -497,6 +505,19 @@ implemented for D28. Source: `Kstack/research-report.md`.
 - [ ] **W4 — Stuck/budget/ledger tuning** (2.6/2.8). The detectors were
   born in S3; here real thresholds, reserve-then-settle for concurrent
   phases, and verification of resume/precompact gates on real runs.
+
+### Carry-over from S4
+
+- [ ] **C1 — Legacy verdict residue.** Remove the `artifact-mismatch`
+  park cause, the producer-less ledger `verdict` kind and the non-flagged
+  branch of `advancePhase`/`state.pendingVerdict` (fail-closed today;
+  removal changes the park cause asserted in `remediation.test.ts`).
+- [ ] **C2 — Report vs trust-check parity.** `kstack-report` accepts the
+  `acceptedVerdictValues` map, `repair.ts` trusts any `NEGATIVE_VALUES`
+  entry; align them, and align the `buildRecordContract` hints (they omit
+  freezing severities).
+- [ ] **C3 — Real-run evidence.** No end-to-end run result is recorded
+  for S4 (TASK_11); W4 calibration needs at least one.
 
 ### DoD
 
