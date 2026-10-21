@@ -2,7 +2,7 @@ import type { WorkflowPhase, WorkflowContext, Workflow, WorkflowStep } from "./t
 import { getWorkflow } from "./workflows.ts";
 import { loadSkillFull, loadSkillGate, getSkillInfo } from "./skills.ts";
 import { reportCliPath, projectRootFor, verdictKeysFor } from "./records.ts";
-import { expectationsFor, NEGATIVE_VALUES } from "./verdicts.ts";
+import { acceptedVerdictValues } from "./verdict-values.ts";
 import { skillsEnabled, manualGates, deterministicSubagents } from "./config.ts";
 import { replaceExact } from "./text.ts";
 import { extractHandoff } from "./handoff.ts";
@@ -1201,11 +1201,13 @@ export function buildStepInstructions(phase: WorkflowPhase, step: WorkflowStep, 
  * `--root` pins the project that owns .kstack/ — a child that cd'd away
  * would otherwise drop the record where the orchestrator never looks.
  */
-export function buildRecordContract(step: WorkflowStep, scope?: { workflowId: string; phase: Pick<WorkflowPhase, "id" | "steps">; cwd?: string }): string {
+export function buildRecordContract(step: WorkflowStep, scope?: { workflowId: string; phase: Pick<WorkflowPhase, "id" | "steps" | "parkOn" | "loopBackOn">; cwd?: string }): string {
   const sig = step.signal;
   const owned = scope ? verdictKeysFor(scope.workflowId, scope.phase, step) : sig?.kind === "verdict" ? [sig.value] : [];
+  // The contract lists EXACTLY the values the CLI accepts (TASK_12): the
+  // hint and the validator must never disagree.
   const valuesFor = (key: string): string =>
-    (scope ? verdictValuesFor(scope.workflowId, scope.phase.id, key) : []).join("|") || "value";
+    (scope ? acceptedVerdictValues(scope.workflowId, scope.phase, key, sig?.kind === "verdict" ? sig.value : undefined) : []).join("|") || "value";
   const required =
     sig?.kind === "verdict"
       ? ` Your record MUST carry \`--verdict ${sig.value}==<${valuesFor(sig.value)}>\` — the workflow parks when it is missing.`
@@ -1238,25 +1240,11 @@ The orchestrator never accepts HANDOFF text as a completion signal — the recor
 /**
  * Routable values for one verdict key: the phase's expected positives plus
  * the negatives that answer them (approved→rejected, green→red|orange, …).
- * Feeds the record-contract hint and the manual advance panel.
+ *
+ * TASK_12: the list moved to the `verdict-values.ts` leaf — the record
+ * contract, the CLI's published map and the repair's acceptance check must
+ * all read the SAME list.
  */
-export function verdictValuesFor(workflowId: string, phaseId: string, key: string): string[] {
-  const exp = expectationsFor(workflowId, phaseId) ?? {};
-  const allowed = exp[key] ?? exp[`${key}?`] ?? [];
-  const negs = [...NEGATIVE_VALUES].filter((n) => NEGATIVE_FOR[n]?.some((pos) => allowed.includes(pos)));
-  return [...allowed, ...negs];
-}
-
-/** Positive values each routing negative answers (record-contract hints). */
-const NEGATIVE_FOR: Record<string, string[]> = {
-  rejected: ["approved"],
-  failed: ["success"],
-  red: ["green"],
-  orange: ["green"],
-  fail: ["pass"],
-  persists: ["verified"],
-  refuted: ["verified"],
-};
 
 /**
  * Deterministic-task text for a DELEGATED step: the step's own task plus its

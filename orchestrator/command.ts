@@ -22,7 +22,7 @@ import { verdictKeysFor, writeStepRecord } from "./records.ts";
 import { evaluateStepRecordTrust, runRecordRepair, stepArtifactPaths, stepRecordFor, stepSpawnEnv } from "./repair.ts";
 import { runSubagent } from "./spawn.ts";
 import { restoreAllTools, type ToolMaskHost } from "./toolmask.ts";
-import { verdictValuesFor } from "./templates.ts";
+import { verdictValuesFor } from "./verdict-values.ts";
 import type { GitContext, WorkflowPhase, WorkflowState, WorkflowStep } from "./types.ts";
 
 /**
