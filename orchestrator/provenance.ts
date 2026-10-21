@@ -35,7 +35,7 @@ import {
   scanInstructionLines,
   scanInstructions,
 } from "../lib/content-security.ts";
-import { SHINGLE_K, loadTaint, shingleHash, taintOwnState, taintPathFor, tokens } from "./taint.ts";
+import { SHINGLE_K, loadTaint, shingleHashesFromTokens, taintOwnState, taintPathFor, tokens } from "./taint.ts";
 import { BROWSER_TOOLS, profileForPhaseId } from "./toolmask.ts";
 import { phaseArtifactPaths, sprintStamp, type SprintRef } from "./artifacts.ts";
 import { safeCopyFile } from "./safe-append.ts";
@@ -188,8 +188,9 @@ function findRuns(list: string[], taint: ReadonlySet<number>): Run[] {
   const runs: Run[] = [];
   const windowCount = list.length - SHINGLE_K + 1;
   if (windowCount <= 0) return runs;
-  const hashes: number[] = [];
-  for (let i = 0; i < windowCount; i++) hashes.push(shingleHash(list.slice(i, i + SHINGLE_K)));
+  // CR-2: the SAME helper the writer uses — the matcher and the writer must
+  // never drift apart on what a shingle hashes to.
+  const hashes: number[] = shingleHashesFromTokens(list, SHINGLE_K);
   let i = 0;
   while (i < windowCount) {
     if (!taint.has(hashes[i])) {
@@ -441,7 +442,7 @@ export function childMayBrowse(agent: { tools?: string[] } | null | undefined): 
  * (the child may browse — the fail-open direction of a trigger, never a
  * silent skip of the guard).
  */
-export function agentTools(agent: string): string[] | undefined {
+function agentTools(agent: string): string[] | undefined {
   try {
     const file = path.join(EXTENSION_ROOT, "agents", `${agent}.md`);
     const raw = fs.readFileSync(file, "utf-8");
@@ -494,7 +495,7 @@ export function guardStepKey(phaseId: string, stepId: string): string {
  * The park reason of a provenance park (ADR-40): the phase and the step.
  * The vocabulary is bound — the panel's prefix list matches on it.
  */
-export function provenanceParkReason(phaseId: string, stepId: string): string {
+function provenanceParkReason(phaseId: string, stepId: string): string {
   return `provenance-review:${guardStepKey(phaseId, stepId)}`;
 }
 
@@ -505,7 +506,7 @@ export function provenanceParkReason(phaseId: string, stepId: string): string {
  * the REWRITTEN file (the coordinates the human sees) and quotes the copied
  * line. At most 10 entries (the guard caps them).
  */
-export function formatGuardFindings(findings: GuardFinding[]): string[] {
+function formatGuardFindings(findings: GuardFinding[]): string[] {
   return findings.map((f) => `${f.file}:${f.line}  ${f.excerpt}`);
 }
 

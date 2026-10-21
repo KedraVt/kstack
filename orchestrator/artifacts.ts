@@ -229,8 +229,25 @@ export function artifactSignalFiles(cwd: string, value: string, sinceMs?: number
 }
 
 /** Ephemeral set for a workflow id — a fresh copy (state stamps it verbatim). */
-export function ephemeralArtifactsFor(workflowId: string): string[] {
-  return [...(EPHEMERAL_ARTIFACTS[workflowId] ?? [])];
+export function ephemeralArtifactsFor(workflowId: string, sprint?: number): string[] {
+  const list = [...(EPHEMERAL_ARTIFACTS[workflowId] ?? [])];
+  if (workflowId === "sprint" && sprint !== undefined) list.push(...sprintLegacyEphemerals(sprint));
+  return list;
+}
+
+/**
+ * TASK_20 — the LEGACY chain's document names for a sprint number. The
+ * current chain writes FLAT names (`user-story.md`), but a sprint started
+ * before the flat-name rename left `user-story_NN.md` and friends in the
+ * project root. They must die with the run that produced them: a finished
+ * sprint that leaves its documents in the root makes the NEXT run's
+ * numbering see a "live" sprint that was archived long ago — the false
+ * positive that paused a run (the same number in the root and in the
+ * archive).
+ */
+export function sprintLegacyEphemerals(sprint: number): string[] {
+  const s = pad2(sprint);
+  return [`user-story_${s}.md`, `tasks_${s}.md`, `product-capability_${s}.md`, `explore-notes_${s}.md`];
 }
 
 /**

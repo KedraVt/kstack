@@ -18,7 +18,7 @@ import { clearPhaseRecords } from "./records.ts";
 import { evaluateStepRecordTrust, repairKey, runRecordRepair, stepArtifactPaths, stepRecordFor, stepSpawnEnv } from "./repair.ts";
 import { cleanupRunArtifacts } from "./runcleanup.ts";
 import { newStepRun, feedStepEvent, detectStuck, checkStepBudgets, stepBudgetDefaults, beginStepWatch, endStepWatch, BUDGET_ENV, type BudgetDim } from "./stuck.ts";
-import { cleanupEphemeralArtifacts, sprintGateEphemerals, artifactSignalFiles, runStartMs } from "./artifacts.ts";
+import { cleanupEphemeralArtifacts, sprintGateEphemerals, sprintLegacyEphemerals, artifactSignalFiles, runStartMs } from "./artifacts.ts";
 import { reconcileToolMask, restoreAllTools, profileForPhaseId, type ToolMaskHost } from "./toolmask.ts";
 import { agentMayBrowse, provenancePark, runProvenanceGuard } from "./provenance.ts";
 
@@ -495,7 +495,14 @@ export async function executeCurrentPhase(
     const numbered = {
       ...state,
       sprintNumber: discovery.next,
-      ephemeralArtifacts: [...new Set([...(state.ephemeralArtifacts ?? []), ...sprintGateEphemerals(discovery.next)])],
+      ephemeralArtifacts: [
+        ...new Set([
+          ...(state.ephemeralArtifacts ?? []),
+          ...sprintGateEphemerals(discovery.next),
+          // TASK_20: the legacy document names of THIS sprint number die with it.
+          ...sprintLegacyEphemerals(discovery.next),
+        ]),
+      ],
     };
     saveState(pi, numbered);
     state = numbered;

@@ -130,14 +130,25 @@ export function shingleHash(list: string[]): number {
  * The hashes of every shingle of the text. A text shorter than `k` tokens
  * yields no hash at all — it cannot be a copied run.
  */
-export function shingleHashes(text: string, k: number = SHINGLE_K): number[] {
-  const list = tokens(text);
+export function shingleHashesFromTokens(list: string[], k: number = SHINGLE_K): number[] {
   if (k < 1 || list.length < k) return [];
   const hashes: number[] = [];
   for (let i = 0; i + k <= list.length; i++) {
     hashes.push(shingleHash(list.slice(i, i + k)));
   }
   return hashes;
+}
+
+/**
+ * The hashes of every shingle of the text. A text shorter than `k` tokens
+ * yields no hash at all — it cannot be a copied run.
+ *
+ * CR-2: the WRITER (this store) and the MATCHER (the guard) must agree on
+ * every window's hash — they used to run the same loop twice. Both go
+ * through `shingleHashesFromTokens` now.
+ */
+export function shingleHashes(text: string, k: number = SHINGLE_K): number[] {
+  return shingleHashesFromTokens(tokens(text), k);
 }
 
 /** The store's directory, relative to the session cwd. */
