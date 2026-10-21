@@ -105,6 +105,10 @@ export function loadActiveState(ctx: ExtensionContext): WorkflowState | null {
             : [];
         }
         if (typeof normalized.resumeMode !== "boolean") delete normalized.resumeMode;
+        // S5a/TASK_10: the budget-raise env name rides the untrusted entry
+        // channel too — only a plain string may name an env var (it is
+        // printed back to the human, never executed).
+        if (typeof normalized.budgetRaiseEnv !== "string") delete normalized.budgetRaiseEnv;
         if (typeof normalized.baseHead !== "string") delete normalized.baseHead;
         if (typeof normalized.stepGates !== "boolean") delete normalized.stepGates;
         if (typeof normalized.stepGate !== "boolean") delete normalized.stepGate;

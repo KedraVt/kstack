@@ -400,6 +400,13 @@ export interface WorkflowState {
   freezeInfo?: FreezeInfo;
   /** Why the workflow is paused ("loop-exhausted:<phase>", "sprint-number-anomaly", …) — surfaced to the user. */
   pausedReason?: string;
+  /**
+   * S5a/TASK_10 (ADR-62, INV-12): the env var that RAISES the budget dim
+   * that tripped (`BUDGET_ENV`). Persisted with the state so the park panel
+   * can name it after a restart — the name is not only in a notification.
+   * Absent when the park was not a budget trip.
+   */
+  budgetRaiseEnv?: string;
   /** Active retry injection for a looped-back phase (cleared when that phase completes). */
   retryContext?: RetryContext;
   /** Sprint number, discovered once at the user-story phase (E5). Zero-pad to 2 digits when interpolating. */

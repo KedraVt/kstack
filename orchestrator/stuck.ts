@@ -299,6 +299,34 @@ const DEFAULT_TOKEN_LIMIT = 250_000;
 const DEFAULT_CONTEXT_LIMIT = 180_000;
 
 /**
+ * Per-timeout-class TURN caps (S5a/TASK_09, ADR-31).
+ *
+ * The flat 60-turn limit tripped the scout twice in this sprint's own run:
+ * an EXPLORE step legitimately reads far more than 60 turns, and a WORK step
+ * that implements a feature needs more than that too. The limits are
+ * PROVISIONAL — they are calibrated on a single run and are re-checked by
+ * the retro phase (AC-15, AC-23). Every one of them stays env-overridable.
+ */
+export const CLASS_TURN_LIMITS: Record<TimeoutClass, number> = {
+  EXPLORE: 150,
+  WORK: 200,
+  VERIFY: 100,
+};
+
+/** The turn cap of a phase whose timeout class is unmapped. */
+export const DEFAULT_TURN_LIMIT = 100;
+
+/** The env var that raises each budget dim — the park message names it. */
+export const BUDGET_ENV: Record<BudgetDim, string> = {
+  turns: "KSTACK_PI_STEP_MAX_TURNS",
+  tokens: "KSTACK_PI_STEP_MAX_TOKENS",
+  context: "KSTACK_PI_STEP_MAX_CONTEXT",
+  usd: "KSTACK_PI_STEP_MAX_USD",
+  ms: "KSTACK_PI_STEP_MAX_MS",
+  usdPerMin: "KSTACK_PI_STEP_MAX_USD_PER_MIN",
+};
+
+/**
  * Env-resolved per-step budget limits. Unset envs → conservative defaults
  * ("off" disables a dim). The SPEND cap defaults to the phase's timeout
  * class (timeoutClassFor); an explicit KSTACK_PI_STEP_MAX_TOKENS /
@@ -307,8 +335,9 @@ const DEFAULT_CONTEXT_LIMIT = 180_000;
 export function stepBudgetDefaults(phaseId?: string): StepBudgets {
   const cls = phaseId ? timeoutClassFor(phaseId) : null;
   const tokenDefault = cls ? CLASS_TOKEN_LIMITS[cls] : DEFAULT_TOKEN_LIMIT;
+  const turnDefault = cls ? CLASS_TURN_LIMITS[cls] : DEFAULT_TURN_LIMIT;
   return {
-    turns: limit(numberEnv("KSTACK_PI_STEP_MAX_TURNS", 60, { allowOff: true })),
+    turns: limit(numberEnv("KSTACK_PI_STEP_MAX_TURNS", turnDefault, { allowOff: true })),
     tokens: limit(numberEnv("KSTACK_PI_STEP_MAX_TOKENS", tokenDefault, { allowOff: true })),
     context: limit(numberEnv("KSTACK_PI_STEP_MAX_CONTEXT", DEFAULT_CONTEXT_LIMIT, { allowOff: true })),
     // No pricing feed exists in-repo — the USD dims default to off (Infinity,
@@ -320,7 +349,7 @@ export function stepBudgetDefaults(phaseId?: string): StepBudgets {
 }
 
 const BUDGET_DIMS = ["turns", "tokens", "context", "usd", "ms", "usdPerMin"] as const;
-type BudgetDim = (typeof BUDGET_DIMS)[number];
+export type BudgetDim = (typeof BUDGET_DIMS)[number];
 
 function usageFor(run: StepRun, dim: BudgetDim, now: number): number {
   switch (dim) {

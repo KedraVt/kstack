@@ -17,7 +17,7 @@ import { appendLedger } from "./ledger.ts";
 import { clearPhaseRecords } from "./records.ts";
 import { evaluateStepRecordTrust, repairKey, runRecordRepair, stepArtifactPaths, stepRecordFor, stepSpawnEnv } from "./repair.ts";
 import { cleanupRunArtifacts } from "./runcleanup.ts";
-import { newStepRun, feedStepEvent, detectStuck, checkStepBudgets, stepBudgetDefaults, beginStepWatch, endStepWatch } from "./stuck.ts";
+import { newStepRun, feedStepEvent, detectStuck, checkStepBudgets, stepBudgetDefaults, beginStepWatch, endStepWatch, BUDGET_ENV, type BudgetDim } from "./stuck.ts";
 import { cleanupEphemeralArtifacts, sprintGateEphemerals, artifactSignalFiles, runStartMs } from "./artifacts.ts";
 import { reconcileToolMask, restoreAllTools, profileForPhaseId, type ToolMaskHost } from "./toolmask.ts";
 
@@ -257,6 +257,34 @@ export function advanceBlockReason(state: WorkflowState): string | null {
     return `the subagent delegation for phase ${state.phaseIndex + 1} of "${state.workflowId}" is still running — wait for its results before calling kstack_advance`;
   }
   return null;
+}
+
+/**
+ * S5a/TASK_10 (ADR-62, INV-12) — the details of a `budget-exceeded:` trip:
+ * the dim that tripped, the env var that RAISES it and the limit in force.
+ * Null for any other trip (a stuck rule, a quota).
+ */
+export function budgetTripDetails(trip: string): { dim: BudgetDim; env: string; limit: number | null } | null {
+  const match = /^budget-exceeded:([A-Za-z]+):([^:]+)/.exec(trip ?? "");
+  if (!match) return null;
+  const dim = match[1] as BudgetDim;
+  const env = BUDGET_ENV[dim];
+  if (!env) return null;
+  // The trip names "<phase>.<step>" — the phase resolves the class default.
+  const phaseId = match[2].split(".")[0];
+  const limit = stepBudgetDefaults(phaseId)[dim];
+  return { dim, env, limit: Number.isFinite(limit) ? limit : null };
+}
+
+/**
+ * S5a/TASK_10 — the hint the park message carries: the env var that raises
+ * the tripped dim and a concrete value to try (twice the limit in force).
+ */
+export function budgetRaiseHint(trip: string): string | null {
+  const details = budgetTripDetails(trip);
+  if (!details) return null;
+  const suggested = details.limit === null ? "off" : String(details.limit * 2);
+  return `raise with ${details.env}=${suggested} or off`;
 }
 
 /**
@@ -777,25 +805,54 @@ export async function executeCurrentPhase(
 
     // S3/D28 + TASK_04: a tripped detector or an exhausted quota parks the
     // run at the CURRENT stepIndex — resume re-delivers the same step in
-    // resumeMode. Ledger kinds: stuck rules ⇒ run-interrupted, budget/quota
-    // trips ⇒ quota-parked. Never a phase-verdict, never an attempt burn.
+    // resumeMode. Ledger kinds: a stuck rule or a budget trip ⇒
+    // run-interrupted, a wall-clock / run-token quota ⇒ quota-parked. Never
+    // a phase-verdict, never an attempt burn.
     if (stepGuard?.trip || interruption.kind) {
       const reason = stepGuard?.trip ?? `quota-parked:${phase.id}${step ? `.${step.id}` : ""}`;
       // S5a/TASK_10: a budget trip is an INTERRUPTION, never a quota —
       // `quota-parked` is reserved for the wall-clock / run-token
       // exhaustion, and the two true quota sites set `interruption.kind`
       // themselves (they are unchanged).
-      const kind =
-        interruption.kind ?? (stepGuard!.trip!.startsWith("stuck:") ? "run-interrupted" : "quota-parked");
-      const parked = { ...state, status: "paused" as const, pausedReason: reason, resumeMode: true };
+      const kind = interruption.kind ?? "run-interrupted";
+      const budget = stepGuard?.trip ? budgetTripDetails(stepGuard.trip) : null;
+      const parked = {
+        ...state,
+        status: "paused" as const,
+        pausedReason: reason,
+        resumeMode: true,
+        // The env var that raises the tripped dim is PERSISTED, so the panel
+        // can name it after a restart (INV-12). A non-budget park clears it.
+        budgetRaiseEnv: budget?.env,
+      };
       saveState(pi, parked);
       setKstackStatus(ctx, parked, workflow);
-      // The budget-exceeded path already appended its quota-parked event
-      // inside the delegation loop — only the detector trip lands here.
+      // The trip lands here: the delegation loop only sets `stepGuard.trip`,
+      // it never ledgered the event itself (the two quota sites above do).
       if (stepGuard?.trip) {
-        appendLedger(ctx.cwd, state, { kind, phaseId: phase.id, stepId: step!.id, payload: { summary: `detector trip: ${stepGuard.trip}` } }, (m) => notify(m, "warning"));
+        const raiseHint = budget ? budgetRaiseHint(stepGuard.trip) : null;
+        appendLedger(
+          ctx.cwd,
+          state,
+          {
+            kind,
+            phaseId: phase.id,
+            stepId: step!.id,
+            payload: {
+              summary: raiseHint
+                ? `budget trip: ${stepGuard.trip} — ${raiseHint}`
+                : `detector trip: ${stepGuard.trip}`,
+              ...(budget ? { raiseWith: budget.env } : {}),
+            },
+          },
+          (m) => notify(m, "warning"),
+        );
       }
-      notify(`kstack: ${reason} — step paused for a human decision; resume via /kstack re-runs the step in resume mode.`, "warning");
+      const raiseHint = stepGuard?.trip ? budgetRaiseHint(stepGuard.trip) : null;
+      notify(
+        `kstack: ${reason} — step paused for a human decision; resume via /kstack re-runs the step in resume mode.${raiseHint ? ` — ${raiseHint}` : ""}`,
+        "warning",
+      );
       return;
     }
 
