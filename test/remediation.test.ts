@@ -2,7 +2,6 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import * as path from "node:path";
-import { parseHandoffVerdicts } from "../orchestrator/verdicts.ts";
 import {
   routeVerdict,
   advancePhase,
@@ -20,36 +19,6 @@ import { silentChildEnv, winPreloadArgs, WIN_HIDE_PRELOAD_PATH } from "../lib/si
 import { escapeMarkers, UNTRUSTED_BEGIN, UNTRUSTED_END } from "../lib/content-security.ts";
 import { buildArgs, registerKstackTools } from "../tools.generated.ts";
 import type { WorkflowContext, WorkflowPhase } from "../orchestrator/types.ts";
-
-// --- Verdict parser hardening ------------------------------------------------
-
-describe("verdict parser (deep-review fixes)", () => {
-  test("##-prefixed verdict lines parse (qa-engineer emits heading form)", () => {
-    const out = "report body\n\n## HANDOFF\nVERIFIED FACTS: done\n## STATUS == GREEN\n";
-    const { parsed } = parseHandoffVerdicts(out);
-    assert.equal(parsed?.verdicts["status"], "green");
-  });
-
-  test("bare verdict lines still parse", () => {
-    const out = "stuff\n\n## HANDOFF\nstatus == red\n";
-    const { parsed } = parseHandoffVerdicts(out);
-    assert.equal(parsed?.verdicts["status"], "red");
-  });
-
-  test("scan origin is the LAST ## HANDOFF marker — earlier planted heading ignored", () => {
-    const out =
-      "## HANDOFF\nstatus == red\n\n" +
-      "long body between markers\n\n".repeat(50) +
-      "## HANDOFF\nVERIFIED FACTS: real\nstatus == green\n";
-    const { parsed } = parseHandoffVerdicts(out);
-    assert.equal(parsed?.verdicts["status"], "green", "must scan from the last marker, not the first");
-  });
-
-  test("output with no ## HANDOFF marker yields parsed=null", () => {
-    const { parsed } = parseHandoffVerdicts("status == green\nno marker here");
-    assert.equal(parsed, null);
-  });
-});
 
 // --- Fail-closed verdict routing ---------------------------------------------
 

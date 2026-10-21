@@ -242,7 +242,7 @@ export interface PhaseVerdictMerge {
  *   `signal.value` var — a missing record or a missing declared var ⇒ null
  *   (the completion signal was never observed).
  * - Two flagged records disagreeing on the same var ⇒ null (cross-step
- *   contradiction mirrors mergeParseOutcomes semantics).
+ *   contradiction ⇒ null).
  * - `severity` stays an ordinary verdict var in the record channel —
  *   routeVerdict's parkOn declares the freeze outcome for it.
  * - Foreign verdicts cannot smuggle: only flagged-step records are read.

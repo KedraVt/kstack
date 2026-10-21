@@ -258,8 +258,8 @@ export function routeVerdict(
   const loopBackOn = phase?.loopBackOn ?? {};
   const hasEdges = !!(phase?.loopBackTo || Object.keys(loopBackOn).length > 0);
 
-  // parkOn scan — severity-as-verdict (record channel) AND the legacy
-  // parsed.severity field (HANDOFF channel) are both covered.
+  // parkOn scan — severity-as-verdict (record channel) AND the standalone
+  // parsed.severity field are both covered.
   const emittedValues = [...Object.entries(v).map(([k, val]) => `${k}==${val}`), ...(parsed.severity ? [`severity==${parsed.severity}`] : [])];
   for (const emitted of emittedValues) {
     const value = emitted.split("==")[1];
@@ -289,8 +289,8 @@ export function routeVerdict(
   }
 
   // D3 fail-closed (record channel): a security rejection emitted without a
-  // severity verdict is ambiguity, not a loop — same contract the HANDOFF
-  // parser enforces on the legacy channel.
+  // severity verdict is ambiguity, not a loop — the same contract the retired
+  // HANDOFF parser enforced.
   if (
     expectations["security-review"] !== undefined &&
     v["security-review"] === "rejected" &&
@@ -385,9 +385,10 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
 
   // Resolve the phase verdict (INV-9). Flagged-steps phases merge their
   // kstack-report records from .kstack/runs/<runId>/ — the ONLY channel
-  // allowed to produce a phase verdict under the step model. Legacy phases
-  // (no flagged steps) consume the pendingVerdict stash set at delegation
-  // time by the executor's HANDOFF parse.
+  // allowed to produce a phase verdict under the step model. A verdict-bearing
+  // phase WITHOUT flagged steps has no record to merge: it falls back to the
+  // pendingVerdict stash and parks when the stash is empty (no registry phase
+  // is in that shape — every verdict-bearing phase declares a flagged step).
   let parsed: ParsedVerdict | null = null;
   let parkCause: VerdictParkCause = "no-verdict";
   let pvStash = state.pendingVerdict;

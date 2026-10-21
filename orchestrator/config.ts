@@ -74,9 +74,10 @@ export function loopbacksEnabled(): boolean {
 }
 
 /**
- * Deterministic verdict parsing. Off ⇒ verdict-bearing phases PAUSE for the
+ * Deterministic verdict routing. Off ⇒ verdict-bearing phases PAUSE for the
  * human after completing — no auto-routing in either direction (never a
- * silent advance past a possible rejection).
+ * silent advance past a possible rejection). Guards the RECORD channel: the
+ * step records are the only channel that may produce a phase verdict.
  */
 export function verdictsEnabled(): boolean {
   return parse(process.env.KSTACK_PI_VERDICTS) ?? true;

@@ -1,26 +1,24 @@
 /**
- * Deterministic verdict parsing for the sprint workflow (plan B4 / D1–D4).
+ * Verdict routing tables and loop-back feedback for the step model (S4).
  *
- * SECURITY: everything a subagent emits is UNTRUSTED INPUT — repo content can
- * plant literal verdict strings anywhere in the report. Routing therefore
- * happens ONLY if ALL guards hold (guards mirror skip.ts):
- *  1. the `variable == value` line appears inside the structured `## HANDOFF`
- *     section of the subagent's output;
- *  2. every value is matched against a CLOSED whitelist after case
- *     normalization; hedged or malformed values ("high?", "medium-high",
- *     "approved but...") make the WHOLE parse null — never guessed at;
- *  3. each claimed verdict is confirmed by its on-disk artifact: the artifact
- *     must exist and contain the same `variable == value` line within its
- *     ≤64KB tail (dual channel: HANDOFF + disk must agree);
- *  4. ambiguity ⇒ null ⇒ D4 manual park WITHOUT burning an attempt.
+ * A phase verdict is produced ONLY by the step records (ADR-1 / INV-9:
+ * `runtime/bin/kstack-report` writes `.kstack/runs/<runId>/<phase>.<step>.json`,
+ * `records.ts` merges them). The legacy `## HANDOFF` text channel was retired
+ * with the migration — nothing here reads a subagent's report text any more,
+ * so a planted verdict string in a report can no longer route.
  *
- * The orchestrator NEVER advances on doubt.
+ * This module owns:
+ *  - the CLOSED expectation map (ADR-7): every verdict variable a phase may
+ *    emit must land on an expected POSITIVE value or a routing NEGATIVE —
+ *    anything else parks for a human (fail-closed, never a silent advance);
+ *  - the routing NEGATIVE vocabulary;
+ *  - the verdict-bearing test (a phase routes only if it declares a gate);
+ *  - the disk feedback extraction that fuels a loop-back.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ParsedVerdict, VerdictSeverity, WorkflowPhase } from "./types.ts";
-import { extractHandoff } from "./handoff.ts";
+import type { ParsedVerdict, WorkflowPhase } from "./types.ts";
 import {
   qaArtifactPath,
   codeReviewArtifactPath,
@@ -28,44 +26,6 @@ import {
   dockerBuildReportPath,
   newestArchitectArtifact,
 } from "./artifacts.ts";
-
-/** Closed value whitelist (case-normalized to lowercase). Anything else ⇒ null. */
-const VALUE_WHITELIST = [
-  "approved", "rejected", "green", "red", "orange", "success", "failed",
-  // S4 vocabulary (walkthrough/ui/outcome/pipeline gates).
-  "verified", "persists", "refuted", "pass", "fail",
-] as const;
-
-/** Closed severity whitelist. Hedged values ⇒ null (legacy HANDOFF channel). */
-const SEVERITY_WHITELIST = ["critical", "high", "medium", "low"] as const;
-
-/**
- * Variables the parser recognizes anywhere in a HANDOFF. Unknown
- * `x == y`-shaped lines are ignored as prose; KNOWN variables carrying an
- * out-of-whitelist value are treated as tampered/hedged ⇒ whole parse fails.
- */
-export const KNOWN_VARIABLES = [
-  "status", // qa-engineer qa-artifact_XX.md
-  "code-review", // devsecops code-review-artifact.md
-  "security-review", // devsecops security-review-artifact.md
-  "severity", // required on security rejection
-  "docker-build", // devsecops docker-build-report.md
-  "docker-security", // devsecops docker-build-report.md
-  "software-architect-review", // software-architect-artifact_n.md
-  // S4 verdict vars (kstack-report records + HANDOFF migration path).
-  "outcome", // investigate.verify: verified|persists|refuted
-  "walkthrough", // develop implement.walkthrough: pass|fail
-  "be-walk", // sprint implement.be-walk lane: pass|fail
-  "fe-walk", // sprint implement.fe-walk lane: pass|fail
-  "ui", // ui-check: pass|fail
-  "pipeline", // pipeline-review: approved|rejected
-] as const;
-
-// Verdict lines: `status == green`. An optional markdown heading prefix is
-// tolerated (`## status == green`) — the agent prompts and the artifact
-// channel (artifactConfirmsLine below) both already allow it, so requiring a
-// bare line in the HANDOFF channel alone split the contract in two.
-const VAR_LINE_RE = /^\s*(?:#{1,6}\s+)?([A-Za-z][A-Za-z0-9 _-]*?)\s*==\s*(\S[^\n]*)$/;
 
 /** Values that mean "the gated work did not pass" — routing negatives. */
 export const NEGATIVE_VALUES = new Set(["rejected", "failed", "red", "orange", "persists", "refuted", "fail"]);
@@ -139,128 +99,9 @@ export function isVerdictBearing(phase: Pick<WorkflowPhase, "loopBackTo" | "loop
   return !!phase.steps?.some((s) => s.signal?.kind === "verdict");
 }
 
-export interface VerdictParseOutcome {
-  parsed: ParsedVerdict | null;
-  /** Raw verdict-shaped lines found in the HANDOFF, for the D4 panel display. */
-  lines: string[];
-}
+// --- Artifact resolution + loop-back feedback ---------------------------------
 
-/**
- * Parse verdict variable/value pairs from the `## HANDOFF` section of a
- * subagent output (containment starts at the LAST `## HANDOFF` marker of the
- * raw output per extractHandoff — for short outputs the whole text is scanned
- * from its first marker — and runs to end-of-text; chain steps are parsed
- * separately then merged — see
- * mergeParseOutcomes). Returns `{parsed: null}` when no valid verdict set can be
- * extracted: missing HANDOFF, no known-variable lines, or any known variable
- * carrying an out-of-whitelist (hedged/malformed) value.
- */
-export function parseHandoffVerdicts(output: string): VerdictParseOutcome {
-  // Guard 1 (mirrors skip.ts): only text at or after the literal `## HANDOFF`
-  // marker is scanned. extractHandoff() returns the WHOLE output for short
-  // reports (<6KB), so without this containment check a verdict line planted
-  // in a short report's body would parse. Fail closed on missing marker.
-  const extracted = extractHandoff(output ?? "").text;
-  // LAST marker, matching extractHandoff's own contract: a `## HANDOFF`
-  // heading planted earlier in the report body must not become the scan
-  // origin for the real handoff's verdict lines.
-  const markerIdx = extracted.lastIndexOf("## HANDOFF");
-  if (markerIdx < 0 || !extracted.includes("==")) {
-    return { parsed: null, lines: [] };
-  }
-  const handoff = extracted.slice(markerIdx);
-
-  const lines: string[] = [];
-  const verdicts: Record<string, string> = {};
-  let severity: VerdictSeverity | undefined;
-
-  for (const raw of handoff.split("\n")) {
-    const match = VAR_LINE_RE.exec(raw);
-    if (!match) continue;
-    const variable = match[1].trim().toLowerCase().replace(/\s+/g, "-");
-    if (!(KNOWN_VARIABLES as readonly string[]).includes(variable)) continue;
-
-    lines.push(raw.trim());
-    const value = match[2].trim().toLowerCase();
-
-    if (variable === "severity") {
-      if (!(SEVERITY_WHITELIST as readonly string[]).includes(value)) {
-        return { parsed: null, lines }; // hedged/malformed severity ⇒ D4 panel (D3)
-      }
-      // BUG-4: a second, DIFFERENT severity line is self-contradiction ⇒ null.
-      if (severity !== undefined && severity !== value) {
-        return { parsed: null, lines };
-      }
-      severity = value as VerdictSeverity;
-      continue;
-    }
-
-    if (!(VALUE_WHITELIST as readonly string[]).includes(value)) {
-      return { parsed: null, lines }; // fail-closed on any malformed known verdict
-    }
-    // BUG-4: contradictory duplicate of a variable we already captured ⇒ null
-    // (identical repeats are redundant, not conflicting — keep first).
-    if (verdicts[variable] !== undefined && verdicts[variable] !== value) {
-      return { parsed: null, lines };
-    }
-    verdicts[variable] = value;
-  }
-
-  if (Object.keys(verdicts).length === 0) {
-    return { parsed: null, lines };
-  }
-  // D3 fail-closed: a security rejection WITHOUT a parsable severity must
-  // never auto-route — it could be a critical hole looping silently. Missing
-  // or hedged severity ⇒ whole parse null ⇒ D4 manual panel.
-  if (verdicts["security-review"] === "rejected" && !severity) {
-    return { parsed: null, lines };
-  }
-  return { parsed: { verdicts, severity }, lines };
-}
-
-/**
- * Merge per-step parse outcomes across a chain (review fix W1): parsing the
- * JOINED outputs would keep only the LAST ## HANDOFF once the total exceeds
- * extractHandoff's whole-output threshold — silently dropping earlier chain
- * steps' verdicts and parking every realistic gate run. Each step parses
- * independently; merged maps conflict on any variable/severity disagreement
- * ⇒ null (preserves BUG-4 contradiction semantics).
- */
-export function mergeParseOutcomes(outcomes: VerdictParseOutcome[]): VerdictParseOutcome {
-  const lines = outcomes.flatMap((o) => o.lines);
-  const parsedResults = outcomes.map((o) => o.parsed);
-  if (parsedResults.every((p) => p === null)) {
-    return { parsed: null, lines };
-  }
-  // Any step failing to produce a trustworthy verdict ⇒ null overall:
-  // a gate needs EVERY chain step's verdict to route deterministically.
-  if (parsedResults.some((p) => p === null)) {
-    return { parsed: null, lines };
-  }
-  const verdicts: Record<string, string> = {};
-  let severity: VerdictSeverity | undefined;
-  for (const p of parsedResults as NonNullable<(typeof parsedResults)[number]>[]) {
-    for (const [variable, value] of Object.entries(p.verdicts)) {
-      if (verdicts[variable] !== undefined && verdicts[variable] !== value) {
-        return { parsed: null, lines }; // cross-step contradiction
-      }
-      verdicts[variable] = value;
-    }
-    if (p.severity !== undefined) {
-      if (severity !== undefined && severity !== p.severity) {
-        return { parsed: null, lines };
-      }
-      severity = p.severity;
-    }
-  }
-  if (Object.keys(verdicts).length === 0) return { parsed: null, lines };
-  if (verdicts["security-review"] === "rejected" && !severity) return { parsed: null, lines };
-  return { parsed: { verdicts, severity }, lines };
-}
-
-// --- Dual-channel artifact cross-check --------------------------------------
-
-/** Artifact tail window for STATUS-line confirmation (plan E2). */
+/** Artifact tail window for the disk feedback reader (plan E2). */
 export const ARTIFACT_TAIL_BYTES = 64 * 1024;
 
 function readTail(filePath: string): string | null {
@@ -282,9 +123,9 @@ function readTail(filePath: string): string | null {
 }
 
 /**
- * Resolve the on-disk artifacts expected to carry each verdict variable,
+ * Resolve the on-disk artifacts that carry a verdict variable's report,
  * relative to cwd. Gate artifacts are SPRINT-STAMPED (BUG-2 fix): a stale
- * report from a prior sprint can no longer satisfy this sprint's disk channel.
+ * report from a prior sprint can no longer feed this sprint's loop-back.
  * QA status rides the sprint-numbered artifact; architect review rides the
  * NEWEST sprint-stamped software-architect-artifact. All names come from
  * artifacts.ts — the single source shared with the task templates that tell
@@ -297,8 +138,8 @@ export function artifactForVariable(variable: string, cwd: string, sprintNumber?
     case "code-review":
       return [codeReviewArtifactPath(cwd, sprintNumber)];
     case "security-review":
-    // B5: the severity rides the security-review artifact — freeze/loop-back
-    // routing must be disk-confirmable against the same file.
+    // The severity rides the security-review artifact — the rejection's
+    // blockers are read from the same file.
     case "severity":
       return [securityReviewArtifactPath(cwd, sprintNumber)];
     case "docker-build":
@@ -311,51 +152,6 @@ export function artifactForVariable(variable: string, cwd: string, sprintNumber?
     default:
       return [];
   }
-}
-
-/**
- * Confirm one `variable == value` line against the variable's on-disk
- * artifact(s) within the ≤64KB tail (line-anchored — see B5/BUG-3 notes).
- */
-function artifactConfirmsLine(variable: string, value: string, cwd: string, sprintNumber?: number): boolean {
-  const escapedVar = variable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const escapedVal = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const needle = new RegExp(`^\\s*(?:#+\\s*)?${escapedVar}\\s*==\\s*${escapedVal}\\s*$`, "im");
-  const candidates = artifactForVariable(variable, cwd, sprintNumber);
-  return candidates.some((artifactPath) => {
-    const tail = readTail(artifactPath)?.toLowerCase();
-    return tail ? needle.test(tail) : false;
-  });
-}
-
-/**
- * Verify EVERY parsed verdict against its on-disk artifact (guard 3): the
- * artifact must exist AND contain the same `variable == value` verdict on its
- * OWN line within the ≤64KB tail (BUG-3 fix: line-anchored match — template
- * prose like `code-review == approved|rejected` can no longer confirm a
- * verdict). Any disagreement/absence ⇒ false (fail-closed).
- *
- * B5 fix: on a security rejection the severity is disk-verified too. It is
- * not part of `parsed.verdicts`, yet it alone decides freeze-vs-loop-back
- * (D3) — leaving it HANDOFF-only would let a planted/paraphrased HANDOFF
- * downgrade a critical rejection to low and silently bypass the security
- * freeze.
- */
-export function verifyArtifactVerdicts(parsed: ParsedVerdict, cwd: string, sprintNumber?: number): boolean {
-  for (const [variable, value] of Object.entries(parsed.verdicts)) {
-    if (!artifactConfirmsLine(variable, value, cwd, sprintNumber)) return false;
-  }
-  // Severity is disk-verified only on a security REJECTION (the only routing
-  // that consumes it — freeze vs loop-back). A stray severity line beside an
-  // approved review is noise, not a channel to confirm.
-  if (
-    parsed.severity !== undefined &&
-    parsed.verdicts["security-review"] === "rejected" &&
-    !artifactConfirmsLine("severity", parsed.severity, cwd, sprintNumber)
-  ) {
-    return false;
-  }
-  return true;
 }
 
 // --- Feedback extraction (loop engine fuel) ---------------------------------

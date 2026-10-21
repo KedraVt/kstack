@@ -459,7 +459,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
       }
 
       // Sprint loop engine (D1–D3): verdict routing needs the phase list and
-      // cwd; the pendingVerdict was stashed at delegation time.
+      // cwd; the phase verdict comes from the step records (ADR-1).
       const advanceOpts: AdvanceOptions = { phases: workflow.phases, cwd: ctx.cwd };
       const newState = advancePhase(
         advanceState,

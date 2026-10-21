@@ -14,7 +14,6 @@ import { resolvePhaseEnabled, coherenceProblems } from "../orchestrator/enabled.
 import { gateInventory, configureGates } from "../orchestrator/gates.ts";
 import { carryOverOpenQuestions } from "../orchestrator/templates.ts";
 import { beginStepWatch, endStepWatch, feedWatchEvent } from "../orchestrator/stuck.ts";
-import { parseHandoffVerdicts } from "../orchestrator/verdicts.ts";
 import { getWorkflow, getWorkflowIds } from "../orchestrator/workflows.ts";
 import { initOrchestrator } from "../orchestrator/index.ts";
 import { handleSprintPanel, manualAdvancePanel } from "../orchestrator/command.ts";
@@ -71,6 +70,7 @@ describe("verdict ownership", () => {
     const step = (id: string) => implement.steps!.find((s) => s.id === id)!;
     assert.deepEqual(verdictKeysFor("sprint", implement, step("backend")), []);
     assert.deepEqual(verdictKeysFor("sprint", implement, step("be-walk")), ["be-walk"]);
+    assert.deepEqual(verdictKeysFor("sprint", implement, step("fe-walk")), ["fe-walk"]);
     const devsecops = phaseOf("sprint", "devsecops-review");
     assert.deepEqual(verdictKeysFor("sprint", devsecops, devsecops.steps![1]), ["security-review", "severity"]);
   });
@@ -318,11 +318,6 @@ describe("verdict routing consistency", () => {
     assert.deepEqual(routeVerdict("investigate", "verify", { verdicts: { outcome: "persists" } }, { phase: verify }), { kind: "loop-back", target: "fix" });
     assert.deepEqual(routeVerdict("investigate", "verify", { verdicts: { outcome: "refuted" } }, { phase: verify }), { kind: "loop-back", target: "root-cause" });
     assert.equal(routeVerdict("investigate", "verify", { verdicts: { outcome: "verified" } }, { phase: verify }).kind, "advance");
-  });
-
-  test("the legacy HANDOFF parser knows the sprint lane keys", () => {
-    const out = parseHandoffVerdicts("## HANDOFF\nbe-walk == pass\nfe-walk == fail\n");
-    assert.deepEqual(out.parsed?.verdicts, { "be-walk": "pass", "fe-walk": "fail" });
   });
 });
 

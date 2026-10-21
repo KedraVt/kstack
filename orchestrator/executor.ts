@@ -1,15 +1,14 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { WorkflowState, WorkflowContext, GitContext, WorkflowPhase } from "./types.ts";
 import { getWorkflow } from "./workflows.ts";
-import { saveState, advancePhase, gateOptionalPhase, gateEntry, parkForUnreadableVerdict, loadActiveState, recordStepResult, attemptKey, returnTargetFor, type AdvanceOptions } from "./state.ts";
+import { saveState, advancePhase, gateOptionalPhase, gateEntry, loadActiveState, recordStepResult, type AdvanceOptions } from "./state.ts";
 import { resolvePhaseEnabled, stepSkippedByVars } from "./enabled.ts";
 import { probeCapabilities, capabilitiesUnprobed, missingRequires, missingPrefers } from "./capabilities.ts";
 import { buildPhaseInstructions, buildDeterministicPlan, mainContractFor, buildStepInstructions, buildStepTask, interpolateStepTask, buildRecordContract, sprintDodSuffix, retryContextBlock } from "./templates.ts";
 import { detectGitContext, type ExecFn } from "./git.ts";
 import { runSubagent, type SpawnRequest, type SpawnResult, resolveTimeoutMs } from "./spawn.ts";
-import { parseHandoffVerdicts, verifyArtifactVerdicts, mergeParseOutcomes } from "./verdicts.ts";
 import { computeNextSprintNumber } from "./sprint.ts";
-import { deterministicSubagents, skillsEnabled, optionalPhases, maxRunTokens, delegationBudgetMs, modelTierFor, verdictsEnabled, timeoutClassFor, manualGates, numberEnv } from "./config.ts";
+import { deterministicSubagents, skillsEnabled, optionalPhases, maxRunTokens, delegationBudgetMs, modelTierFor, timeoutClassFor, manualGates, numberEnv } from "./config.ts";
 import { ensureRun, recordDelegatedStep, writeRunReport, recordLiveness, recordTokens, totalTokensUsed } from "./telemetry.ts";
 import { extractHandoff } from "./handoff.ts";
 import { isRefutedStrategy, isValidatedStrategy } from "./skip.ts";
@@ -814,61 +813,6 @@ export async function executeCurrentPhase(
           );
         }
       }
-    }
-
-    // Sprint verdict parsing at DELEGATION time (plan B4 / D1): the raw
-    // subagent outputs are the source of truth — never the main model's
-    // paraphrase. Each CHAIN STEP parses independently (review W1: joining
-    // outputs first would drop every non-final HANDOFF once the total passed
-    // extractHandoff's whole-output threshold), then outcomes merge with
-    // contradiction ⇒ null. Dual-channel check against on-disk artifacts;
-    // any disagreement ⇒ parsed=null ⇒ D4 park (no attempt burned).
-    // S3: the verdict is PHASE-LEVEL and comes from the FINAL step — mid-step
-    // delegations never parse.
-    const isLastStep = !step || stepIndex === steps!.length - 1;
-    // INV-9: a phase with verdict-flagged steps gets its phase verdict ONLY
-    // from the flagged kstack-report records (advancePhase merges them) — the
-    // legacy HANDOFF stash stays for UNFLAGGED verdict phases (pre-migration).
-    const hasFlaggedSteps = (phase.steps ?? []).some((s) => s.signal?.kind === "verdict");
-    if (state.workflowId === "sprint" && phase.loopBackTo && !hasFlaggedSteps && verdictsEnabled() && isLastStep) {
-      const outcome = mergeParseOutcomes(
-        // B1 fix: parse the UNCAPPED rawOutput. `output` is capOutput()'d at
-        // 50KB — and the ## HANDOFF section (the only channel the parser
-        // reads) trails the report, so any subagent producing >50KB of output
-        // would lose its verdict lines to the truncation and park the gate
-        // on every realistic run. rawOutput exists precisely for this.
-        results.map((r) => parseHandoffVerdicts(r.result.rawOutput || r.result.output || "")),
-      );
-      let parsed = outcome.parsed;
-      // D4 park cause: capture whether the merge produced a verdict BEFORE the
-      // artifact check can null it — a non-null start means the park is a
-      // HANDOFF/disk disagreement, not an agent that emitted nothing.
-      const parkCause = parsed ? "artifact-mismatch" : "no-verdict";
-      if (parsed && !verifyArtifactVerdicts(parsed, ctx.cwd, state.sprintNumber)) {
-        parsed = null; // HANDOFF says X, artifact disagrees ⇒ fail closed
-      }
-      if (!parsed) {
-        const parkedState = parkForUnreadableVerdict(
-          { ...state, pendingVerdict: { phaseId: phase.id, parsed: null, excerpt: outcome.lines.join("\n") } },
-          phase.id,
-          parkCause,
-        );
-        saveState(pi, parkedState);
-        setKstackStatus(ctx, parkedState, workflow);
-        notify(
-          `kstack sprint: no trustworthy verdict found for "${phase.id}" — pipeline parked for manual review (/kstack next). No retry budget consumed.`,
-          "warning",
-        );
-        return;
-      }
-      const withVerdict = { ...state, pendingVerdict: { phaseId: phase.id, parsed, excerpt: outcome.lines.join("\n") } };
-      saveState(pi, withVerdict);
-      state = withVerdict;
-      // S3 ledger: verdict resolution lands verbatim (INV-L2). The attempt
-      // number is THIS gate's own budget for its loop target (pair key).
-      const chargedTarget = returnTargetFor(phase, parsed) ?? phase.onComplete;
-      const gateAttempt = chargedTarget ? (state.attempts?.[attemptKey(phase.id, chargedTarget)] ?? 0) + 1 : 1;
-      appendLedger(ctx.cwd, state, { kind: "verdict", phaseId: phase.id, stepId: step?.id, attempt: gateAttempt, payload: { verdicts: { ...parsed.verdicts } } }, (m) => notify(m, "warning"));
     }
 
     // STEP 0 telemetry: persist per-step measurements (persistence only —

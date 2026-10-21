@@ -12,7 +12,7 @@ import { createState, advancePhase, routeVerdict, parkForUnreadableVerdict, forc
 import { launchPhase } from "../orchestrator/executor.ts";
 import { decisionBlockedByInFlightChain, handleSprintPanel } from "../orchestrator/command.ts";
 import { getAllWorkflows, getWorkflow } from "../orchestrator/workflows.ts";
-import { parseHandoffVerdicts, verifyArtifactVerdicts, extractBlockers, buildRetryFeedback, mergeParseOutcomes, KNOWN_VARIABLES } from "../orchestrator/verdicts.ts";
+import { extractBlockers, buildRetryFeedback, EXPECTATIONS } from "../orchestrator/verdicts.ts";
 import { computeNextSprintNumber, pad2, sprintArchiveDir, archivedSprintDirs } from "../orchestrator/sprint.ts";
 import { buildPhaseInstructions, buildDeterministicPlan, retryContextBlock, conditionalSkillIds, glossaryTable, MASTER_DOD } from "../orchestrator/templates.ts";
 import { modelTierFor, sprintMaxAttempts, sprintArchMaxAttempts, timeoutClassFor } from "../orchestrator/config.ts";
@@ -121,207 +121,35 @@ describe("sprint workflow registration", () => {
 
 });
 
-// --- Verdict parsing (D1/D4 fail-closed) --------------------------------------
+// --- Verdict vocabulary (expectation map) ---------------------------------------
 
-describe("verdict parsing (D1/D4 fail-closed)", () => {
-  const GREEN_QA = [
-    "## REPORT",
-    "Executed acceptance criteria against branch feature/x.",
-    "",
-    "## HANDOFF",
-    "VERIFIED FACTS:",
-    "- suite green @ qa-artifact_01.md",
-    "status == green",
-    "DECISIONS: none",
-    "OPEN QUESTIONS: none",
-    "DO NOT REDO: implementation",
-  ].join("\n");
-
-  test("parses whitelisted values inside a HANDOFF", () => {
-    const out = parseHandoffVerdicts(GREEN_QA);
-    assert.ok(out.parsed);
-    assert.equal(out.parsed.verdicts["status"], "green");
-    assert.deepEqual(out.lines, ["status == green"]);
-  });
-
-  test("case-normalizes values and variable names", () => {
-    const out = parseHandoffVerdicts(GREEN_QA.replace("status == green", "STATUS == GREEN"));
-    assert.ok(out.parsed);
-    assert.equal(out.parsed.verdicts["status"], "green");
-  });
-
-  test("verdict line OUTSIDE ## HANDOFF is rejected even in short reports (guard 1)", () => {
-    // Short output (<6KB): extractHandoff returns the whole text — containment
-    // must still hold. This is the planted-line attack surface.
-    assert.equal(parseHandoffVerdicts("All good!\nstatus == green\n(no handoff section)").parsed, null);
-  });
-
-  test("missing HANDOFF marker or empty output ⇒ null", () => {
-    assert.equal(parseHandoffVerdicts("plain report with status == red").parsed, null);
-    assert.equal(parseHandoffVerdicts("").parsed, null);
-    assert.equal(parseHandoffVerdicts(undefined as any).parsed, null);
-  });
-
-  test("out-of-whitelist value on a known variable fails the WHOLE parse", () => {
-    const out = parseHandoffVerdicts(GREEN_QA.replace("status == green", "status == mostly-green"));
-    assert.equal(out.parsed, null);
-    assert.ok(out.lines.length > 0, "failing lines kept for the D4 panel");
-  });
-
-  test("trailing prose after the value fails closed (ambiguity ⇒ null)", () => {
-    assert.equal(parseHandoffVerdicts(GREEN_QA.replace("status == green", "status == green — all pass")).parsed, null);
-  });
-
-  test("hedged severity fails closed; clean severity parses (D3)", () => {
-    const base = "## HANDOFF\nsecurity-review == rejected\nseverity == critical";
-    assert.ok(parseHandoffVerdicts(base).parsed?.severity === "critical");
-    assert.ok(parseHandoffVerdicts(base.replace("critical", "low")).parsed?.severity === "low");
-    assert.equal(parseHandoffVerdicts(base.replace("critical", "critical?")).parsed, null);
-    assert.equal(parseHandoffVerdicts(base.replace("critical", "medium-high")).parsed, null);
-    // MISSING severity on a security rejection ⇒ whole parse null ⇒ D4 panel.
-    // Never auto-route: it could be a critical hole looping silently.
-    assert.equal(parseHandoffVerdicts(base.replace("severity == critical", "")).parsed, null, "missing severity fails closed — human decides via D4 panel");
-  });
-
-  test("contradictory duplicate verdict lines ⇒ null, last-wins is never trusted (BUG-4)", () => {
-    const base = "## HANDOFF\ncode-review == approved";
-    assert.ok(parseHandoffVerdicts(`${base}\ncode-review == approved`).parsed, "identical repeat is redundant, not conflicting");
-    assert.equal(parseHandoffVerdicts(`${base}\ncode-review == rejected`).parsed, null);
-    assert.equal(parseHandoffVerdicts("## HANDOFF\nseverity == high\nseverity == low").parsed, null);
-  });
-
-  test("unknown x == y lines are ignored as prose", () => {
-    const out = parseHandoffVerdicts("## HANDOFF\ncode-review == approved\ncoverage == high");
-    assert.ok(out.parsed);
-    assert.deepEqual(Object.keys(out.parsed.verdicts), ["code-review"]);
-  });
-
-  test("chain steps parse INDEPENDENTLY then merge (review W1)", () => {
-    // Realistic sizes: each step >6KB, so joined-output parsing would keep only
-    // the LAST HANDOFF and lose earlier chain steps' verdicts.
-    const big = "x".repeat(7 * 1024);
-    const stepA = `${big}\n## HANDOFF\nVERIFIED FACTS:\naudited diff\ncode-review == approved`;
-    const stepB = `${big}\n## HANDOFF\nVERIFIED FACTS:\nno findings\nsecurity-review == approved\nseverity == low`;
-    const merged = mergeParseOutcomes([parseHandoffVerdicts(stepA), parseHandoffVerdicts(stepB)]);
-    assert.ok(merged.parsed, "both chain steps' verdicts survive the merge");
-    assert.equal(merged.parsed?.verdicts["code-review"], "approved");
-    assert.equal(merged.parsed?.verdicts["security-review"], "approved");
-
-    const conflict = mergeParseOutcomes([
-      parseHandoffVerdicts("## HANDOFF\ncode-review == approved"),
-      parseHandoffVerdicts("## HANDOFF\ncode-review == rejected"),
-    ]);
-    assert.equal(conflict.parsed, null, "cross-step contradiction fails closed");
-
-    const partial = mergeParseOutcomes([
-      parseHandoffVerdicts("## HANDOFF\ncode-review == approved"),
-      parseHandoffVerdicts("## HANDOFF\nno verdict lines here"),
-    ]);
-    assert.equal(partial.parsed, null, "a step without a trustworthy verdict nulls the whole gate");
-  });
-
-  test("HANDOFF with no known variables ⇒ null", () => {
-    assert.equal(parseHandoffVerdicts("## HANDOFF\ncoverage == high").parsed, null);
-  });
-
-  test("KNOWN_VARIABLES covers every routing variable the templates instruct agents to emit", () => {
-    for (const v of ["status", "code-review", "security-review", "severity", "docker-build", "docker-security", "software-architect-review"]) {
-      assert.ok(KNOWN_VARIABLES.includes(v as any), `missing known variable ${v}`);
-    }
-  });
-});
-
-// --- Dual-channel artifact verification (guard 3) ------------------------------
-
-describe("dual-channel artifact verification (guard 3)", () => {
-  function setup(files: Record<string, string>): string {
-    const tmp = tmpDir("kstack-verdict-");
-    for (const [file, content] of Object.entries(files)) {
-      fs.mkdirSync(path.dirname(path.join(tmp, file)), { recursive: true });
-      writeFileSync(path.join(tmp, file), content);
-    }
-    return tmp;
-  }
-
-  test("artifact exists + contains the same line ⇒ confirmed", () => {
-    const cwd = setup({ "qa-artifact_01.md": "# QA report\n...\nstatus == green\n" });
-    try {
-      assert.equal(verifyArtifactVerdicts({ verdicts: { status: "green" } }, cwd, 1), true);
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  });
-
-  test("artifact missing / disagreeing value ⇒ fail-closed", () => {
-    const cwd = setup({});
-    try {
-      assert.equal(verifyArtifactVerdicts({ verdicts: { status: "green" } }, cwd, 1), false);
-      writeFileSync(path.join(cwd, "qa-artifact_01.md"), "status == red\n");
-      assert.equal(verifyArtifactVerdicts({ verdicts: { status: "green" } }, cwd, 1), false, "disk says red, handoff said green");
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  });
-
-  test("devsecops artifacts resolve under devsecops/, sprint-stamped (BUG-2)", () => {
-    const cwd = setup({ "devsecops/security-review-artifact_01.md": "severity == high\nsecurity-review == rejected\n" });
-    try {
-      assert.equal(verifyArtifactVerdicts({ verdicts: { "security-review": "rejected" } }, cwd, 1), true, "stamped artifact confirms");
-      // BUG-2 regression: an UNSTAMPED leftover from a prior sprint must NOT satisfy this sprint's disk channel
-      const stale = setup({ "devsecops/security-review-artifact.md": "severity == high\nsecurity-review == rejected\n" });
-      try {
-        assert.equal(verifyArtifactVerdicts({ verdicts: { "security-review": "rejected" } }, stale, 1), false, "unstamped stale artifact fails");
-      } finally {
-        rmSync(stale, { recursive: true, force: true });
-      }
-      assert.equal(verifyArtifactVerdicts({ verdicts: { "code-review": "approved" } }, cwd, 1), false, "missing artifact fails");
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  });
-
-  test("software-architect-review resolves to the NEWEST sprint-stamped artifact (W5)", () => {
-    const cwd = setup({
-      "software-architect-artifact_03_1.md": "old\nsoftware-architect-review == rejected\n",
-      "software-architect-artifact_03_2.md": "newer\nsoftware-architect-review == approved\n",
-      "software-architect-artifact_03_10.md": "newest\nsoftware-architect-review == rejected\n",
-      "software-architect-artifact_02_9.md": "other sprint\nsoftware-architect-review == approved\n",
-    });
-    try {
-      // numeric tail sort: _03_10 is newer than _03_2; other sprints ignored
-      assert.equal(verifyArtifactVerdicts({ verdicts: { "software-architect-review": "rejected" } }, cwd, 3), true);
-      assert.equal(verifyArtifactVerdicts({ verdicts: { "software-architect-review": "approved" } }, cwd, 3), false,
-        "newest is _03_10 (rejected) — not _03_2, not another sprint's _02_9");
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  });
-
-  test("only the artifact TAIL window matters (64KB)", () => {
-    const cwd = setup({});
-    try {
-      const padding = "x".repeat(70 * 1024);
-      writeFileSync(path.join(cwd, "qa-artifact_02.md"), `status == green\n${padding}`);
-      assert.equal(verifyArtifactVerdicts({ verdicts: { status: "green" } }, cwd, 2), false, "line outside the tail window does not count");
-      writeFileSync(path.join(cwd, "qa-artifact_03.md"), `${padding}\nstatus == orange`);
-      assert.equal(verifyArtifactVerdicts({ verdicts: { status: "orange" } }, cwd, 3), true);
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  });
-
-  test("template prose cannot confirm a verdict — line-anchored needle (BUG-3)", () => {
-    const cwd = setup({
-      // Unresolved instruction text left in the artifact by a lazy reviewer:
-      "devsecops/code-review-artifact_04.md": "Write devsecops/code-review-artifact.md containing the line 'code-review == approved|rejected'.",
-    });
-    try {
-      assert.equal(verifyArtifactVerdicts({ verdicts: { "code-review": "approved" } }, cwd, 4), false, "'approved|rejected' template line is not an approval");
-      // A real verdict line on its own line DOES confirm:
-      writeFileSync(path.join(cwd, "devsecops/code-review-artifact_04.md"), "findings: none\ncode-review == approved\n");
-      assert.equal(verifyArtifactVerdicts({ verdicts: { "code-review": "approved" } }, cwd, 4), true);
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
+describe("verdict vocabulary (expectation map)", () => {
+  test("the expectation map covers every routing variable the templates instruct agents to emit", () => {
+    // The record channel validates every emitted var against the expectation
+    // map (ADR-7): a variable the templates ask for but the map does not know
+    // parks the gate as a foreign verdict.
+    const known = new Set(
+      Object.values(EXPECTATIONS)
+        .flatMap((phases) => Object.values(phases))
+        .flatMap((vars) => Object.keys(vars))
+        .map((k) => k.replace(/\?$/, "")),
+    );
+    for (const v of [
+      "status",
+      "code-review",
+      "security-review",
+      "severity",
+      "docker-build",
+      "docker-security",
+      "software-architect-review",
+      "outcome",
+      "walkthrough",
+      "be-walk",
+      "fe-walk",
+      "ui",
+      "pipeline",
+    ]) {
+      assert.ok(known.has(v), `missing expectation entry for ${v}`);
     }
   });
 });
@@ -386,9 +214,7 @@ describe("feedback extraction (loop fuel)", () => {
     const empty = tmpDir("kstack-fb-");
     try {
       assert.equal(buildRetryFeedback({ verdicts: { status: "red" } }, "qa-verdict", empty, 9), "");
-      const parsed = parseHandoffVerdicts("## HANDOFF\nsecurity-review == rejected\nseverity == medium");
-      assert.ok(parsed.parsed);
-      const fb = buildRetryFeedback(parsed.parsed!, "devsecops-review", empty, undefined);
+      const fb = buildRetryFeedback({ verdicts: { "security-review": "rejected" }, severity: "medium" }, "devsecops-review", empty, undefined);
       assert.equal(fb, ""); // no artifacts on disk → empty payload, never throws
     } finally {
       rmSync(empty, { recursive: true, force: true });
@@ -1135,26 +961,6 @@ describe("model tiers (E4/D10, inert by default)", () => {
 // --- Code-review pass-1 fixes (B1 / B2 / B3) ---------------------------------
 
 describe("code-review pass-1 fixes", () => {
-  test("B1: verdicts must be parsed from the UNCAPPED rawOutput, not the 50KB-capped output", () => {
-    // Mirrors spawn.ts: output = capOutput(rawOutput) — truncated at 50KB with
-    // a truncation marker appended. The ## HANDOFF trails the report, so the
-    // capped channel amputates exactly the lines the parser needs.
-    const handoff = [
-      "## HANDOFF",
-      "VERIFIED FACTS: implementation complete @ src/app.ts:1",
-      "DECISIONS: none",
-      "status == green",
-    ].join("\n");
-    const rawOutput = `${"x".repeat(60_000)}\n\n## REPORT\nfull report body\n\n${handoff}\n`;
-    const output = `${rawOutput.slice(0, 50 * 1024)}\n…(truncated)`;
-
-    assert.ok(rawOutput.length > 50 * 1024, "precondition: raw output exceeds the cap");
-    assert.ok(!output.includes("## HANDOFF"), "precondition: capped channel lost the HANDOFF");
-
-    assert.equal(parseHandoffVerdicts(rawOutput).parsed?.verdicts["status"], "green");
-    assert.equal(parseHandoffVerdicts(output).parsed, null, "the capped channel must NOT parse — the executor must feed rawOutput");
-  });
-
   test("B2: retryTimeoutMs scales the per-phase class timeout, not the global default", () => {
     const saved = process.env.KSTACK_PI_SUBAGENT_TIMEOUT;
     try {
@@ -1208,27 +1014,6 @@ describe("code-review pass-1 fixes", () => {
     assert.equal(shouldReopenFullChain(false, "REFUTED: x"), false, "only a collapsed chain reopens");
     assert.equal(shouldReopenFullChain(true, undefined), false);
     assert.equal(shouldReopenFullChain(true, ""), false);
-  });
-
-  test("B5: severity is disk-verified (freeze/loop-back routing cannot rest on the HANDOFF alone)", () => {
-    const dir = tmpDir("kstack-b5-");
-    try {
-      fs.mkdirSync(path.join(dir, "devsecops"), { recursive: true });
-      writeFileSync(
-        path.join(dir, "devsecops", "security-review-artifact_03.md"),
-        "# Security Review\n\nsecurity-review == rejected\n\nseverity == high\n",
-      );
-      const rejected: any = { verdicts: { "security-review": "rejected" } };
-
-      // HANDOFF and disk agree on high ⇒ verified.
-      assert.equal(verifyArtifactVerdicts({ ...rejected, severity: "high" } as any, dir, 3), true);
-      // Severity missing on disk (only in the HANDOFF) ⇒ fail closed.
-      assert.equal(verifyArtifactVerdicts({ ...rejected, severity: "low" } as any, dir, 3), false, "downgrade without disk confirmation must fail");
-      // No severity claimed ⇒ severity check simply doesn't apply.
-      assert.equal(verifyArtifactVerdicts(rejected, dir, 3), true);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 
   test("B6: KSTACK_PI_VERDICTS=off parks verdict-bearing phases instead of silently advancing", () => {

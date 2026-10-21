@@ -24,6 +24,8 @@ verdict parsing retires post-migration; `isRefutedStrategy` deleted;
 record↔evidence cross-check preserves the dual-channel guarantee. The
 protocol is transport — routing stays deterministic and unchanged.
 
+HANDOFF verdict parsing retired (Phase C, 2026-10-21).
+
 ## ADR-2 — Verdict authorship is delegated-step only
 
 **Decision.** `verdict?: boolean` on `WorkflowStep`, legal only on
