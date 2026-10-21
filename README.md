@@ -6,6 +6,8 @@ One extension, two layers:
 - **65 native browser tools** — headless Chromium, ~100ms/command (chain batches N commands into one call)
 - **Workflow orchestrator** — `/kstack` command that guides you through develop, investigate, QA, ship, and review pipelines
 
+> **Born from [gstack](https://github.com/garrytan/gstack).** The headless-browser runtime in [`browser/`](browser/) is vendored from gstack (MIT, © 2026 Garry Tan) and renamed; see [Credits & attribution](#credits--attribution).
+
 ## What's new (feat/skill-ingestion branch)
 
 - **Deterministic subagents** — specialists (scout/planner/worker/reviewer) are spawned by the orchestrator itself in isolated `pi` processes; delegation no longer depends on the model's discretion. The `subagent` tool remains for ad-hoc use.
@@ -191,12 +193,13 @@ env `KSTACK_*`, skills `kstack-*`). Install it as a separate extension dir —
 State lives in two places, both renamed: `.kstack/` inside each target repo
 (`plans/`, `sprints/`, `runs/`) and `~/.kstack` for session-level data
 (sessions, analytics, learnings; overridable via `KSTACK_HOME`). **No data
-migration ships yet** — `~/.kstack` starts clean, the old `~/.gstack` and
-`.gstack/` dirs are left untouched, and persisted pre-rename workflow sessions
-simply don't resume (the state entry type changed). A migration script
-(`kstack-migrate`) is planned for a later sprint. A legacy
-`<!-- gstack:begin -->` managed block in a repo's AGENTS.md is upgraded in
-place by `/kstack init`.
+migration ships yet** — `~/.kstack` starts clean, and the old `~/.gstack` and
+`.gstack/` dirs are moved aside to `~/.kstack/legacy/gstack-home` and
+`<repo>/.kstack/legacy/gstack-repo-state` (not deleted), while persisted
+pre-rename workflow sessions simply don't resume (the state entry type
+changed). A migration script (`kstack-migrate`) is planned for a later
+sprint. A legacy `<!-- gstack:begin -->` managed block in a repo's AGENTS.md
+is upgraded in place by `/kstack init`.
 
 ## Architecture
 
@@ -300,6 +303,22 @@ Deferred ideas live in `TODOS.md` (absorbed the old `FUTURE_UPDATES.md`).
 ## License
 
 MIT
+
+---
+
+## Credits & attribution
+
+kstack is a fork and rebrand of **[gstack](https://github.com/garrytan/gstack)** by [Garry Tan](https://github.com/garrytan) (MIT).
+
+| What | Origin | State here |
+|---|---|---|
+| Headless-browser runtime (`browse/`) | [garrytan/gstack](https://github.com/garrytan/gstack) `browse/` (commit `43d6ed2`, v1.91.165.0) | Vendored into [`browser/`](browser/) with the gstack → kstack rename applied (`.gstack` → `.kstack`, `GSTACK_*` → `KSTACK_*`). Upstream layout is preserved so import paths are unchanged. The upstream MIT license is reproduced verbatim in [`browser/LICENSE`](browser/LICENSE) and the provenance in [`browser/NOTICE.md`](browser/NOTICE.md). |
+| Browser tools (65 `kstack_*` commands) | gstack `browse/src/commands.ts` | Re-exposed as native pi tools; the command set is unchanged. |
+| Workflow orchestrator (`/kstack`) | kstack | Original work: the deterministic multi-phase orchestrator, sprint workflow, verdict routing, park model, and skill catalog were written for this project. |
+
+gstack remains the upstream of the browser layer only: the vendored tree is maintained in this repo and is no longer synced from upstream. Its license and copyright notice are preserved, as MIT requires.
+
+Earlier releases were published as `gstack-pi`; v3.0.0 is the first release under the `kstack` name.
 
 ---
 
