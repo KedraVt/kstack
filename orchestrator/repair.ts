@@ -159,6 +159,7 @@ export function stepSpawnEnv(
   cwd: string,
   extra?: Record<string, string>,
 ): Record<string, string> {
+  const owned = verdictKeysFor(workflowId, phase, step);
   return {
     KSTACK_WORKFLOW: workflowId,
     KSTACK_RUN_ID: runId ?? "",
@@ -168,7 +169,16 @@ export function stepSpawnEnv(
     // The project that owns .kstack/ — the record must land where the
     // orchestrator reads it, whatever cwd the child ends up in.
     KSTACK_PROJECT_ROOT: projectRootFor(cwd),
-    KSTACK_VERDICT_KEYS: verdictKeysFor(workflowId, phase, step).join(" "),
+    KSTACK_VERDICT_KEYS: owned.join(" "),
+    // The accepted values of every key this step OWNS ("key=v1,v2 …"):
+    // kstack-report validates a verdict against this map at WRITE time, so
+    // an off-map value fails the step now instead of parking the phase later.
+    KSTACK_VERDICT_VALUES: owned
+      .map((key) => `${key}=${acceptedVerdictValues(workflowId, phase, key, step.signal?.value).join(",")}`)
+      .join(" "),
+    // The step's declared signal verdict — a record without it is
+    // signal-missing and the phase re-issues the step.
+    KSTACK_VERDICT_REQUIRED: step.signal?.kind === "verdict" ? step.signal.value : "",
     ...(extra ?? {}),
   };
 }

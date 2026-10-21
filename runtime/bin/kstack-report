@@ -20,9 +20,13 @@
 # An agent that cd'd elsewhere would otherwise drop its record outside the
 # orchestrator's .kstack/ — the step would park as signal-missing.
 # Records are UNTRUSTED input: routing re-validates verdict values against
-# the (workflow, phase) expectation map before acting on them.
+# the (workflow, phase) expectation map before acting on them. When the
+# orchestrator publishes that map to the step (KSTACK_VERDICT_VALUES), the
+# CLI validates the values at WRITE time: an off-map value, a missing
+# declared verdict or a security rejection without a severity is refused
+# (nothing is written, exit 1) so the step learns of the mistake now.
 #
-# Exit codes: 0 written · 1 usage error · 2 write failure.
+# Exit codes: 0 written · 1 usage error (incl. a refused verdict) · 2 write failure.
 
 set -uo pipefail
 
@@ -99,6 +103,74 @@ if [ ${#VERDICTS[@]} -gt 0 ]; then
     KEPT+=("$key==$val")
   done
   VERDICTS=("${KEPT[@]+"${KEPT[@]}"}")
+fi
+
+# Verdict VALUE validation (write time). The orchestrator publishes the
+# accepted values of the keys this step OWNS as "key=v1,v2 key2=v1,v2"
+# (KSTACK_VERDICT_VALUES). A verdict outside its list is a mistake the step
+# must learn NOW — the record is NOT written and the CLI exits 1. Without the
+# env (a main-session step has no per-step env) the behaviour is unchanged.
+if [ -n "${KSTACK_VERDICT_VALUES:-}" ]; then
+  # The accepted values of one key (empty when the key has no map entry).
+  accepted_for() {
+    local want="$1" entry
+    for entry in ${KSTACK_VERDICT_VALUES:-}; do
+      case "$entry" in
+        "$want"=*) printf '%s' "${entry#*=}"; return 0 ;;
+      esac
+    done
+    return 1
+  }
+
+  # Is a value inside a comma separated list?
+  list_has() {
+    local list="$1" want="$2" item
+    local IFS=','
+    for item in $list; do
+      if [ "$item" = "$want" ]; then return 0; fi
+    done
+    return 1
+  }
+
+  # 1. An owned verdict carrying a value outside its accepted list.
+  for pair in "${KEPT[@]+"${KEPT[@]}"}"; do
+    vkey="${pair%%==*}"
+    vval="${pair#*==}"
+    allowed="$(accepted_for "$vkey")"
+    [ -n "$allowed" ] || continue
+    if ! list_has "$allowed" "$vval"; then
+      echo "kstack-report: --verdict '$vkey==$vval' is not accepted for '$vkey' (accepted: ${allowed//,/ | }) — nothing was written" >&2
+      exit 1
+    fi
+  done
+
+  # 2. The step's declared signal verdict is mandatory: a record without it
+  #    is signal-missing and the phase re-issues the step.
+  if [ -n "${KSTACK_VERDICT_REQUIRED:-}" ]; then
+    have_required=0
+    for pair in "${KEPT[@]+"${KEPT[@]}"}"; do
+      if [ "${pair%%==*}" = "$KSTACK_VERDICT_REQUIRED" ]; then have_required=1; break; fi
+    done
+    if [ "$have_required" -eq 0 ]; then
+      echo "kstack-report: this step's record MUST carry --verdict '$KSTACK_VERDICT_REQUIRED==<value>' — it is missing — nothing was written" >&2
+      exit 1
+    fi
+  fi
+
+  # 3. D3: a security rejection without a severity is not a verdict — the
+  #    phase cannot route it, so the record is refused instead of parked.
+  sec_value=""
+  sev_value=""
+  for pair in "${KEPT[@]+"${KEPT[@]}"}"; do
+    case "$pair" in
+      security-review==*) sec_value="${pair#*==}" ;;
+      severity==*) sev_value="${pair#*==}" ;;
+    esac
+  done
+  if [ "$sec_value" = "rejected" ] && [ -z "$sev_value" ]; then
+    echo "kstack-report: --verdict 'security-review==rejected' needs a 'severity' verdict in the SAME call — nothing was written" >&2
+    exit 1
+  fi
 fi
 
 # Sanitize path segments — record/ledger filenames must never escape
