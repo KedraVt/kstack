@@ -102,7 +102,7 @@ describe("per-run operational files die with the run", () => {
         ...createState("sprint", "g"),
         status: "paused",
         verdictPark: "qa-verdict",
-        pausedReason: "verdict-unreadable:qa-verdict:artifact-mismatch",
+        pausedReason: "verdict-unreadable:qa-verdict:unroutable",
       };
       appendLedger(cwd, state, { kind: "step", phaseId: "qa-verdict", stepId: "browse", payload: { summary: "looked" } });
       writeRecord(cwd, state.runId, "qa-verdict", "browse");

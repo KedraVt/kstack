@@ -12,7 +12,7 @@ import { createState, advancePhase, routeVerdict, parkForUnreadableVerdict, forc
 import { launchPhase } from "../orchestrator/executor.ts";
 import { decisionBlockedByInFlightChain, handleSprintPanel } from "../orchestrator/command.ts";
 import { getAllWorkflows, getWorkflow } from "../orchestrator/workflows.ts";
-import { extractBlockers, buildRetryFeedback, EXPECTATIONS } from "../orchestrator/verdicts.ts";
+import { extractBlockers, buildRetryFeedback, EXPECTATIONS, verdictGateProblems } from "../orchestrator/verdicts.ts";
 import { computeNextSprintNumber, pad2, sprintArchiveDir, archivedSprintDirs } from "../orchestrator/sprint.ts";
 import { buildPhaseInstructions, buildDeterministicPlan, retryContextBlock, conditionalSkillIds, glossaryTable, MASTER_DOD } from "../orchestrator/templates.ts";
 import { modelTierFor, sprintMaxAttempts, sprintArchMaxAttempts, timeoutClassFor } from "../orchestrator/config.ts";
@@ -489,7 +489,7 @@ describe("D4 park helpers", () => {
     assert.equal(parked.status, "paused");
     assert.equal(parked.verdictPark, "devsecops-review");
     assert.equal(parked.pausedReason, "verdict-unreadable:devsecops-review:no-verdict");
-    const reparked = parkForUnreadableVerdict(parked, "devsecops-review", "artifact-mismatch");
+    const reparked = parkForUnreadableVerdict(parked, "devsecops-review", "unroutable");
     assert.equal(reparked, parked, "idempotent — a second park keeps the original cause");
   });
 
@@ -556,7 +556,7 @@ describe("D4 park helpers", () => {
 
 describe("D4 park cause distinction", () => {
   test("the three causes encode distinctly in pausedReason", () => {
-    for (const cause of ["no-verdict", "artifact-mismatch", "unroutable"] as const) {
+    for (const cause of ["no-verdict", "unroutable", "no-expectation"] as const) {
       const parked = parkForUnreadableVerdict(sprintState(8), "qa-browsing", cause);
       assert.equal(parked.pausedReason, `verdict-unreadable:qa-browsing:${cause}`);
     }
@@ -597,7 +597,6 @@ describe("D4 park cause distinction", () => {
 
     for (const [cause, pattern] of [
       ["no-verdict", /no trustworthy verdict/i],
-      ["artifact-mismatch", /on-disk artifact/i],
       ["unroutable", /expectation map/i],
     ] as const) {
       prompts.length = 0;
@@ -1323,17 +1322,18 @@ describe("in-flight decision guards (2026-09 fix 4)", () => {
   test("every mutating sprint-panel branch is guarded (F4)", () => {
     // Static wiring check: the mutating/launching choices of handleSprintPanel
     // (freeze: reviewer fix + own fix; D4 continue + return + repair; gate
-    // accept + re-run; kill-switch accept + re-run; pause resume/re-issue)
-    // must consult panelGuard before touching state. A refused decision
-    // still returns true — the user stays parked, never falling through to
-    // the generic resume path.
+    // accept + re-run; kill-switch accept + re-run; pause resume/re-issue;
+    // S5a/TASK_17: provenance accept + provenance re-run) must consult
+    // panelGuard before touching state. A refused decision still returns
+    // true — the user stays parked, never falling through to the generic
+    // resume path.
     const source = readFileSync(new URL("../orchestrator/command.ts", import.meta.url), "utf-8");
     const guardCount = (source.match(/if \(panelGuard\(ctx, state\)\) return true;/g) ?? []).length;
-    assert.equal(guardCount, 10, "all 10 mutating park-panel branches must be guarded");
+    assert.equal(guardCount, 12, "all 12 mutating park-panel branches must be guarded");
   });
 
   test("sprint panel refuses a mutating decision while the chain runs, allows it after (F4)", async () => {
-    const parked = parkForUnreadableVerdict(sprintState(8), "qa-verdict", "artifact-mismatch");
+    const parked = parkForUnreadableVerdict(sprintState(8), "qa-verdict", "unroutable");
 
     const notified: string[] = [];
     const saved: unknown[] = [];
@@ -1409,7 +1409,7 @@ describe("in-flight decision guards (2026-09 fix 4)", () => {
 
       // "Return phase with context" — a verdict-park resolution writes
       // kind:"gate" decision:"return" addressed at the PARKED phase.
-      const parked = parkForUnreadableVerdict(sprintState(8), "devsecops-review", "artifact-mismatch");
+      const parked = parkForUnreadableVerdict(sprintState(8), "devsecops-review", "unroutable");
       const p1 = mkPanel("Return phase with context");
       assert.equal(await handleSprintPanel(parked, p1.cmdCtx, p1.pi), true);
       let entries = readLedger(cwd, parked);
@@ -1421,7 +1421,7 @@ describe("in-flight decision guards (2026-09 fix 4)", () => {
       // decision:"abort" (covers all 8 abort call sites). The audit lands in
       // the SHARED legacy lane: a per-run ledger file dies with the run (see
       // test/run-cleanup.test.ts), the shared lane is the one that survives.
-      const parked2 = { ...parkForUnreadableVerdict(sprintState(8), "qa-verdict", "artifact-mismatch"), runId: undefined };
+      const parked2 = { ...parkForUnreadableVerdict(sprintState(8), "qa-verdict", "unroutable"), runId: undefined };
       const p2 = mkPanel("Abort workflow", true);
       assert.equal(await handleSprintPanel(parked2, p2.cmdCtx, p2.pi), true);
       entries = readLedger(cwd, parked2);
@@ -1460,4 +1460,83 @@ describe("in-flight decision guards (2026-09 fix 4)", () => {
 
 // close the outer "buildResumeContext / activeConstraintLines (Q4)" describe
 // (the input-router describe above is nested inside it, matching the original layout)
+});
+
+// --- TASK_11 — the S4 verdict residue is gone (ADR-33, ADR-51, INV-15) ---------
+
+describe("verdict residue removal (TASK_11)", () => {
+  test("no source file mentions the retired artifact mismatch cause", () => {
+    // The needle is assembled at runtime so this test file does not itself
+    // carry the literal — the grep over *.ts must print nothing at all.
+    const needle = ["artifact", "mismatch"].join("-");
+    const root = new URL("../", import.meta.url);
+    const hits: string[] = [];
+    const walk = (dir: URL) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === "node_modules" || entry.name === ".git" || entry.name === ".kstack") continue;
+        const child = new URL(entry.name + (entry.isDirectory() ? "/" : ""), dir);
+        if (entry.isDirectory()) walk(child);
+        else if (entry.name.endsWith(".ts")) {
+          const text = readFileSync(child, "utf-8");
+          if (text.includes(needle)) hits.push(entry.name);
+        }
+      }
+    };
+    walk(root);
+    assert.deepEqual(hits, [], `the retired cause is still present in: ${hits.join(", ")}`);
+  });
+
+  test("every verdict-bearing phase of the registry declares a verdict-flagged step", () => {
+    assert.deepEqual(verdictGateProblems(getAllWorkflows()), [], "a verdict-bearing phase with no flagged step is a registry mistake");
+  });
+
+  test("a stepped verdict-bearing phase with no flagged step parks as a CONFIG error, never a fallback route", () => {
+    // A STEPPED phase that routes but declares no flagged step has NO
+    // record channel: the old code fell back to the pendingVerdict stash and
+    // could route a verdict the registry never declared.
+    const phase = {
+      id: "gate",
+      name: "gate",
+      execution: "main" as const,
+      steps: [{ id: "s1", execution: "main" as const, task: "x" }],
+      loopBackTo: "impl",
+    };
+    const state = {
+      ...sprintState(8),
+      pendingVerdict: { phaseId: "gate", parsed: { verdicts: { status: "green" }, vars: {} } as any, excerpt: "" },
+    };
+    const next = advancePhase(state, "gate", { status: "completed", summary: "gate done" }, 12, {
+      phases: [phase as any, ...SPRINT.phases],
+    });
+    assert.equal(next.status, "paused");
+    assert.equal(next.pausedReason, "verdict-config:gate", "the park names the misconfigured phase");
+    assert.equal(next.verdictPark, undefined, "a config park is NOT a verdict park");
+    assert.equal(next.pendingVerdict, undefined, "the retired stash never routes a config park");
+  });
+
+  test("a phase with no steps at all has no verdict channel either — it parks unreadable", () => {
+    // The pre-S3 implicit shape: no step contract, no record channel. The
+    // retired stash may not route it, so the verdict is simply unreadable.
+    const phase = {
+      id: "gate",
+      name: "gate",
+      execution: "main" as const,
+      loopBackTo: "impl",
+    };
+    const state = {
+      ...sprintState(8),
+      pendingVerdict: { phaseId: "gate", parsed: { verdicts: { status: "green" }, vars: {} } as any, excerpt: "" },
+    };
+    const next = advancePhase(state, "gate", { status: "completed", summary: "gate done" }, 12, {
+      phases: [phase as any, ...SPRINT.phases],
+    });
+    assert.equal(next.status, "paused");
+    assert.equal(next.pausedReason, "verdict-unreadable:gate:no-verdict");
+  });
+
+  test("the retired cause is gone from the park-cause vocabulary", () => {
+    const parked = parkForUnreadableVerdict(sprintState(8), "qa-browsing", "no-verdict");
+    assert.equal(parked.pausedReason, "verdict-unreadable:qa-browsing:no-verdict");
+    assert.equal(parked.verdictPark, "qa-browsing");
+  });
 });

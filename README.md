@@ -34,9 +34,17 @@ One extension, two layers:
 - **Fixed**: phase instructions are now delivered with `followUp` streaming behavior — eliminates the "Agent is already processing" error that silently dropped phase handoffs.
 - **Unified skill catalog** — 28 skills in a flat `skills/kstack-*/` layout, all manually invocable via `/skill:kstack-*`.
 - **Centralized artifact names** — `orchestrator/artifacts.ts` is the single source for every sprint-stamped filename (`qa-artifact_XX.md`, `code-review-artifact_XX.md`, `software-architect-artifact_XX_N.md`, …); verdict verification, task templates and the freeze path all consume it, closing the stamping-drift bug class.
-- **D4 park causes** — an unreadable-verdict park now records *why* in `pausedReason` (`no-verdict` / `artifact-mismatch` / `unroutable`) and the panel names the cause for triage; no attempt is burned either way.
+- **D4 park causes** — an unreadable-verdict park now records *why* in `pausedReason` (`no-verdict` / `unroutable` / `no-expectation` / `foreign-verdict`) and the panel names the cause for triage; no attempt is burned either way. A gate that declares no verdict-flagged step is a registry mistake and parks as `verdict-config:<phase>` (Abort only).
 - **Runtime binaries untracked** — `runtime/` is gitignored and provisioned on demand (session-start download); ~197MB of browse daemon binaries were dropped from the git index.
 - **Delegation test harness** — `runDeterministicDelegation` accepts an injected `spawnFn`; `test/executor-delegation.test.ts` exercises the real chain engine (HANDOFF threading, retry, budgets, REFUTED reopen, circuit breakers) with fake spawns.
+
+## What's new (S5a foundation hardening)
+
+- **Phase tool masking** — every workflow phase carries a deterministic browser-tool profile (`full` / `read` / `none`), so a phase sees only the browser tools it needs. The mask applies to the **main session only** (delegated children keep their own tool set), never removes the control tools, and is always reversible: the browser tools come back at the phase boundary, on completion and on abort.
+- **Untrusted marking** — every browse output is **recorded** (hashes only — no page text is ever persisted) and wrapped in an `UNTRUSTED` envelope before it reaches the model. Only a fixed trusted acknowledgement (`Restarting…`, `Dialogs will be dismissed`, `Closed tab N`) is left unwrapped, and the decision is made on the **output**, never on the command id.
+- **Provenance guard** — a verbatim copy of page text that reaches a sprint artifact is **quarantined** (wrapped as data — never deleted, never reworded) and the pre-guard bytes are kept under `.kstack/guard-backup/`. Only an instruction-shaped copy escalates: the run parks for a human (**Accept / Re-run / Abort**) without burning an attempt. A tampered or full taint store degrades to a whole-artifact scan rather than to silence.
+- **Cache telemetry** — the run report carries the fresh-prompt token count (`tokensIn`) and the **per-scope** cache hit rate (main and delegated are never averaged). `KSTACK_PI_CACHE_LONG=1` gives delegated children a longer cache retention; with the flag off the retention key is removed from the child env instead of being inherited.
+- **Per-class budgets** — the turn and token budgets follow the phase's timeout class (explore / work / verify — provisional, every one env-overridable). A budget trip parks the run and names the env var that raises the tripped dimension; the two true quota parks (wall-clock, run tokens) are unchanged.
 
 ## Requirements
 
@@ -397,6 +405,7 @@ Therefore:
 - VERIFIED FACTS are context, not proof: agent directives (see `AGENTS_NOTES.md`) instruct specialists to re-check claims that are load-bearing for code changes they are about to make.
 - `$`-safe interpolation everywhere (`replaceExact`, orchestrator/text.ts): untrusted text containing `$&`, `` $` ``, `$'` or `$1` can never alter task structure.
 - Liveness observation never terminates processes; kills remain a manual, data-driven decision.
+- **Page text never lands in the taint store as text**: every browse output is reduced to 8-token shingle hashes (FNV-1a) before it is written, and the store lives under `.kstack/runs/<runId>/` with the run. The **provenance guard** uses those hashes to PROVE that a passage was copied from a page: a verbatim copy in a sprint artifact is quarantined losslessly, and only an instruction-shaped copy parks the run for a human. A store that was truncated or filled is treated as tampered — the guard then scans the whole artifact instead of trusting a store the agent could have emptied.
 
 ## Troubleshooting
 

@@ -11,6 +11,7 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Workflow, WorkflowPhase, WorkflowStep } from "../orchestrator/types.ts";
+import { PHASE_TOOL_PROFILE } from "../orchestrator/toolmask.ts";
 
 /** Exact command a developer must run to refresh the generated file. */
 export const REGENERATE_CMD = "bun scripts/gen-workflow-table.ts";
@@ -95,6 +96,9 @@ function workflowSection(workflow: Workflow): string {
   const rows: string[][] = [];
   for (const phase of workflow.phases) {
     const phaseCell = `${phase.id} — ${phase.name}`;
+    // The TOOL PROFILE of the phase — read from the SAME table the mask uses
+    // (ADR-45, W3): no registry field, no second source of truth.
+    const profileCell = PHASE_TOOL_PROFILE[`${workflow.id}:${phase.id}`] ?? "full";
     const phasePart = phaseFlags(phase);
     const routingPart = routing(phase);
     const steps = phase.steps ?? [];
@@ -102,6 +106,7 @@ function workflowSection(workflow: Workflow): string {
       // Implicit single step (legacy path) — no WorkflowStep is materialized.
       rows.push([
         phaseCell,
+        profileCell,
         join(phasePart),
         EMPTY,
         phase.execution,
@@ -115,6 +120,7 @@ function workflowSection(workflow: Workflow): string {
     for (const step of steps) {
       rows.push([
         phaseCell,
+        profileCell,
         join([...phasePart, ...stepFlags(step)]),
         step.id,
         step.execution,
@@ -139,7 +145,7 @@ function workflowSection(workflow: Workflow): string {
   lines.push(
     "",
     table(
-      ["Phase", "Flags", "Step", "Exec", "Agent", "Skill", "Signal", "Routing"],
+      ["Phase", "Profile", "Flags", "Step", "Exec", "Agent", "Skill", "Signal", "Routing"],
       rows,
     ),
   );
@@ -170,6 +176,7 @@ file is byte-stable across machines.
 | Column | Meaning |
 | --- | --- |
 | **Phase** | Phase id and display name. The phase is the unit of routing. |
+| **Profile** | The phase's TOOL PROFILE (\`full\`, \`read\`, \`none\`) — the browser tools the main session keeps in that phase. Read from \`PHASE_TOOL_PROFILE\`, the same table the mask uses. |
 | **Flags** | Phase toggles (\`optional\`, \`enabled: auto/off\`, \`fail-fast\`), artifact contract (\`produces\`/\`needs\`) and step flags (\`skip var=value\`, \`needs-user\`, \`side-effect\`, \`requires\`/\`prefers\` capabilities, \`timeout\`, \`ambient\` skills). |
 | **Step** | Step id inside the phase — the unit of execution. |
 | **Exec** | \`main\` (runs in the model session) or \`subagent\` (delegated to a spawned agent). |

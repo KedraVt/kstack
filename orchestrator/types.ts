@@ -113,6 +113,14 @@ export interface GateRow {
   detect?: boolean;
 }
 
+/**
+ * S5a/TASK_01: the named browser-tool subset the MAIN session may see in a
+ * phase. Declared here (the leaf contract module) so `toolmask.ts` can
+ * import it without a cycle — the per-phase mapping lives in
+ * `toolmask.ts` PHASE_TOOL_PROFILE (data), not on WorkflowPhase.
+ */
+export type ToolProfile = "full" | "read" | "none";
+
 export interface WorkflowPhase {
   id: string;
   name: string;
@@ -291,8 +299,6 @@ export interface PendingVerdict {
  * `pausedReason` ("verdict-unreadable:<phaseId>:<cause>"):
  * - "no-verdict": the subagent emitted nothing trustworthy (no verdict
  *   lines, hedged, or a contradiction across chain steps);
- * - "artifact-mismatch": the HANDOFF parsed but disagreed with the
- *   on-disk artifact (or the artifact was absent);
  * - "unroutable": the verdict parsed and whitelisted but is not on the
  *   phase's expectation map.
  * - "no-expectation": the (workflowId, phaseId) pair has no EXPECTATIONS
@@ -300,7 +306,7 @@ export interface PendingVerdict {
  * - "foreign-verdict": a NON verdict-flagged step's record emitted
  *   verdicts — only flagged records may carry gate variables.
  */
-export type VerdictParkCause = "no-verdict" | "artifact-mismatch" | "unroutable" | "no-expectation" | "foreign-verdict";
+export type VerdictParkCause = "no-verdict" | "unroutable" | "no-expectation" | "foreign-verdict";
 
 /** D3 freeze payload: security rejection parked for human review.
  * `severity` is the emitted severity value — legacy vocabulary
@@ -392,6 +398,20 @@ export interface WorkflowState {
   freezeInfo?: FreezeInfo;
   /** Why the workflow is paused ("loop-exhausted:<phase>", "sprint-number-anomaly", …) — surfaced to the user. */
   pausedReason?: string;
+  /**
+   * S5a/TASK_10 (ADR-62, INV-12): the env var that RAISES the budget dim
+   * that tripped (`BUDGET_ENV`). Persisted with the state so the park panel
+   * can name it after a restart — the name is not only in a notification.
+   * Absent when the park was not a budget trip.
+   */
+  budgetRaiseEnv?: string;
+  /**
+   * S5a/TASK_16 (ADR-40, INV-23): the park list of a provenance park —
+   * `file:line  <excerpt>` per copied passage, at most 10 entries. It rides
+   * the state so the /kstack panel can show the human exactly what was
+   * copied; the ledger keeps the same list for the audit trail.
+   */
+  provenanceFindings?: string[];
   /** Active retry injection for a looped-back phase (cleared when that phase completes). */
   retryContext?: RetryContext;
   /** Sprint number, discovered once at the user-story phase (E5). Zero-pad to 2 digits when interpolating. */

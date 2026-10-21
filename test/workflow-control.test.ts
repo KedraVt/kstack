@@ -33,6 +33,27 @@ after(() => {
 });
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "kstack-control-"));
+
+/**
+ * The env of a kstack-report call in a unit test: the ambient kstack env
+ * (published verdict maps, the current phase/step) must NOT leak into the
+ * assertion — the published maps describe ONE step, and a test asserts the
+ * CLI under an env it controls.
+ */
+function cliEnv(overrides: Record<string, string> = {}): Record<string, string> {
+  const env = { ...(process.env as Record<string, string>) };
+  for (const k of [
+    "KSTACK_VERDICT_KEYS",
+    "KSTACK_VERDICT_VALUES",
+    "KSTACK_VERDICT_REQUIRED",
+    "KSTACK_PHASE",
+    "KSTACK_STEP",
+  ]) {
+    delete env[k];
+  }
+  return { ...env, ...overrides };
+}
+
 let seq = 0;
 function harness(initialState: unknown, ui: Record<string, any> = {}) {
   const entries: any[] = [{ type: "custom", customType: "kstack-wf-state", data: initialState }];
@@ -44,6 +65,10 @@ function harness(initialState: unknown, ui: Record<string, any> = {}) {
     registerCommand: () => {},
     on: () => {},
     exec: async () => ({ stdout: "", stderr: "" }),
+    // S5a/TASK_02: the tool-mask host surface (the fake owns no tool set).
+    getActiveTools: () => [],
+    getAllTools: () => [],
+    setActiveTools: () => {},
     appendEntry: (t: string, d: any) => entries.push({ type: "custom", customType: t, data: d }),
     sendUserMessage: (m: string) => sent.push(m),
   };
@@ -109,7 +134,7 @@ describe("verdict ownership", () => {
       "bash",
       [script, "--workflow", "sprint", "--run-id", "r1", "--phase", "implement", "--step", "backend",
         "--marker", "BACKEND-DONE", "--verdict", "be-walk==pass", "--verdict", "ui==Pass."],
-      { cwd, encoding: "utf-8", env: { ...process.env, KSTACK_VERDICT_KEYS: "ui" } },
+      { cwd, encoding: "utf-8", env: cliEnv({ KSTACK_VERDICT_KEYS: "ui", KSTACK_PROJECT_ROOT: cwd }) },
     );
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stderr, /ignoring --verdict 'be-walk'/);
@@ -127,7 +152,7 @@ describe("verdict ownership", () => {
       "bash",
       [script, "--workflow", "develop", "--run-id", "r1", "--phase", "implement", "--step", "build",
         "--root", root, "--marker", "BUILD-DONE"],
-      { cwd: elsewhere, encoding: "utf-8" },
+      { cwd: elsewhere, encoding: "utf-8", env: cliEnv() },
     );
     assert.equal(run.status, 0, run.stderr);
     assert.ok(fs.existsSync(path.join(root, ".kstack", "runs", "r1", "implement.build.json")), "record landed under --root");
@@ -143,7 +168,7 @@ describe("verdict ownership", () => {
     const run = spawnSync(
       "bash",
       [script, "--workflow", "develop", "--run-id", "r1", "--phase", "implement", "--step", "build", "--marker", "BUILD-DONE"],
-      { cwd: elsewhere, encoding: "utf-8", env: { ...process.env, KSTACK_PROJECT_ROOT: root } },
+      { cwd: elsewhere, encoding: "utf-8", env: cliEnv({ KSTACK_PROJECT_ROOT: root }) },
     );
     assert.equal(run.status, 0, run.stderr);
     assert.ok(fs.existsSync(path.join(root, ".kstack", "runs", "r1", "implement.build.json")), "record landed under the env root");
@@ -157,7 +182,7 @@ describe("verdict ownership", () => {
     const run = spawnSync(
       "bash",
       [script, "--workflow", "develop", "--run-id", "r1", "--phase", "implement", "--root", path.join(cwd, "nope")],
-      { cwd, encoding: "utf-8" },
+      { cwd, encoding: "utf-8", env: cliEnv() },
     );
     assert.notEqual(run.status, 0, "a bad --root must fail");
     assert.match(run.stderr, /--root .* is not an existing directory/);
@@ -218,7 +243,7 @@ describe("human step gates", () => {
 describe("workflow entry + artifact lifetime", () => {
   test("no programmatic start tool: workflows start only through /kstack", () => {
     const names: string[] = [];
-    initOrchestrator({ registerTool: (t: any) => names.push(t.name), registerCommand: () => {}, on: () => {} } as any);
+    initOrchestrator({ registerTool: (t: any) => names.push(t.name), registerCommand: () => {}, on: () => {}, getActiveTools: () => [], getAllTools: () => [], setActiveTools: () => {} } as any);
     assert.ok(!names.includes("kstack_start"), names.join(","));
     assert.ok(names.includes("kstack_advance"));
   });
@@ -487,7 +512,7 @@ describe("2026-10 workflow audit fixes", () => {
     const cwd = fs.mkdtempSync(path.join(TMP, "cli-"));
     const runId = "2026-10-19T00:00:00.123Z-abcd";
     const script = new URL("../runtime/bin/kstack-report", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
-    const run = spawnSync("bash", [script, "--workflow", "develop", "--run-id", runId, "--phase", "implement", "--step", "build", "--marker", "BUILD-DONE"], { cwd, encoding: "utf-8" });
+    const run = spawnSync("bash", [script, "--workflow", "develop", "--run-id", runId, "--phase", "implement", "--step", "build", "--marker", "BUILD-DONE"], { cwd, encoding: "utf-8", env: cliEnv({ KSTACK_PROJECT_ROOT: cwd }) });
     assert.equal(run.status, 0, run.stderr);
     assert.ok(readStepRecord(cwd, "develop", runId, "implement", "build"), "record still readable");
     assert.deepEqual(fs.readdirSync(path.join(cwd, ".kstack", "ledger")), [path.basename(ledgerPathFor(cwd, { workflowId: "develop", runId }))]);

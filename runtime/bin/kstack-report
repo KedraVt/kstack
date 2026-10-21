@@ -26,6 +26,12 @@
 # declared verdict or a security rejection without a severity is refused
 # (nothing is written, exit 1) so the step learns of the mistake now.
 #
+# SCOPE: the published maps describe ONE step — the env names it
+# (KSTACK_PHASE/KSTACK_STEP). A record for a DIFFERENT step (written by a
+# nested process that inherited the env) is not validated against that map
+# and its verdicts are not dropped: the step's mandates must never refuse
+# another step's record.
+#
 # Exit codes: 0 written · 1 usage error (incl. a refused verdict) · 2 write failure.
 
 set -uo pipefail
@@ -90,17 +96,39 @@ fi
 # are DROPPED with a warning — the record is still written, so a step is never
 # blocked for doing its work, but it cannot produce a verdict it does not own.
 # Values are lowercased and stripped of trailing punctuation ("Approved.").
+#
+# The published maps describe ONE step: the orchestrator exports them to a
+# delegated step's env, and every process that step spawns inherits them (a
+# test runner, a build, a nested CLI call). The env also NAMES that step
+# (KSTACK_PHASE / KSTACK_STEP), so a record for a DIFFERENT step is not the
+# step's record — the published mandates do not apply to it and its verdicts
+# are not dropped.
+env_covers_invocation() {
+  if [ -n "${KSTACK_PHASE:-}" ] && [ "$KSTACK_PHASE" != "$PHASE" ]; then return 1; fi
+  if [ -n "${KSTACK_STEP:-}" ] && [ "$KSTACK_STEP" != "$STEP" ]; then return 1; fi
+  return 0
+}
+
+# Does the published ownership map cover this verdict key?
+owns_verdict() {
+  [ -n "${KSTACK_VERDICT_KEYS+x}" ] || return 0        # no map published: nothing to enforce
+  env_covers_invocation || return 0                    # the map belongs to another step
+  printf ' %s ' "$KSTACK_VERDICT_KEYS" | grep -qF " $1 "
+}
+
 if [ ${#VERDICTS[@]} -gt 0 ]; then
   declare -a KEPT=()
   for pair in "${VERDICTS[@]}"; do
     case "$pair" in *==*) ;; *) KEPT+=("$pair"); continue ;; esac
     key="${pair%%==*}"
     val="$(printf '%s' "${pair#*==}" | tr '[:upper:]' '[:lower:]' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:].,;:!]*$//')"
-    if [ -n "${KSTACK_VERDICT_KEYS+x}" ] && ! printf ' %s ' "$KSTACK_VERDICT_KEYS" | grep -qF " $key "; then
-      echo "kstack-report: ignoring --verdict '$key' — this step owns ${KSTACK_VERDICT_KEYS:-no gate verdict}" >&2
-      continue
+    if owns_verdict "$key"; then
+      KEPT+=("$key==$val")
+    else
+      owned_desc="${KSTACK_VERDICT_KEYS:-}"
+      [ -n "$owned_desc" ] || owned_desc="no gate verdict"
+      echo "kstack-report: ignoring --verdict '$key' — this step owns $owned_desc" >&2
     fi
-    KEPT+=("$key==$val")
   done
   VERDICTS=("${KEPT[@]+"${KEPT[@]}"}")
 fi
@@ -110,7 +138,9 @@ fi
 # (KSTACK_VERDICT_VALUES). A verdict outside its list is a mistake the step
 # must learn NOW — the record is NOT written and the CLI exits 1. Without the
 # env (a main-session step has no per-step env) the behaviour is unchanged.
-if [ -n "${KSTACK_VERDICT_VALUES:-}" ]; then
+# The published map covers the step the env NAMES: a record for another step
+# (a nested process that inherited the env) is not validated against it.
+if [ -n "${KSTACK_VERDICT_VALUES:-}" ] && env_covers_invocation; then
   # The accepted values of one key (empty when the key has no map entry).
   accepted_for() {
     local want="$1" entry
@@ -145,15 +175,24 @@ if [ -n "${KSTACK_VERDICT_VALUES:-}" ]; then
   done
 
   # 2. The step's declared signal verdict is mandatory: a record without it
-  #    is signal-missing and the phase re-issues the step.
+  #    is signal-missing and the phase re-issues the step. The mandate is
+  #    scoped to the keys the step OWNS: a required key outside
+  #    KSTACK_VERDICT_KEYS is dropped by the writer, so enforcing it would
+  #    refuse every record the step could ever write (a deadlock).
   if [ -n "${KSTACK_VERDICT_REQUIRED:-}" ]; then
-    have_required=0
-    for pair in "${KEPT[@]+"${KEPT[@]}"}"; do
-      if [ "${pair%%==*}" = "$KSTACK_VERDICT_REQUIRED" ]; then have_required=1; break; fi
-    done
-    if [ "$have_required" -eq 0 ]; then
-      echo "kstack-report: this step's record MUST carry --verdict '$KSTACK_VERDICT_REQUIRED==<value>' — it is missing — nothing was written" >&2
-      exit 1
+    required_owned=1
+    if [ -n "${KSTACK_VERDICT_KEYS+x}" ]; then
+      printf ' %s ' "$KSTACK_VERDICT_KEYS" | grep -qF " $KSTACK_VERDICT_REQUIRED " || required_owned=0
+    fi
+    if [ "$required_owned" -eq 1 ]; then
+      have_required=0
+      for pair in "${KEPT[@]+"${KEPT[@]}"}"; do
+        if [ "${pair%%==*}" = "$KSTACK_VERDICT_REQUIRED" ]; then have_required=1; break; fi
+      done
+      if [ "$have_required" -eq 0 ]; then
+        echo "kstack-report: this step's record MUST carry --verdict '$KSTACK_VERDICT_REQUIRED==<value>' — it is missing — nothing was written" >&2
+        exit 1
+      fi
     fi
   fi
 

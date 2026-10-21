@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { REGENERATE_CMD, loadCanonicalWorkflows, renderWorkflowTable } from "../scripts/gen-workflow-table.ts";
+import { PHASE_TOOL_PROFILE } from "../orchestrator/toolmask.ts";
 
 const README_PATH = fileURLToPath(new URL("../orchestrator/README.md", import.meta.url));
 
@@ -48,6 +49,27 @@ describe("generated workflow table (orchestrator/README.md)", () => {
         rendered.includes(`## ${workflow.id} — ${workflow.name}`),
         `workflow section "${workflow.id}" is missing from orchestrator/README.md — regenerate with:\n  ${REGENERATE_CMD}\n`,
       );
+    }
+  });
+
+  test("the table renders the tool profile of every phase (TASK_03)", async () => {
+    const workflows = await loadCanonicalWorkflows();
+    const rendered = renderWorkflowTable(workflows);
+    // The profile column comes from the SAME table the code uses — no
+    // registry field, no second source of truth (ADR-45, W3).
+    for (const workflow of workflows) {
+      for (const phase of workflow.phases) {
+        const expected = PHASE_TOOL_PROFILE[`${workflow.id}:${phase.id}`] ?? "full";
+        const row = rendered
+          .split("\n")
+          .find((line) => line.startsWith(`| ${phase.id} — ${phase.name} `));
+        assert.ok(row, `the phase "${workflow.id}:${phase.id}" is missing from the table`);
+        const cells = row.split("|").map((c) => c.trim());
+        assert.ok(
+          cells.includes(expected),
+          `the phase "${workflow.id}:${phase.id}" must render the profile "${expected}" — the row is: ${row}`,
+        );
+      }
     }
   });
 

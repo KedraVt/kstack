@@ -14,6 +14,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { WorkflowState } from "./types.ts";
+import { safeAppendDetailed } from "./safe-append.ts";
 
 /**
  * `.kstack/ledger/` and `.kstack/runs/` hold verbatim model-influenced
@@ -45,7 +46,7 @@ export interface LedgerEntry {
    * S4: "report" = a kstack-report step record (the delegation completion
    * protocol — canonical source for verdicts and routing vars).
    */
-  kind: "step" | "phase" | "verdict" | "gate" | "report" | "run-interrupted" | "quota-parked";
+  kind: "step" | "phase" | "gate" | "report" | "run-interrupted" | "quota-parked";
   workflowId: string;
   phaseId: string;
   stepId?: string;
@@ -65,8 +66,57 @@ export interface LedgerEntry {
     artifacts?: string[];
     /** Watched-step usage accumulated while the step ran (D28). */
     tokens?: number;
+    /**
+     * The FRESH PROMPT count of the watched step (Σ `usage.input`). The
+     * cache-hit-rate formula needs the input-only number on the main side
+     * too — without it a main-step row has no defined hit-rate
+     * (ADR-47, INV-9).
+     */
+    tokensIn?: number;
     cacheRead?: number;
     cacheCreation?: number;
+    /**
+     * S5a/TASK_16 (ADR-40): the provenance guard's park list — one
+     * `file:line  <excerpt>` entry per copied passage. It rides the ledger
+     * so the list survives a restart (the panel reads the state, the
+     * ledger keeps the audit trail).
+     */
+    findings?: string[];
+    /**
+     * S5a/TASK_16 (ADR-40): the artifacts the provenance guard could NOT
+     * scan — one `file: reason` entry per skipped candidate. A skip is a
+     * coverage hole, so it is never silent.
+     */
+    skipped?: string[];
+  };
+}
+
+/** The usage counters a watched main step contributes to the ledger row. */
+export interface MainStepUsage {
+  /** The watch's turn count — carried for context, not part of the payload. */
+  turns?: number;
+  tokens: number;
+  tokensIn: number;
+  cacheRead: number;
+  cacheCreation: number;
+}
+
+/**
+ * The ledger payload of a completed MAIN step: the verbatim summary plus the
+ * watched step's usage counters. The counters are omitted entirely when no
+ * watch ran (an implicit phase) — the row then carries the summary alone.
+ */
+export function mainStepPayload(
+  summary: string,
+  usage?: MainStepUsage | null,
+): LedgerEntry["payload"] {
+  if (!usage) return { summary };
+  return {
+    summary,
+    tokens: usage.tokens,
+    tokensIn: usage.tokensIn,
+    cacheRead: usage.cacheRead,
+    cacheCreation: usage.cacheCreation,
   };
 }
 
@@ -88,6 +138,11 @@ export function ledgerPathFor(cwd: string, state: LedgerState): string {
   return path.join(cwd, ".kstack", "ledger", `${safe(state.workflowId)}-${runId}.jsonl`);
 }
 
+/** The ledger's file name — the leaf `safeAppend` writes into. */
+function ledgerFileName(state: LedgerState): string {
+  return path.basename(ledgerPathFor("", state));
+}
+
 /**
  * Synchronously append one entry. `.kstack/ledger/` is created on first
  * write. Returns true on success; on ANY failure calls onError once and
@@ -100,30 +155,15 @@ export function appendLedger(
   onError?: (message: string) => void,
 ): boolean {
   try {
-    const file = ledgerPathFor(cwd, state);
-    const dir = path.dirname(file);
-    fs.mkdirSync(dir, { recursive: true });
     ensureOperationalDirsIgnored(cwd);
-    // Symlink-plant containment (S3 security review): a repo shipping
-    // .kstack/ledger as a symlink must not turn appends into file creation
-    // in an attacker-chosen directory. Fail-soft via onError — INV-L3 holds.
-    const rel = path.relative(fs.realpathSync(cwd), fs.realpathSync(dir));
-    if (rel.startsWith("..") || path.isAbsolute(rel)) {
-      throw new Error("ledger dir resolves outside the repo cwd");
-    }
-    // File-level containment too: realpath covers the DIRECTORY only — a
-    // planted `<wf>-adhoc.jsonl` symlink (predictable name on v≤3/hand-built
-    // state resumes) would redirect the append outside the repo. lstatSync
-    // (not existsSync — it follows links) also catches dangling links.
-    let lst: fs.Stats | null = null;
-    try {
-      lst = fs.lstatSync(file);
-    } catch {
-      /* ENOENT — new file, fine */
-    }
-    if (lst?.isSymbolicLink()) throw new Error("ledger path is a symlink");
     const full: LedgerEntry = { at: new Date().toISOString(), workflowId: state.workflowId, ...entry };
-    fs.appendFileSync(file, JSON.stringify(full) + "\n", "utf-8");
+    // TASK_13 (ADR-38): the containment (realpath inside the repo + symlink
+    // refusal) now lives in the shared `safeAppend` helper — the same
+    // helper the taint store uses, so a new writer cannot be less careful
+    // than the ledger. Behaviour is unchanged: false on any failure, the
+    // caller continues, and the error surfaces once through onError.
+    const res = safeAppendDetailed(cwd, path.join(".kstack", "ledger"), ledgerFileName(state), JSON.stringify(full) + "\n");
+    if (!res.ok) throw new Error(`ledger append refused: ${res.reason ?? "containment or write failure"}`);
     return true;
   } catch (err: any) {
     try {

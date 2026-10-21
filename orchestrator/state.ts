@@ -105,6 +105,19 @@ export function loadActiveState(ctx: ExtensionContext): WorkflowState | null {
             : [];
         }
         if (typeof normalized.resumeMode !== "boolean") delete normalized.resumeMode;
+        // S5a/TASK_10: the budget-raise env name rides the untrusted entry
+        // channel too — only a plain string may name an env var (it is
+        // printed back to the human, never executed).
+        if (typeof normalized.budgetRaiseEnv !== "string") delete normalized.budgetRaiseEnv;
+        // S5a/TASK_16: the provenance park list rides the same untrusted
+        // entry channel — only plain strings may name a file and a line.
+        if (Array.isArray(normalized.provenanceFindings)) {
+          normalized.provenanceFindings = normalized.provenanceFindings.filter(
+            (f): f is string => typeof f === "string",
+          );
+        } else {
+          delete normalized.provenanceFindings;
+        }
         if (typeof normalized.baseHead !== "string") delete normalized.baseHead;
         if (typeof normalized.stepGates !== "boolean") delete normalized.stepGates;
         if (typeof normalized.stepGate !== "boolean") delete normalized.stepGate;
@@ -385,15 +398,23 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
 
   // Resolve the phase verdict (INV-9). Flagged-steps phases merge their
   // kstack-report records from .kstack/runs/<runId>/ — the ONLY channel
-  // allowed to produce a phase verdict under the step model. A verdict-bearing
-  // phase WITHOUT flagged steps has no record to merge: it falls back to the
-  // pendingVerdict stash and parks when the stash is empty (no registry phase
-  // is in that shape — every verdict-bearing phase declares a flagged step).
+  // allowed to produce a phase verdict under the step model. The retired
+  // non-flagged `pendingVerdict` fallback is GONE (ADR-33, AC-19): a
+  // verdict-bearing phase without a flagged step has NO record channel, so it
+  // never routes from the stash. Two shapes remain, and both fail closed:
+  //  - a STEPPED phase that declares no verdict-flagged step is a REGISTRY
+  //    MISTAKE (ADR-51 / INV-15): the CI registry validation fails the build
+  //    and the runtime parks it as a CONFIG error;
+  //  - a phase that declares NO steps at all (the pre-S3 implicit shape) has
+  //    no record channel and no step contract: its verdict is simply
+  //    unreadable (no-verdict). No registry phase has this shape —
+  //    verdictGateProblems proves it.
   let parsed: ParsedVerdict | null = null;
   let parkCause: VerdictParkCause = "no-verdict";
   let pvStash = state.pendingVerdict;
   if (verdictPhase) {
-    const flagged = phase!.steps?.some((s) => s.signal?.kind === "verdict") ?? false;
+    const steps = phase!.steps ?? [];
+    const flagged = steps.some((s) => s.signal?.kind === "verdict");
     if (flagged) {
       const merged = mergePhaseVerdicts(phase!, cwd, state.workflowId, state.runId, state.results);
       parsed = merged.parsed;
@@ -408,9 +429,16 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
       if (Object.keys(merged.vars).length > 0) {
         next.vars = { ...(state.vars ?? {}), ...merged.vars };
       }
+    } else if (steps.length > 0) {
+      // ADR-51 / INV-15: a MISCONFIGURED gate. The retired fallback (the
+      // pendingVerdict stash) could route a verdict the registry never
+      // declared — the stash is gone and the phase parks instead.
+      return parkForVerdictConfig(state, phase!.id);
     } else {
-      const pending = state.pendingVerdict;
-      parsed = pending && pending.phaseId === phase!.id ? pending.parsed : null;
+      // A phase with NO steps has no record channel at all: the verdict is
+      // unreadable and the phase parks fail-closed (no-verdict).
+      parsed = null;
+      parkCause = "no-verdict";
     }
     if (!parsed) {
       return parkForUnreadableVerdict({ ...state, pendingVerdict: pvStash }, phase!.id, parkCause);
@@ -560,6 +588,27 @@ export function advancePhase(state: WorkflowState, phaseId: string, result: Phas
 export function parkForUnreadableVerdict(state: WorkflowState, phaseId: string, cause: VerdictParkCause): WorkflowState {
   if (state.verdictPark) return state; // idempotent
   return { ...state, status: "paused", verdictPark: phaseId, pausedReason: `verdict-unreadable:${phaseId}:${cause}` };
+}
+
+/**
+ * The runtime shape of a MISCONFIGURED gate (ADR-51, INV-15): a
+ * verdict-bearing phase that declares no verdict-flagged step, so it has no
+ * record channel at all.
+ *
+ * It is a NON-verdict park: no verdict was read, nothing is routed, no
+ * attempt is burned and the D4 panel does not claim it. The reason
+ * `verdict-config:<phaseId>` names the phase, and the human can only abort
+ * it — re-running a step cannot fix a registry mistake, and a Resume that
+ * re-parked would be a click-loop.
+ */
+export function parkForVerdictConfig(state: WorkflowState, phaseId: string): WorkflowState {
+  return {
+    ...state,
+    status: "paused",
+    verdictPark: undefined,
+    pendingVerdict: undefined,
+    pausedReason: `verdict-config:${phaseId}`,
+  };
 }
 
 /**

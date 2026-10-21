@@ -61,6 +61,22 @@ export function strictContent(): boolean {
   return parse(process.env.KSTACK_PI_STRICT_CONTENT) ?? false;
 }
 
+/**
+ * S5a/TASK_08 (ADR-30, ADR-56): the cache-retention opt-in.
+ *
+ * When ON, every delegated child gets `PI_CACHE_RETENTION=long` — a longer
+ * prompt-cache TTL, which buys a higher cache hit-rate across the run's
+ * phases. When OFF (the default) the key is DELETED from the child env: the
+ * child inherits the WHOLE parent env, so merely not adding the key would
+ * leak an operator-exported `PI_CACHE_RETENTION` into every child.
+ *
+ * The "1h + 5m breakpoint budget" of the efficiency plan is NOT implemented
+ * here: pi owns `cache_control`.
+ */
+export function cacheLong(): boolean {
+  return parse(process.env.KSTACK_PI_CACHE_LONG) ?? false;
+}
+
 // --- Sprint workflow kill-switches (MERGE-PLAN §12 / BUG-6) ------------------
 
 /** Register the sprint workflow at all. Off ⇒ hidden from menu/router entirely. */

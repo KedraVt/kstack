@@ -43,6 +43,14 @@ export interface StepRun {
   toolCalls: number;
   /** SPEND — sum over turns of (input + output). Cache tokens are NOT counted. */
   tokens: number;
+  /**
+   * FRESH PROMPT — sum over turns of `usage.input` only. pi's `input`
+   * EXCLUDES the cached prompt part, so this is the comparable "input" of
+   * the cache-hit-rate formula (input + cacheRead + cacheWrite) on BOTH
+   * scopes: the main step's `tokensIn` and the delegated child's
+   * `usage.input` mean the same thing (ADR-47, INV-9).
+   */
+  tokensIn: number;
   /** PEAK single-turn prompt size — max over turns of (input + cacheRead + cacheWrite). */
   contextTokens: number;
   /** Cache-hit and cache-write tokens — the D28 byte-stable-prefix measure. */
@@ -70,6 +78,7 @@ export function newStepRun(startedAtMs = Date.now()): StepRun {
     turns: 0,
     toolCalls: 0,
     tokens: 0,
+    tokensIn: 0,
     contextTokens: 0,
     cacheRead: 0,
     cacheWrite: 0,
@@ -117,6 +126,17 @@ function usageSpend(u: any): number {
   if (!u) return 0;
   const n = (v: any) => Number(v ?? 0) || 0;
   return n(u.input ?? u.inputTokens) + n(u.output ?? u.outputTokens);
+}
+
+/**
+ * The FRESH PROMPT part of one turn: pi's `input` only (the cached prefix is
+ * excluded by pi). A missing or non-finite value counts zero.
+ */
+function usageInput(u: any): number {
+  if (!u) return 0;
+  const raw = u.input ?? u.inputTokens;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 /** Single-turn PROMPT size — the fresh input plus the cached prompt prefix. */
@@ -216,6 +236,7 @@ export function feedStepEvent(run: StepRun, event: StepWatchEvent): void {
       // SPEND counts the fresh input+output only; the cached prompt prefix is
       // re-reported every turn and would inflate the total quadratically.
       run.tokens += usageSpend(msg.usage);
+      run.tokensIn += usageInput(msg.usage);
       const promptSize = usageContext(msg.usage);
       if (promptSize > run.contextTokens) run.contextTokens = promptSize;
       run.cacheRead += Number(msg.usage?.cacheRead ?? msg.usage?.cacheReadTokens ?? 0) || 0;
@@ -278,6 +299,34 @@ const DEFAULT_TOKEN_LIMIT = 250_000;
 const DEFAULT_CONTEXT_LIMIT = 180_000;
 
 /**
+ * Per-timeout-class TURN caps (S5a/TASK_09, ADR-31).
+ *
+ * The flat 60-turn limit tripped the scout twice in this sprint's own run:
+ * an EXPLORE step legitimately reads far more than 60 turns, and a WORK step
+ * that implements a feature needs more than that too. The limits are
+ * PROVISIONAL — they are calibrated on a single run and are re-checked by
+ * the retro phase (AC-15, AC-23). Every one of them stays env-overridable.
+ */
+export const CLASS_TURN_LIMITS: Record<TimeoutClass, number> = {
+  EXPLORE: 150,
+  WORK: 200,
+  VERIFY: 100,
+};
+
+/** The turn cap of a phase whose timeout class is unmapped. */
+export const DEFAULT_TURN_LIMIT = 100;
+
+/** The env var that raises each budget dim — the park message names it. */
+export const BUDGET_ENV: Record<BudgetDim, string> = {
+  turns: "KSTACK_PI_STEP_MAX_TURNS",
+  tokens: "KSTACK_PI_STEP_MAX_TOKENS",
+  context: "KSTACK_PI_STEP_MAX_CONTEXT",
+  usd: "KSTACK_PI_STEP_MAX_USD",
+  ms: "KSTACK_PI_STEP_MAX_MS",
+  usdPerMin: "KSTACK_PI_STEP_MAX_USD_PER_MIN",
+};
+
+/**
  * Env-resolved per-step budget limits. Unset envs → conservative defaults
  * ("off" disables a dim). The SPEND cap defaults to the phase's timeout
  * class (timeoutClassFor); an explicit KSTACK_PI_STEP_MAX_TOKENS /
@@ -286,8 +335,9 @@ const DEFAULT_CONTEXT_LIMIT = 180_000;
 export function stepBudgetDefaults(phaseId?: string): StepBudgets {
   const cls = phaseId ? timeoutClassFor(phaseId) : null;
   const tokenDefault = cls ? CLASS_TOKEN_LIMITS[cls] : DEFAULT_TOKEN_LIMIT;
+  const turnDefault = cls ? CLASS_TURN_LIMITS[cls] : DEFAULT_TURN_LIMIT;
   return {
-    turns: limit(numberEnv("KSTACK_PI_STEP_MAX_TURNS", 60, { allowOff: true })),
+    turns: limit(numberEnv("KSTACK_PI_STEP_MAX_TURNS", turnDefault, { allowOff: true })),
     tokens: limit(numberEnv("KSTACK_PI_STEP_MAX_TOKENS", tokenDefault, { allowOff: true })),
     context: limit(numberEnv("KSTACK_PI_STEP_MAX_CONTEXT", DEFAULT_CONTEXT_LIMIT, { allowOff: true })),
     // No pricing feed exists in-repo — the USD dims default to off (Infinity,
@@ -299,7 +349,7 @@ export function stepBudgetDefaults(phaseId?: string): StepBudgets {
 }
 
 const BUDGET_DIMS = ["turns", "tokens", "context", "usd", "ms", "usdPerMin"] as const;
-type BudgetDim = (typeof BUDGET_DIMS)[number];
+export type BudgetDim = (typeof BUDGET_DIMS)[number];
 
 function usageFor(run: StepRun, dim: BudgetDim, now: number): number {
   switch (dim) {
@@ -389,10 +439,16 @@ export function activeStepWatch(): { phaseId: string; stepId: string } | null {
  * hasn't run yet); it is measured here, across the step's message_end events,
  * and the caller ledgers it when the step completes. Null when no watch runs.
  */
-export function stepWatchStats(): { turns: number; tokens: number; cacheRead: number; cacheCreation: number } | null {
+export function stepWatchStats(): {
+  turns: number;
+  tokens: number;
+  tokensIn: number;
+  cacheRead: number;
+  cacheCreation: number;
+} | null {
   if (!watch) return null;
-  const { turns, tokens, cacheRead, cacheWrite } = watch.run;
-  return { turns, tokens, cacheRead, cacheCreation: cacheWrite };
+  const { turns, tokens, tokensIn, cacheRead, cacheWrite } = watch.run;
+  return { turns, tokens, tokensIn, cacheRead, cacheCreation: cacheWrite };
 }
 
 export interface WatchVerdict {

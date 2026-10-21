@@ -18,9 +18,10 @@
 
 import * as fs from "node:fs";
 import type { VerdictParkCause, WorkflowPhase, WorkflowStep } from "./types.ts";
-import { expectationsFor, NEGATIVE_VALUES } from "./verdicts.ts";
+import { expectationsFor } from "./verdicts.ts";
 import { readStepRecord, recordPathFor, reportCliPath, projectRootFor, verdictKeysFor, type StepRecord } from "./records.ts";
-import { buildRecordContract, verdictValuesFor } from "./templates.ts";
+import { buildRecordContract } from "./templates.ts";
+import { acceptedVerdictValues } from "./verdict-values.ts";
 import { phaseArtifactPaths } from "./artifacts.ts";
 import { runSubagent, type SpawnRequest } from "./spawn.ts";
 
@@ -91,12 +92,12 @@ export function evaluateStepRecordTrust(
         defect: `'${key}' is not on the ${phase.id} expectation map`,
       };
     }
-    const allowed = expectations[rawKey];
-    const routable =
-      allowed.includes(value) ||
-      NEGATIVE_VALUES.has(value) ||
-      phase.parkOn?.[value] !== undefined ||
-      phase.loopBackOn?.[value] !== undefined;
+    // TASK_12 (ADR-34, ADR-52): the record channel accepts a value IFF the
+    // CLI accepts it — the SAME list. The old rule (the global
+    // NEGATIVE_VALUES set) accepted values the write-time channel had
+    // already refused, so a step could be told "rejected is not accepted"
+    // and still have its record trusted.
+    const routable = acceptedVerdictValues(workflowId, phase, key, step.signal?.value).includes(value);
     if (!routable) {
       return {
         ok: false,
@@ -133,14 +134,11 @@ export function evaluateStepRecordTrust(
  * declared park/loop values (e.g. the severities that freeze the sprint)
  * belong to the MODIFIER keys (severity), never to the step's own signal —
  * they are added for those keys only.
+ *
+ * TASK_12: the function moved to the `verdict-values.ts` leaf; it is
+ * re-exported here so the historical import path keeps working.
  */
-export function acceptedVerdictValues(workflowId: string, phase: WorkflowPhase, key: string, signalKey?: string): string[] {
-  const allowed = [...new Set(verdictValuesFor(workflowId, phase.id, key))];
-  if (key === signalKey) return allowed;
-  for (const v of Object.keys(phase.parkOn ?? {})) if (!allowed.includes(v)) allowed.push(v);
-  for (const v of Object.keys(phase.loopBackOn ?? {})) if (!allowed.includes(v)) allowed.push(v);
-  return allowed;
-}
+export { acceptedVerdictValues } from "./verdict-values.ts";
 
 /** The artifacts a step may have written (its declared artifact signal + the phase's artifacts). */
 export function stepArtifactPaths(phase: WorkflowPhase, step: WorkflowStep, cwd: string, sprintNumber?: number): string[] {
@@ -179,6 +177,11 @@ export function stepSpawnEnv(
     // The step's declared signal verdict — a record without it is
     // signal-missing and the phase re-issues the step.
     KSTACK_VERDICT_REQUIRED: step.signal?.kind === "verdict" ? step.signal.value : "",
+    // S5a/TASK_16 (ADR-57, G4): the taint store is per-run — the child
+    // records the untrusted output it saw under the SAME run id, so the
+    // guard can match a copy the child pasted into an artifact. The env
+    // carries the RUN ID only, never a path.
+    ...(runId ? { KSTACK_TAINT_RUN: runId } : {}),
     ...(extra ?? {}),
   };
 }

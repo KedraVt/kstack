@@ -711,6 +711,10 @@ const harness = (initialState: unknown, cwd: string) => {
     registerCommand: () => {},
     on: () => {},
     exec: async () => ({ stdout: "", stderr: "" }),
+    // S5a/TASK_02: the tool-mask host surface (the fake owns no tool set).
+    getActiveTools: () => [],
+    getAllTools: () => [],
+    setActiveTools: () => {},
     appendEntry: (_t: string, d: any) => entries.push({ type: "custom", customType: _t, data: d }),
     sendUserMessage: (m: string) => sent.push(m),
   };

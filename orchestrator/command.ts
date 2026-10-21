@@ -11,7 +11,7 @@ import { gateInventory, configureGates } from "./gates.ts";
 import { collectAskAnswers } from "./enabled.ts";
 import { probeCapabilities } from "./capabilities.ts";
 import { cleanupEphemeralArtifacts, ephemeralArtifactsFor } from "./artifacts.ts";
-import { launchPhase, executeCurrentPhase, releasePhaseInFlight, isPhaseInFlight, invalidateRuntime, finalizeRun } from "./executor.ts";
+import { launchPhase, executeCurrentPhase, releasePhaseInFlight, isPhaseInFlight, invalidateRuntime, finalizeRun, budgetRaiseHint } from "./executor.ts";
 import { existsSync } from "node:fs";
 import * as path from "node:path";
 import { appendLedger } from "./ledger.ts";
@@ -21,7 +21,8 @@ import { endStepWatch } from "./stuck.ts";
 import { verdictKeysFor, writeStepRecord } from "./records.ts";
 import { evaluateStepRecordTrust, runRecordRepair, stepArtifactPaths, stepRecordFor, stepSpawnEnv } from "./repair.ts";
 import { runSubagent } from "./spawn.ts";
-import { verdictValuesFor } from "./templates.ts";
+import { restoreAllTools, type ToolMaskHost } from "./toolmask.ts";
+import { verdictValuesFor } from "./verdict-values.ts";
 import type { GitContext, WorkflowPhase, WorkflowState, WorkflowStep } from "./types.ts";
 
 /**
@@ -63,16 +64,45 @@ export function decisionBlockedByInFlightChain(
  * exists to prevent, turned against the user.
  */
 /**
+ * S5a/ADR-62 (INV-12) — the hint the PAINTER shows for a budget park: the env
+ * var that raises the tripped dimension and a value to try. The park notify
+ * is transient, so after a restart the persisted `pausedReason` (which carries
+ * the dimension) and the persisted `budgetRaiseEnv` are what the human has.
+ * Returns null for any other park.
+ */
+export function budgetPanelHint(state: Pick<WorkflowState, "pausedReason" | "budgetRaiseEnv">): string | null {
+  const fromReason = budgetRaiseHint(state.pausedReason ?? "");
+  if (fromReason) return fromReason;
+  if (state.budgetRaiseEnv) return `raise with ${state.budgetRaiseEnv} or off`;
+  return null;
+}
+
+/**
+ * S5a/ADR-62 — the panel title of a paused run, with the budget hint when
+ * the park is a budget trip.
+ */
+function pausedPanelTitle(state: WorkflowState): string {
+  const reason = state.pausedReason ? ` — ${state.pausedReason}` : "";
+  const hint = budgetPanelHint(state);
+  return `Workflow paused${reason}${hint ? ` — ${hint}` : ""}`;
+}
+
+/**
  * The phase whose park a human resolution releases: verdict parks name the
  * phase directly; kill-switch/exhaustion reasons encode it after the first
  * colon; entry gates park AT the gated phase; post-completion manual gates
  * park one index past the completed phase; optional phases park at
  * phaseIndex. Falls back to the workflow id when nothing resolves.
+ *
+ * S5a/TASK_17 (ADR-40, ADR-51): the prefix list carries the two S5a parks
+ * — `provenance-review:<phase>:<step>` (the copied page text) and
+ * `verdict-config:<phase>` (a verdict-bearing phase with no flagged step).
+ * Both name their phase after the first colon, like the kill-switch parks.
  */
-function parkedGateId(state: WorkflowState): string {
+export function parkedGateId(state: WorkflowState): string {
   if (state.verdictPark) return state.verdictPark;
   const reason = state.pausedReason ?? "";
-  for (const p of ["verdicts-disabled:", "loopback-disabled:"]) {
+  for (const p of ["verdicts-disabled:", "loopback-disabled:", "provenance-review:", "verdict-config:"]) {
     if (reason.startsWith(p)) return reason.slice(p.length).split(":")[0] || state.workflowId;
   }
   const phases = getWorkflow(state.workflowId)?.phases ?? [];
@@ -102,7 +132,16 @@ function auditGateDecision(
   );
 }
 
-function abortWorkflow(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: WorkflowState, message: string): void {
+export function abortWorkflow(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: WorkflowState, message: string): void {
+  // S5a/TASK_02 (call site 3): the terminal restore runs BEFORE
+  // invalidateRuntime() — the browser tools come back and the mask ledger is
+  // cleared (only after the restore succeeded, INV-28). A later `full` phase
+  // in the same session has its browser tools.
+  try {
+    restoreAllTools(pi as unknown as ToolMaskHost);
+  } catch {
+    /* an abort never dies on a mask restore */
+  }
   // Invalidate first: any in-flight delegation's shouldAbort() flips false→
   // true and the spawn loop terminates the child (SIGKILL). Previously the
   // orphaned chain kept running to completion, burning tokens after "aborted"
@@ -126,7 +165,7 @@ function abortWorkflow(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: Wo
   // The run is over: its ledger file and step records die with it. The run
   // report is written FIRST — it is the durable record and must not depend
   // on the files deleted below.
-  writeRunReport(ctx.cwd, state.workflowId);
+  writeRunReport(ctx.cwd, state.workflowId, state.runId);
   cleanupRunArtifacts(ctx.cwd, state, (m) => {
     try { ctx.ui.notify(m, "warning"); } catch { /* stale ctx */ }
   });
@@ -300,7 +339,7 @@ export async function handleKstackCommand(args: string, ctx: ExtensionCommandCon
     }
 
     const choice = await ctx.ui.select(
-      activeState.status === "paused" ? `Workflow paused${activeState.pausedReason ? ` — ${activeState.pausedReason}` : ""}` : "Workflow in progress",
+      activeState.status === "paused" ? pausedPanelTitle(activeState) : "Workflow in progress",
       [
         `Resume: ${activeState.workflowId} → ${phaseName} ${progress}`,
         "Advance manually…",
@@ -580,13 +619,11 @@ export async function handleSprintPanel(
     // (state.ts); parks written before the cause existed fall back to no-verdict.
     const cause = state.pausedReason?.split(":")[2] ?? "no-verdict";
     const causeText =
-      cause === "artifact-mismatch"
-        ? "the parsed HANDOFF verdict disagrees with the on-disk artifact"
-        : cause === "unroutable"
-          ? "a whitelisted verdict value is off this phase's expectation map"
-          : state.pausedReason?.startsWith("park-on:") || state.pausedReason?.startsWith("feedback-spec:")
-            ? `a designed park fired (${state.pausedReason})`
-            : "the agent emitted no trustworthy verdict";
+      cause === "unroutable"
+        ? "a whitelisted verdict value is off this phase's expectation map"
+        : state.pausedReason?.startsWith("park-on:") || state.pausedReason?.startsWith("feedback-spec:")
+          ? `a designed park fired (${state.pausedReason})`
+          : "the agent emitted no trustworthy verdict";
     const excerpt = state.pendingVerdict?.excerpt?.trim() || "(no verdict-shaped lines found in the step records)";
     // A security verdict can NEVER be skipped: "Continue as approved" is not
     // offered for a phase whose verdict step is the security review.
@@ -637,6 +674,80 @@ export async function handleSprintPanel(
   }
 
   const reason = state.pausedReason ?? "";
+  // S5a/TASK_17 (ADR-40): the provenance park — text copied from a page
+  // reached an artifact. The copy is already quarantined (marked as data,
+  // nothing deleted); the human decides what happens to the phase.
+  //
+  // Accept: the human has read the listed lines — the gate is released and
+  // the guard is NOT re-run. Re-run: the human edits the listed lines out
+  // first — the step is re-issued in resume mode and the guard checks the
+  // artifact again (a surviving match re-parks: one human click per
+  // iteration, no autonomous loop). Abort: the run ends.
+  if (state.status === "paused" && reason.startsWith("provenance-review:")) {
+    const findings = state.provenanceFindings ?? [];
+    const choice = await ctx.ui.select(
+      `${wfId} paused — ${reason} — page text was copied into the artifact (quarantined, nothing deleted). Copied lines:\n${findings.map((f) => `- ${f}`).join("\n") || "- (no detail available)"}`,
+      ["Accept result — continue past the gate", "Re-run the step (re-checks the artifact)", "Abort workflow"],
+    );
+    if (choice === "Accept result — continue past the gate") {
+      if (panelGuard(ctx, state)) return true;
+      const next = forceContinuePastGate(state, phases);
+      // The guard parks BEFORE the step result is written, so the accepted
+      // phase is absent from state.results — the Accept must record it, or
+      // the phase vanishes from the run report and its verdict never routes
+      // (the same contract forceApproveParked honours at state.ts).
+      // The park reason names the phase the guard fired in
+      // ("provenance-review:<phase>:<step>").
+      const acceptedPhaseId =
+        phases.find((p) => p.id === parkedGateId(state))?.id ??
+        phases[state.phaseIndex]?.id ??
+        parkedGateId(state);
+      const accepted: WorkflowState = {
+        ...next,
+        // The accepted phase is OVER: the resume marker (the Re-run branch's
+        // re-issue flag) must not label the NEXT phase's first step as an
+        // interrupted, re-issued step — forceApproveParked clears it too.
+        resumeMode: undefined,
+        reissues: undefined,
+        results: {
+          ...next.results,
+          [acceptedPhaseId]: {
+            status: "completed",
+            summary: "Accepted by explicit human decision (provenance guard: copied page text reviewed).",
+          },
+        },
+      };
+      auditGateDecision(ctx, state, "run");
+      saveState(pi, accepted);
+      launchPhase(pi, ctx, accepted);
+    } else if (choice === "Re-run the step (re-checks the artifact)") {
+      if (panelGuard(ctx, state)) return true;
+      const resumed = resumeState(state);
+      auditGateDecision(ctx, state, "run");
+      saveState(pi, resumed);
+      launchPhase(pi, ctx, resumed);
+    } else if (choice === "Abort workflow") {
+      if (await ctx.ui.confirm("Abort workflow?", `Stop "${wfId}" at phase ${state.phaseIndex + 1}?`)) {
+        abortWorkflow(pi, ctx, state, "Workflow aborted.");
+      }
+    }
+    return true;
+  }
+  // S5a/TASK_17 (ADR-51): a verdict-bearing phase that declares no flagged
+  // step is a REGISTRY mistake — re-running a step cannot fix it, so the
+  // only way out is Abort. A Resume here would re-park forever.
+  if (state.status === "paused" && reason.startsWith("verdict-config:")) {
+    const choice = await ctx.ui.select(
+      `${wfId} paused — ${reason} — this phase declares a verdict but no step owns it: a workflow definition mistake, not a work problem. Only aborting can resolve it.`,
+      ["Abort workflow"],
+    );
+    if (choice === "Abort workflow") {
+      if (await ctx.ui.confirm("Abort workflow?", `Stop "${wfId}" at phase ${state.phaseIndex + 1}?`)) {
+        abortWorkflow(pi, ctx, state, "Workflow aborted.");
+      }
+    }
+    return true;
+  }
   // Kill-switch parks (F2 fix): with KSTACK_PI_VERDICTS/_LOOPBACKS off, a
   // completed verdict-bearing gate pauses with verdicts-disabled:/
   // loopback-disabled:. Without a decision surface the only exits were Abort

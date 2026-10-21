@@ -17,8 +17,10 @@ import { appendLedger } from "./ledger.ts";
 import { clearPhaseRecords } from "./records.ts";
 import { evaluateStepRecordTrust, repairKey, runRecordRepair, stepArtifactPaths, stepRecordFor, stepSpawnEnv } from "./repair.ts";
 import { cleanupRunArtifacts } from "./runcleanup.ts";
-import { newStepRun, feedStepEvent, detectStuck, checkStepBudgets, stepBudgetDefaults, beginStepWatch, endStepWatch } from "./stuck.ts";
-import { cleanupEphemeralArtifacts, sprintGateEphemerals, artifactSignalFiles, runStartMs } from "./artifacts.ts";
+import { newStepRun, feedStepEvent, detectStuck, checkStepBudgets, stepBudgetDefaults, beginStepWatch, endStepWatch, BUDGET_ENV, type BudgetDim } from "./stuck.ts";
+import { cleanupEphemeralArtifacts, sprintGateEphemerals, sprintLegacyEphemerals, artifactSignalFiles, runStartMs } from "./artifacts.ts";
+import { reconcileToolMask, restoreAllTools, profileForPhaseId, type ToolMaskHost } from "./toolmask.ts";
+import { agentMayBrowse, provenancePark, runProvenanceGuard } from "./provenance.ts";
 
 // --- Sequential-chain resilience (STEP 2f) -----------------------------------
 
@@ -259,6 +261,70 @@ export function advanceBlockReason(state: WorkflowState): string | null {
 }
 
 /**
+ * S5a/TASK_10 (ADR-62, INV-12) — the details of a `budget-exceeded:` trip:
+ * the dim that tripped, the env var that RAISES it and the limit in force.
+ * Null for any other trip (a stuck rule, a quota).
+ */
+export function budgetTripDetails(trip: string): { dim: BudgetDim; env: string; limit: number | null } | null {
+  const match = /^budget-exceeded:([A-Za-z]+):([^:]+)/.exec(trip ?? "");
+  if (!match) return null;
+  const dim = match[1] as BudgetDim;
+  const env = BUDGET_ENV[dim];
+  if (!env) return null;
+  // The trip names "<phase>.<step>" — the phase resolves the class default.
+  const phaseId = match[2].split(".")[0];
+  const limit = stepBudgetDefaults(phaseId)[dim];
+  return { dim, env, limit: Number.isFinite(limit) ? limit : null };
+}
+
+/**
+ * S5a/TASK_10 — the hint the park message carries: the env var that raises
+ * the tripped dim and a concrete value to try (twice the limit in force).
+ */
+export function budgetRaiseHint(trip: string): string | null {
+  const details = budgetTripDetails(trip);
+  if (!details) return null;
+  const suggested = details.limit === null ? "off" : String(details.limit * 2);
+  return `raise with ${details.env}=${suggested} or off`;
+}
+
+/**
+ * S5a/TASK_10 — apply the phase's TOOL PROFILE to the MAIN session.
+ *
+ * The mask is CONTEXT ECONOMY, not a security boundary (ADR-28): every
+ * failure is swallowed and the session continues UNMASKED. The change is
+ * ledgered once per change — the audit trail the C3 baseline reads (the
+ * main-scope rows are the mask's evidence).
+ */
+export function applyPhaseToolMask(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  state: WorkflowState,
+  phase: Pick<WorkflowPhase, "id">,
+): void {
+  try {
+    const profile = profileForPhaseId(state.workflowId, phase.id);
+    reconcileToolMask(pi as unknown as ToolMaskHost, profile, {
+      runId: state.runId ?? null,
+      onChange: (change) => {
+        appendLedger(
+          ctx.cwd,
+          state,
+          {
+            kind: "report",
+            phaseId: phase.id,
+            payload: { summary: `tool-mask ${change.profile}: -${change.removed}/+${change.added}` },
+          },
+          () => {},
+        );
+      },
+    });
+  } catch {
+    /* the mask is an optimisation — it never blocks the run */
+  }
+}
+
+/**
  * Terminal bookkeeping shared by EVERY completion path (executor recursion,
  * kstack_advance on the last phase, the optional-skip panel): flush the run
  * report, delete the run's ephemerals (S4/§10.5 — every failure is
@@ -276,7 +342,15 @@ export function finalizeRun(pi: ExtensionAPI, ctx: ExtensionContext, state: Work
   };
   // The run report is written FIRST: it is the durable record of the run and
   // must not depend on the files deleted below.
-  writeRunReport(ctx.cwd, state.workflowId);
+  writeRunReport(ctx.cwd, state.workflowId, state.runId);
+  // S5a/TASK_02: the terminal restore — the browser tools come back before
+  // the run's ephemerals die. The mask ledger is cleared only after the
+  // restore SUCCEEDED (INV-28).
+  try {
+    restoreAllTools(pi as unknown as ToolMaskHost);
+  } catch {
+    /* a completion never dies on a mask restore */
+  }
   if ((state.ephemeralArtifacts ?? []).length > 0) {
     const { deleted, failed } = cleanupEphemeralArtifacts(ctx.cwd, state.ephemeralArtifacts!, warn);
     appendLedger(ctx.cwd, state, {
@@ -379,6 +453,10 @@ export async function executeCurrentPhase(
   }
   // STEP 0 telemetry: make sure this run is being accumulated.
   ensureRun(state.workflowId);
+  // S5a/TASK_16 (ADR-57, G4): the taint store is PER RUN — the environment
+  // carries the RUN ID (never a path, ADR-57). Without it the store is
+  // disabled and the provenance guard has nothing to match.
+  if (state.runId) process.env.KSTACK_TAINT_RUN = state.runId;
   // Crash forensics: annotate a delegation that never reached a terminal
   // event in the previous run (host died mid-flight).
   annotateOrphanedDelegation(pi, ctx);
@@ -393,6 +471,11 @@ export async function executeCurrentPhase(
     notify(`Workflow "${workflow.name}" completed!`, "info");
     return;
   }
+
+  // S5a/TASK_02 (call site 1): the phase's tool profile is applied to the
+  // MAIN session as the phase starts — the eager half of the mask (the
+  // per-turn re-assert in the before_agent_start hook is the safety net).
+  applyPhaseToolMask(pi, ctx, state, phase);
 
   const git = await detectGitContext(ctx.cwd, opts?.execGit);
   if (!alive()) return;
@@ -412,7 +495,14 @@ export async function executeCurrentPhase(
     const numbered = {
       ...state,
       sprintNumber: discovery.next,
-      ephemeralArtifacts: [...new Set([...(state.ephemeralArtifacts ?? []), ...sprintGateEphemerals(discovery.next)])],
+      ephemeralArtifacts: [
+        ...new Set([
+          ...(state.ephemeralArtifacts ?? []),
+          ...sprintGateEphemerals(discovery.next),
+          // TASK_20: the legacy document names of THIS sprint number die with it.
+          ...sprintLegacyEphemerals(discovery.next),
+        ]),
+      ],
     };
     saveState(pi, numbered);
     state = numbered;
@@ -727,22 +817,94 @@ export async function executeCurrentPhase(
 
     // S3/D28 + TASK_04: a tripped detector or an exhausted quota parks the
     // run at the CURRENT stepIndex — resume re-delivers the same step in
-    // resumeMode. Ledger kinds: stuck rules ⇒ run-interrupted, budget/quota
-    // trips ⇒ quota-parked. Never a phase-verdict, never an attempt burn.
+    // resumeMode. Ledger kinds: a stuck rule or a budget trip ⇒
+    // run-interrupted, a wall-clock / run-token quota ⇒ quota-parked. Never
+    // a phase-verdict, never an attempt burn.
     if (stepGuard?.trip || interruption.kind) {
       const reason = stepGuard?.trip ?? `quota-parked:${phase.id}${step ? `.${step.id}` : ""}`;
-      const kind =
-        interruption.kind ?? (stepGuard!.trip!.startsWith("stuck:") ? "run-interrupted" : "quota-parked");
-      const parked = { ...state, status: "paused" as const, pausedReason: reason, resumeMode: true };
+      // S5a/TASK_10: a budget trip is an INTERRUPTION, never a quota —
+      // `quota-parked` is reserved for the wall-clock / run-token
+      // exhaustion, and the two true quota sites set `interruption.kind`
+      // themselves (they are unchanged).
+      const kind = interruption.kind ?? "run-interrupted";
+      const budget = stepGuard?.trip ? budgetTripDetails(stepGuard.trip) : null;
+      const parked = {
+        ...state,
+        status: "paused" as const,
+        pausedReason: reason,
+        resumeMode: true,
+        // The env var that raises the tripped dim is PERSISTED, so the panel
+        // can name it after a restart (INV-12). A non-budget park clears it.
+        budgetRaiseEnv: budget?.env,
+      };
       saveState(pi, parked);
       setKstackStatus(ctx, parked, workflow);
-      // The budget-exceeded path already appended its quota-parked event
-      // inside the delegation loop — only the detector trip lands here.
+      // The trip lands here: the delegation loop only sets `stepGuard.trip`,
+      // it never ledgered the event itself (the two quota sites above do).
       if (stepGuard?.trip) {
-        appendLedger(ctx.cwd, state, { kind, phaseId: phase.id, stepId: step!.id, payload: { summary: `detector trip: ${stepGuard.trip}` } }, (m) => notify(m, "warning"));
+        const raiseHint = budget ? budgetRaiseHint(stepGuard.trip) : null;
+        appendLedger(
+          ctx.cwd,
+          state,
+          {
+            kind,
+            phaseId: phase.id,
+            stepId: step!.id,
+            payload: {
+              summary: raiseHint
+                ? `budget trip: ${stepGuard.trip} — ${raiseHint}`
+                : `detector trip: ${stepGuard.trip}`,
+              ...(budget ? { raiseWith: budget.env } : {}),
+            },
+          },
+          (m) => notify(m, "warning"),
+        );
       }
-      notify(`kstack: ${reason} — step paused for a human decision; resume via /kstack re-runs the step in resume mode.`, "warning");
+      const raiseHint = stepGuard?.trip ? budgetRaiseHint(stepGuard.trip) : null;
+      notify(
+        `kstack: ${reason} — step paused for a human decision; resume via /kstack re-runs the step in resume mode.${raiseHint ? ` — ${raiseHint}` : ""}`,
+        "warning",
+      );
       return;
+    }
+
+    // S5a/TASK_16 — the provenance guard (delegated step): a child that may
+    // browse can copy page text into the phase's artifact. The guard runs
+    // BEFORE the verdict handling: an instruction-shaped copy is parked for
+    // a human (no attempt burned), a clean artifact advances untouched.
+    if (delegatedStep && step && state.runId && agentMayBrowse(step.agent ?? "worker")) {
+      const guard = runProvenanceGuard({
+        phase,
+        stepId: step.id,
+        cwd: ctx.cwd,
+        runId: state.runId,
+        sprint: state.sprintNumber,
+        workflowId: state.workflowId,
+      });
+      if (guard.escalate) {
+        const parked = provenancePark(state, phase.id, step.id, guard);
+        saveState(pi, parked);
+        setKstackStatus(ctx, parked, workflow);
+        appendLedger(
+          ctx.cwd,
+          state,
+          {
+            kind: "report",
+            phaseId: phase.id,
+            stepId: step.id,
+            payload: {
+              summary: `provenance guard: ${guard.findings.length} copied passage(s) need a human decision — parked WITHOUT burning an attempt`,
+              artifacts: guard.rewritten,
+            },
+          },
+          (m) => notify(m, "warning"),
+        );
+        notify(
+          `kstack: provenance guard — ${guard.findings.length} copied passage(s) found in "${phase.id}". The workflow is paused for a human decision (no attempt burned).`,
+          "warning",
+        );
+        return;
+      }
     }
 
     // S4 rider — verdict-record REPAIR (one attempt per step per park).
@@ -829,6 +991,8 @@ export async function executeCurrentPhase(
         turns: result.turns,
         tokensIn: result.usage?.input,
         tokensCacheRead: result.usage?.cacheRead,
+        tokensCacheCreation: result.usage?.cacheWrite,
+        tokensCacheWrite1h: result.usage?.cacheWrite1h,
         tokensOut: result.usage?.output,
         timeoutClass: timeoutClassFor(phase.id) ?? "default",
       });
