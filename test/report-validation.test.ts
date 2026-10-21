@@ -19,6 +19,18 @@ const HAS_BASH = spawnSync("bash", ["-c", "echo ok"], { encoding: "utf-8" }).sta
 /** The spawn env of a CLI call — `undefined` removes a variable. */
 function envWith(overrides: Record<string, string | undefined>): Record<string, string> {
   const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+  // The ambient kstack env (published verdict maps, the current phase/step)
+  // describes ONE step — a unit test asserts the CLI under an env it
+  // controls, so the inherited values never leak into the assertion.
+  for (const k of [
+    "KSTACK_VERDICT_KEYS",
+    "KSTACK_VERDICT_VALUES",
+    "KSTACK_VERDICT_REQUIRED",
+    "KSTACK_PHASE",
+    "KSTACK_STEP",
+  ]) {
+    delete env[k];
+  }
   for (const [k, v] of Object.entries(overrides)) {
     if (v === undefined) delete env[k];
     else env[k] = v;
@@ -136,6 +148,62 @@ describe("kstack-report verdict value validation", () => {
     assert.equal(run.status, 0, run.stderr);
     const rec = readStepRecord(cwd, "sprint", "r7", "devsecops-review", "security");
     assert.deepEqual(rec?.verdicts, { "security-review": "rejected", severity: "high" });
+  });
+});
+
+describe("the published verdict map is scoped to the step it names", () => {
+  // The env of a delegated step is inherited by EVERY process it spawns
+  // (a test runner, a build, a nested CLI call). The published map
+  // describes ONE step — it must not refuse a record that belongs to a
+  // different step, and it must not enforce a key the step does not own.
+  const QA_STEP_ENV = {
+    KSTACK_PHASE: "qa-browsing",
+    KSTACK_STEP: "test",
+    KSTACK_VERDICT_KEYS: "status",
+    KSTACK_VERDICT_VALUES: "status=green,orange,red",
+    KSTACK_VERDICT_REQUIRED: "status",
+  };
+
+  test("a record for another step is not refused by an inherited mandate", () => {
+    if (!HAS_BASH) return; // no bash on this host
+    const { run, cwd } = report(
+      ["--workflow", "sprint", "--run-id", "r8", "--phase", "implement", "--step", "backend",
+        "--marker", "BACKEND-DONE", "--summary", "done"],
+      QA_STEP_ENV,
+    );
+    assert.equal(run.status, 0, run.stderr);
+    const rec = readStepRecord(cwd, "sprint", "r8", "implement", "backend");
+    assert.deepEqual(rec?.markers, ["BACKEND-DONE"], "the record of the other step is written");
+  });
+
+  test("the mandate still applies to the record of the step the env names", () => {
+    if (!HAS_BASH) return; // no bash on this host
+    const { run, cwd } = report(
+      ["--workflow", "sprint", "--run-id", "r9", "--phase", "qa-browsing", "--step", "test",
+        "--marker", "QA-DONE", "--summary", "done"],
+      QA_STEP_ENV,
+    );
+    assert.equal(run.status, 1, run.stderr);
+    assert.match(run.stderr, /status==<value>/);
+    assert.equal(readStepRecord(cwd, "sprint", "r9", "qa-browsing", "test"), null, "no record was written");
+  });
+
+  test("a required key the step does not own is never enforced", () => {
+    if (!HAS_BASH) return; // no bash on this host
+    const { run, cwd } = report(
+      ["--workflow", "sprint", "--run-id", "r10", "--phase", "implement", "--step", "ui-check",
+        "--marker", "UI-DONE", "--summary", "done"],
+      {
+        KSTACK_PHASE: "implement",
+        KSTACK_STEP: "ui-check",
+        KSTACK_VERDICT_KEYS: "ui",
+        KSTACK_VERDICT_VALUES: "ui=pass,fail",
+        KSTACK_VERDICT_REQUIRED: "status",
+      },
+    );
+    assert.equal(run.status, 0, run.stderr);
+    const rec = readStepRecord(cwd, "sprint", "r10", "implement", "ui-check");
+    assert.deepEqual(rec?.markers, ["UI-DONE"], "an unowned required key cannot deadlock the step");
   });
 });
 
