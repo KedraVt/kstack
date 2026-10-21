@@ -45,6 +45,8 @@ detailed via grilling before execution and this file is updated.
 | D35 | Data migration (S2) | **NOT in S2 — S6 backlog** | `~/.kstack` starts clean; the old `.gstack/` dirs stay in place; `kstack-migrate` task after S5b; no lazy shim — `gstack-wf-state` entries are ignored → pre-rename sessions abort cleanly (D14 holds) |
 | D36 | Document dir (S2) | **Shared `skills/kstack-document/`** | one dir, two registry ids (`kstack-document-release`/`-generate`) via `dir:` — the "one dir per SKILL.md" invariant holds |
 | D37 | Env authority (S2) | **`KSTACK_*` sole source** | no dual-read fallback to the old names; the code reads only `KSTACK_*` |
+| D38 | Loop admission VGR-style | **S5b (W7), no machinery in S4** | VeriLoop-E2 (VGR) inspection: the model proposes, the harness decides; commit only if zero protected regressions + at least one strict improvement. Outcome taxonomy -> judge protocol (W4); per-criterion oracles -> eval (W1); evidence state = derived view of the ledger -> memory (W3). In S4 the loop specs only annotate *what is protected* on each loop-back (the input for W7); literal snapshot rollback -> S6 |
+| D39 | Verdict/consult channel | **`kstack-report` in S4; brain consult -> S5b with event-driven delegation (option A)** | the verdict tool is a protocol -> embedded in the S4 step contracts (avoids double generalization); a consult is additive -> free deferral. Authorship (Q1): judgment verdicts -> delegated steps + tool; factual/self-verifiable ones may stay main+tool. The mechanical+nested `kstack-ask` is optional S4 / first S5b item; a live brain consult needs a non-blocking spawn -> W2; consult-park (B) is a fallback plan only on evidence, not built a priori |
 
 ## Sprint skeleton
 
@@ -431,6 +433,17 @@ feedback from the artifact, park on unreadable verdict.
 blocker**, never the raw trace (CCRM: failed attempt in context
 ×7.1 per-step error).
 
+**Verdict transport (D39)**: the new loops emit verdicts through
+`kstack-report` - a schema-validated tool/CLI (vars, enum values,
+severity mandatory on rejection, artifact refs) that appends an event to
+the ledger and writes `verdict-<phase>.json` into `.kstack/runs/<run>/`;
+`pendingVerdict` is populated from the structured record, fail-closed as
+today (no record -> park, zero attempt). It replaces the HANDOFF parse as
+the canonical channel for the redesigned workflows; HANDOFF stays as
+redundancy during the migration, and the sprint migrates to its own spec.
+Authorship (Q1): judgment verdicts on delegated steps; factual ones may
+stay on main+tool.
+
 ### Tasks
 
 - [ ] **T1 — Per-workflow redesign spec.** For each: step decomposition,
@@ -503,7 +516,11 @@ interface → push.
   runtime executes in level-synchronous waves, per-node trigger rules
   (all_success/none_failed/one_success), joiner-verdict;
   **verdict-nodes appending nodes = bounded replanning**. Complements
-  the phase machine, doesn't replace it.
+  the phase machine, doesn't replace it. Coupling (D39): **event-driven
+  delegation** - non-blocking spawn, completion arrives as an event ->
+  the main session stays free during the delegations; this is what
+  enables `kstack-ask` against the real brain (a live consult at
+  turn latency via mailbox) and any future node parallelism.
 - [ ] **W3 — Memory redesign** (2.9, resolves D5, D31 architecture).
   Memory interface with `enabled` yes/no + `local|supermemory` backend;
   canonical verbatim ledger for decisions/verdicts; optional semantic
@@ -520,6 +537,15 @@ interface → push.
   parallel-calls path (caveat −14.1%).
 - [ ] **W6 — Blast-radius push** (2.2). graft → blast-radius injected
   into context at edit time, without the agent asking for it.
+- [ ] **W7 — Loop admission VGR-style** (D38, last - depends on W1/W3/W4).
+  Every loop-back is a candidate: commit only if zero regressions on the
+  protected items + at least one strict improvement. Outcome taxonomy
+  strict-progress / no-progress / protected-regression / incomparable /
+  zero-rank, from the judge protocol (W4); per-criterion oracles from the
+  eval (W1); evidence state as a derived view of the ledger (W3);
+  repeated no-progress -> park via the stuck detector. Input: the
+  "protected surface" annotations the S4 loop specs carry. Literal
+  rollback (snapshot per commit) is excluded -> S6.
 
 ### DoD
 
