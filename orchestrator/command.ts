@@ -69,11 +69,16 @@ export function decisionBlockedByInFlightChain(
  * colon; entry gates park AT the gated phase; post-completion manual gates
  * park one index past the completed phase; optional phases park at
  * phaseIndex. Falls back to the workflow id when nothing resolves.
+ *
+ * S5a/TASK_17 (ADR-40, ADR-51): the prefix list carries the two S5a parks
+ * — `provenance-review:<phase>:<step>` (the copied page text) and
+ * `verdict-config:<phase>` (a verdict-bearing phase with no flagged step).
+ * Both name their phase after the first colon, like the kill-switch parks.
  */
-function parkedGateId(state: WorkflowState): string {
+export function parkedGateId(state: WorkflowState): string {
   if (state.verdictPark) return state.verdictPark;
   const reason = state.pausedReason ?? "";
-  for (const p of ["verdicts-disabled:", "loopback-disabled:"]) {
+  for (const p of ["verdicts-disabled:", "loopback-disabled:", "provenance-review:", "verdict-config:"]) {
     if (reason.startsWith(p)) return reason.slice(p.length).split(":")[0] || state.workflowId;
   }
   const phases = getWorkflow(state.workflowId)?.phases ?? [];
@@ -645,6 +650,55 @@ export async function handleSprintPanel(
   }
 
   const reason = state.pausedReason ?? "";
+  // S5a/TASK_17 (ADR-40): the provenance park — text copied from a page
+  // reached an artifact. The copy is already quarantined (marked as data,
+  // nothing deleted); the human decides what happens to the phase.
+  //
+  // Accept: the human has read the listed lines — the gate is released and
+  // the guard is NOT re-run. Re-run: the human edits the listed lines out
+  // first — the step is re-issued in resume mode and the guard checks the
+  // artifact again (a surviving match re-parks: one human click per
+  // iteration, no autonomous loop). Abort: the run ends.
+  if (state.status === "paused" && reason.startsWith("provenance-review:")) {
+    const findings = state.provenanceFindings ?? [];
+    const choice = await ctx.ui.select(
+      `${wfId} paused — ${reason} — page text was copied into the artifact (quarantined, nothing deleted). Copied lines:\n${findings.map((f) => `- ${f}`).join("\n") || "- (no detail available)"}`,
+      ["Accept result — continue past the gate", "Re-run the step (re-checks the artifact)", "Abort workflow"],
+    );
+    if (choice === "Accept result — continue past the gate") {
+      if (panelGuard(ctx, state)) return true;
+      const next = forceContinuePastGate(state, phases);
+      auditGateDecision(ctx, state, "run");
+      saveState(pi, next);
+      launchPhase(pi, ctx, next);
+    } else if (choice === "Re-run the step (re-checks the artifact)") {
+      if (panelGuard(ctx, state)) return true;
+      const resumed = resumeState(state);
+      auditGateDecision(ctx, state, "run");
+      saveState(pi, resumed);
+      launchPhase(pi, ctx, resumed);
+    } else if (choice === "Abort workflow") {
+      if (await ctx.ui.confirm("Abort workflow?", `Stop "${wfId}" at phase ${state.phaseIndex + 1}?`)) {
+        abortWorkflow(pi, ctx, state, "Workflow aborted.");
+      }
+    }
+    return true;
+  }
+  // S5a/TASK_17 (ADR-51): a verdict-bearing phase that declares no flagged
+  // step is a REGISTRY mistake — re-running a step cannot fix it, so the
+  // only way out is Abort. A Resume here would re-park forever.
+  if (state.status === "paused" && reason.startsWith("verdict-config:")) {
+    const choice = await ctx.ui.select(
+      `${wfId} paused — ${reason} — this phase declares a verdict but no step owns it: a workflow definition mistake, not a work problem. Only aborting can resolve it.`,
+      ["Abort workflow"],
+    );
+    if (choice === "Abort workflow") {
+      if (await ctx.ui.confirm("Abort workflow?", `Stop "${wfId}" at phase ${state.phaseIndex + 1}?`)) {
+        abortWorkflow(pi, ctx, state, "Workflow aborted.");
+      }
+    }
+    return true;
+  }
   // Kill-switch parks (F2 fix): with KSTACK_PI_VERDICTS/_LOOPBACKS off, a
   // completed verdict-bearing gate pauses with verdicts-disabled:/
   // loopback-disabled:. Without a decision surface the only exits were Abort

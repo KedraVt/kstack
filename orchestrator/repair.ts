@@ -177,6 +177,11 @@ export function stepSpawnEnv(
     // The step's declared signal verdict — a record without it is
     // signal-missing and the phase re-issues the step.
     KSTACK_VERDICT_REQUIRED: step.signal?.kind === "verdict" ? step.signal.value : "",
+    // S5a/TASK_16 (ADR-57, G4): the taint store is per-run — the child
+    // records the untrusted output it saw under the SAME run id, so the
+    // guard can match a copy the child pasted into an artifact. The env
+    // carries the RUN ID only, never a path.
+    ...(runId ? { KSTACK_TAINT_RUN: runId } : {}),
     ...(extra ?? {}),
   };
 }

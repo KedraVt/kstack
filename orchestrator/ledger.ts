@@ -75,6 +75,19 @@ export interface LedgerEntry {
     tokensIn?: number;
     cacheRead?: number;
     cacheCreation?: number;
+    /**
+     * S5a/TASK_16 (ADR-40): the provenance guard's park list — one
+     * `file:line  <excerpt>` entry per copied passage. It rides the ledger
+     * so the list survives a restart (the panel reads the state, the
+     * ledger keeps the audit trail).
+     */
+    findings?: string[];
+    /**
+     * S5a/TASK_16 (ADR-40): the artifacts the provenance guard could NOT
+     * scan — one `file: reason` entry per skipped candidate. A skip is a
+     * coverage hole, so it is never silent.
+     */
+    skipped?: string[];
   };
 }
 

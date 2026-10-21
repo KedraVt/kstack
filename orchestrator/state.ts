@@ -109,6 +109,15 @@ export function loadActiveState(ctx: ExtensionContext): WorkflowState | null {
         // channel too — only a plain string may name an env var (it is
         // printed back to the human, never executed).
         if (typeof normalized.budgetRaiseEnv !== "string") delete normalized.budgetRaiseEnv;
+        // S5a/TASK_16: the provenance park list rides the same untrusted
+        // entry channel — only plain strings may name a file and a line.
+        if (Array.isArray(normalized.provenanceFindings)) {
+          normalized.provenanceFindings = normalized.provenanceFindings.filter(
+            (f): f is string => typeof f === "string",
+          );
+        } else {
+          delete normalized.provenanceFindings;
+        }
         if (typeof normalized.baseHead !== "string") delete normalized.baseHead;
         if (typeof normalized.stepGates !== "boolean") delete normalized.stepGates;
         if (typeof normalized.stepGate !== "boolean") delete normalized.stepGate;

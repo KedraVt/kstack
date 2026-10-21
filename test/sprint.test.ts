@@ -1322,13 +1322,14 @@ describe("in-flight decision guards (2026-09 fix 4)", () => {
   test("every mutating sprint-panel branch is guarded (F4)", () => {
     // Static wiring check: the mutating/launching choices of handleSprintPanel
     // (freeze: reviewer fix + own fix; D4 continue + return + repair; gate
-    // accept + re-run; kill-switch accept + re-run; pause resume/re-issue)
-    // must consult panelGuard before touching state. A refused decision
-    // still returns true — the user stays parked, never falling through to
-    // the generic resume path.
+    // accept + re-run; kill-switch accept + re-run; pause resume/re-issue;
+    // S5a/TASK_17: provenance accept + provenance re-run) must consult
+    // panelGuard before touching state. A refused decision still returns
+    // true — the user stays parked, never falling through to the generic
+    // resume path.
     const source = readFileSync(new URL("../orchestrator/command.ts", import.meta.url), "utf-8");
     const guardCount = (source.match(/if \(panelGuard\(ctx, state\)\) return true;/g) ?? []).length;
-    assert.equal(guardCount, 10, "all 10 mutating park-panel branches must be guarded");
+    assert.equal(guardCount, 12, "all 12 mutating park-panel branches must be guarded");
   });
 
   test("sprint panel refuses a mutating decision while the chain runs, allows it after (F4)", async () => {

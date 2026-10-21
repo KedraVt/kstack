@@ -21,6 +21,7 @@ import { feedWatchEvent, endStepWatch, stepWatchStats, type StepWatchEvent } fro
 import { SECURITY_SECTION } from "../lib/content-security.ts";
 import { EXTENSION_ROOT } from "./skills.ts";
 import { reconcileToolMask, restoreAllTools, profileForPhaseId, type ToolMaskHost } from "./toolmask.ts";
+import { mainMayBrowse, provenancePark, runProvenanceGuard } from "./provenance.ts";
 
 /** Automatic re-deliveries of a main step whose completion signal is missing. */
 const MAX_AUTO_REISSUES = 2;
@@ -379,6 +380,52 @@ export function initOrchestrator(pi: ExtensionAPI): void {
           // Routing vars emitted via the step's record land in state.vars.
           if (check.kind === "ok" && Object.keys(check.vars).length > 0) {
             advanceState = { ...advanceState, vars: { ...(advanceState.vars ?? {}), ...check.vars } };
+          }
+          // S5a/TASK_16 — the provenance guard (main step): a phase with
+          // browser access can copy page text into its artifact. The guard
+          // quarantines the copy losslessly (the user's text is never lost)
+          // and parks the run ONLY when the copy is instruction-shaped.
+          // The park burns no attempt: it is a human decision, not a verdict.
+          if (check.kind === "ok" && mainMayBrowse(state.workflowId, phase.id)) {
+            const guard = runProvenanceGuard({
+              phase,
+              stepId: curStep.id,
+              cwd: ctx.cwd,
+              runId: state.runId,
+              sprint: advanceState.sprintNumber,
+              workflowId: state.workflowId,
+            });
+            if (guard.escalate) {
+              const parked = provenancePark(advanceState, phase.id, curStep.id, guard);
+              saveState(pi, parked);
+              setKstackStatus(ctx, parked, workflow);
+              appendLedger(
+                ctx.cwd,
+                state,
+                {
+                  kind: "report",
+                  phaseId: phase.id,
+                  stepId: curStep.id,
+                  payload: {
+                    summary: `provenance guard: ${guard.findings.length} copied passage(s) need a human decision — parked WITHOUT burning an attempt`,
+                    artifacts: guard.rewritten,
+                  },
+                },
+                (m) => { try { ctx.ui.notify(m, "warning"); } catch { /* stale ctx */ } },
+              );
+              try {
+                ctx.ui.notify(
+                  `kstack: provenance guard — ${guard.findings.length} copied passage(s) found in "${phase.id}". The workflow is paused for a human decision (no attempt burned).`,
+                  "warning",
+                );
+              } catch { /* stale ctx */ }
+              return {
+                content: [{
+                  type: "text",
+                  text: `PROVENANCE REVIEW: text copied from a page was found in the artifact of step "${curStep.id}" — it is quarantined (marked as data, nothing deleted) and the workflow is PAUSED for a human decision. Copied lines:\n${guard.findings.map((f) => `- ${f.file}:${f.line}  ${f.excerpt}`).join("\n")}\nDo NOT call kstack_advance again; the user resolves it via /kstack (Accept / Re-run / Abort).`,
+                }],
+              };
+            }
           }
           if (
             phase.failFast &&

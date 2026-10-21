@@ -49,9 +49,51 @@ const RUN_ID_ENV = "KSTACK_TAINT_RUN";
  */
 let storeFull = false;
 
+/**
+ * The hashes THIS process recorded, and the bytes it wrote (ADR-39, G1).
+ *
+ * The agent has `bash`/`write`: it could delete or truncate the store it is
+ * checked against. The main process therefore keeps its own evidence — a
+ * file SMALLER than the bytes this process wrote is TAMPERED, and the guard
+ * degrades to a whole-artifact scan instead of trusting a store the agent
+ * may have emptied. Contributions of child processes live only in the file
+ * (residual R6).
+ *
+ * The evidence is kept PER RUN: the store is per-run, so a byte count that
+ * mixed two runs would call every later run tampered (its file is smaller
+ * than another run's total).
+ */
+const ownByRun = new Map<string, { hashes: Set<number>; bytes: number }>();
+
+/** The process-local evidence about the store — the guard's tamper check. */
+export interface TaintOwnState {
+  /** The hashes this process recorded. */
+  hashes: Set<number>;
+  /** The bytes this process appended. */
+  bytes: number;
+  /** True when this process stopped recording (the store hit its bound). */
+  full: boolean;
+}
+
+/** The process-local evidence about the store. Never throws. */
+export function taintOwnState(runId?: string): TaintOwnState {
+  if (runId !== undefined) {
+    const own = ownByRun.get(runId);
+    return { hashes: new Set(own?.hashes ?? []), bytes: own?.bytes ?? 0, full: storeFull };
+  }
+  const hashes = new Set<number>();
+  let bytes = 0;
+  for (const own of ownByRun.values()) {
+    for (const h of own.hashes) hashes.add(h);
+    bytes += own.bytes;
+  }
+  return { hashes, bytes, full: storeFull };
+}
+
 /** Test seam: forget that the store was full. Never called in production. */
 export function resetTaintStore(): void {
   storeFull = false;
+  ownByRun.clear();
 }
 
 /**
@@ -76,6 +118,15 @@ function fnv1a32(value: string): number {
 }
 
 /**
+ * The hash of ONE shingle, given as its tokens — the shared hash the guard
+ * uses when it walks an artifact's own token list (the writer hashes the
+ * same token sequence).
+ */
+export function shingleHash(list: string[]): number {
+  return fnv1a32(list.join(" "));
+}
+
+/**
  * The hashes of every shingle of the text. A text shorter than `k` tokens
  * yields no hash at all — it cannot be a copied run.
  */
@@ -84,7 +135,7 @@ export function shingleHashes(text: string, k: number = SHINGLE_K): number[] {
   if (k < 1 || list.length < k) return [];
   const hashes: number[] = [];
   for (let i = 0; i + k <= list.length; i++) {
-    hashes.push(fnv1a32(list.slice(i, i + k).join(" ")));
+    hashes.push(shingleHash(list.slice(i, i + k)));
   }
   return hashes;
 }
@@ -135,7 +186,14 @@ export function recordUntrusted(body: string, cwd: string): boolean {
         break;
       }
       const line = `{"h":[${chunk.join(",")}]}\n`;
-      if (safeAppend(cwd, relDir, "taint.jsonl", line)) wrote = true;
+      if (safeAppend(cwd, relDir, "taint.jsonl", line)) {
+        wrote = true;
+        // The process-local evidence: what THIS process recorded and wrote.
+        const own = ownByRun.get(runId) ?? { hashes: new Set<number>(), bytes: 0 };
+        for (const h of chunk) own.hashes.add(h);
+        own.bytes += Buffer.byteLength(line, "utf-8");
+        ownByRun.set(runId, own);
+      }
     }
     return wrote;
   } catch {

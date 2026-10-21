@@ -139,6 +139,65 @@ const INJECTION_PATTERNS: RegExp[] = [
   /<\/?\s*(?:system|assistant|tool_result)\s*>/i,
 ];
 
+/**
+ * The injection patterns that match a text (ADR-44).
+ *
+ * The provenance guard runs this over the taint-VERIFIED copies only — never
+ * over the agent's own prose: a security review that legitimately discusses
+ * injection patterns must not park the run. In degraded mode (the taint store
+ * is full or tampered) the guard scans the whole artifact instead, because
+ * there the store cannot be trusted and failing toward the human is the point.
+ *
+ * One description per matching pattern; never throws.
+ */
+export function scanInstructions(text: string): string[] {
+  try {
+    const hits: string[] = [];
+    for (const re of INJECTION_PATTERNS) {
+      if (re.test(text)) hits.push(re.source.slice(0, 60));
+    }
+    return hits;
+  } catch {
+    return [];
+  }
+}
+
+/** One instruction-shaped line: where it is and what it says. */
+export interface InstructionHit {
+  /** The 1-based line the shape was found on. */
+  line: number;
+  /** The line's text, trimmed and capped. */
+  excerpt: string;
+}
+
+/**
+ * The instruction-shaped LINES of a text (ADR-44).
+ *
+ * The same patterns as `scanInstructions`, resolved to line numbers: a park
+ * list must QUOTE the offending line, never merely say "something matched".
+ * The patterns are line-local (no `s` flag, no newlines in their classes),
+ * so a per-line scan is faithful to the text scan.
+ *
+ * Never throws.
+ */
+export function scanInstructionLines(text: string, maxExcerpt = 120): InstructionHit[] {
+  try {
+    const hits: InstructionHit[] = [];
+    const lines = String(text ?? "").split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      for (const re of INJECTION_PATTERNS) {
+        if (re.test(lines[i])) {
+          hits.push({ line: i + 1, excerpt: lines[i].trim().slice(0, maxExcerpt) });
+          break;
+        }
+      }
+    }
+    return hits;
+  } catch {
+    return [];
+  }
+}
+
 /** Hard cap so one pathological page cannot flood the warning header. */
 const MAX_WARNINGS = 5;
 

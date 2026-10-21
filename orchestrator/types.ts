@@ -405,6 +405,13 @@ export interface WorkflowState {
    * Absent when the park was not a budget trip.
    */
   budgetRaiseEnv?: string;
+  /**
+   * S5a/TASK_16 (ADR-40, INV-23): the park list of a provenance park —
+   * `file:line  <excerpt>` per copied passage, at most 10 entries. It rides
+   * the state so the /kstack panel can show the human exactly what was
+   * copied; the ledger keeps the same list for the audit trail.
+   */
+  provenanceFindings?: string[];
   /** Active retry injection for a looped-back phase (cleared when that phase completes). */
   retryContext?: RetryContext;
   /** Sprint number, discovered once at the user-story phase (E5). Zero-pad to 2 digits when interpolating. */

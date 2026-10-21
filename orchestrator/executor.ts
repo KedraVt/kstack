@@ -20,6 +20,7 @@ import { cleanupRunArtifacts } from "./runcleanup.ts";
 import { newStepRun, feedStepEvent, detectStuck, checkStepBudgets, stepBudgetDefaults, beginStepWatch, endStepWatch, BUDGET_ENV, type BudgetDim } from "./stuck.ts";
 import { cleanupEphemeralArtifacts, sprintGateEphemerals, artifactSignalFiles, runStartMs } from "./artifacts.ts";
 import { reconcileToolMask, restoreAllTools, profileForPhaseId, type ToolMaskHost } from "./toolmask.ts";
+import { agentMayBrowse, provenancePark, runProvenanceGuard } from "./provenance.ts";
 
 // --- Sequential-chain resilience (STEP 2f) -----------------------------------
 
@@ -452,6 +453,10 @@ export async function executeCurrentPhase(
   }
   // STEP 0 telemetry: make sure this run is being accumulated.
   ensureRun(state.workflowId);
+  // S5a/TASK_16 (ADR-57, G4): the taint store is PER RUN — the environment
+  // carries the RUN ID (never a path, ADR-57). Without it the store is
+  // disabled and the provenance guard has nothing to match.
+  if (state.runId) process.env.KSTACK_TAINT_RUN = state.runId;
   // Crash forensics: annotate a delegation that never reached a terminal
   // event in the previous run (host died mid-flight).
   annotateOrphanedDelegation(pi, ctx);
@@ -854,6 +859,45 @@ export async function executeCurrentPhase(
         "warning",
       );
       return;
+    }
+
+    // S5a/TASK_16 — the provenance guard (delegated step): a child that may
+    // browse can copy page text into the phase's artifact. The guard runs
+    // BEFORE the verdict handling: an instruction-shaped copy is parked for
+    // a human (no attempt burned), a clean artifact advances untouched.
+    if (delegatedStep && step && state.runId && agentMayBrowse(step.agent ?? "worker")) {
+      const guard = runProvenanceGuard({
+        phase,
+        stepId: step.id,
+        cwd: ctx.cwd,
+        runId: state.runId,
+        sprint: state.sprintNumber,
+        workflowId: state.workflowId,
+      });
+      if (guard.escalate) {
+        const parked = provenancePark(state, phase.id, step.id, guard);
+        saveState(pi, parked);
+        setKstackStatus(ctx, parked, workflow);
+        appendLedger(
+          ctx.cwd,
+          state,
+          {
+            kind: "report",
+            phaseId: phase.id,
+            stepId: step.id,
+            payload: {
+              summary: `provenance guard: ${guard.findings.length} copied passage(s) need a human decision — parked WITHOUT burning an attempt`,
+              artifacts: guard.rewritten,
+            },
+          },
+          (m) => notify(m, "warning"),
+        );
+        notify(
+          `kstack: provenance guard — ${guard.findings.length} copied passage(s) found in "${phase.id}". The workflow is paused for a human decision (no attempt burned).`,
+          "warning",
+        );
+        return;
+      }
     }
 
     // S4 rider — verdict-record REPAIR (one attempt per step per park).
