@@ -12,7 +12,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { ensureOperationalDirsIgnored } from "./ledger.ts";
+import { ensureOperationalDirsIgnored, ledgerPathFor, type LedgerEntry } from "./ledger.ts";
 
 export interface RunReportStep {
   phaseId: string;
@@ -25,6 +25,14 @@ export interface RunReportStep {
   turns?: number;
   tokensIn?: number;
   tokensCacheRead?: number;
+  /** Tokens written to the prompt cache (the delegated side's cache creation). */
+  tokensCacheCreation?: number;
+  /**
+   * The 1h-TTL part of the cache write. PROVIDER-CONDITIONAL: only some
+   * providers report the split — the field is OMITTED when the child did not
+   * report it, so an absent value is never read as "no 1h writes".
+   */
+  tokensCacheWrite1h?: number;
   tokensOut?: number;
   /** Populated from STEP 2 onward (extractHandoff level). */
   handoffLevel?: string;
@@ -34,6 +42,24 @@ export interface RunReportStep {
   /** Timeout class resolved for the phase (STEP 5); "default" until then. */
   timeoutClass?: string;
 }
+
+/**
+ * One row per (phaseId, scope) of the run report. The two scopes are NEVER
+ * mixed: the tool mask changes the MAIN session's prompt prefix only, so
+ * averaging the scopes would hide exactly the effect the mask shows.
+ */
+export interface RunReportPhase {
+  phaseId: string;
+  scope: "main" | "delegated";
+  tokensIn: number;
+  tokensCacheRead: number;
+  tokensCacheCreation: number;
+  /** cacheRead / (input + cacheRead + cacheWrite) — 0 when the denominator is 0. */
+  cacheHitRate: number;
+}
+
+/** Why the main-scope rows are (not) in the report. */
+export type MainScopeStatus = "ok" | "no-run-id" | "no-ledger";
 
 export interface LivenessObservation {
   agent: string;
@@ -48,6 +74,10 @@ export interface RunReport {
   writtenAt: string;
   steps: RunReportStep[];
   livenessObservations: LivenessObservation[];
+  /** One row per (phaseId, scope) — the cache-hit-rate evidence (ADR-47). */
+  phases?: RunReportPhase[];
+  /** Why the main-scope rows are absent (or "ok" when they are there). */
+  mainScopeStatus?: MainScopeStatus;
 }
 
 interface Accumulator {
@@ -89,6 +119,8 @@ export function recordDelegatedStep(step: RunReportStep): void {
     turns: step.turns,
     tokensIn: step.tokensIn,
     tokensCacheRead: step.tokensCacheRead,
+    tokensCacheCreation: step.tokensCacheCreation,
+    tokensCacheWrite1h: step.tokensCacheWrite1h,
     tokensOut: step.tokensOut,
     handoffLevel: step.handoffLevel,
     incomplete: step.incomplete ?? false,
@@ -125,14 +157,104 @@ export function runReportFileName(startedAt: string, workflowId: string): string
   return `${startedAt.replace(/:/g, "-")}-${safe(workflowId)}.json`;
 }
 
+/** A counter that is never negative and never NaN. */
+function num(value: unknown): number {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * The cache hit-rate: `cacheRead / (input + cacheRead + cacheWrite)`, 0 when
+ * the denominator is 0. The INPUT term is the input-only count on both
+ * scopes (the main step's `tokensIn`, the child's `usage.input`).
+ */
+function hitRate(input: number, read: number, write: number): number {
+  const denom = input + read + write;
+  return denom === 0 ? 0 : read / denom;
+}
+
+/** The main-scope rows: the watched main steps of the run's ledger. */
+function mainScopeRows(
+  cwd: string,
+  workflowId: string,
+  runId: string | undefined,
+): { rows: RunReportPhase[]; status: MainScopeStatus } {
+  if (!runId) return { rows: [], status: "no-run-id" };
+  const file = ledgerPathFor(cwd, { workflowId, runId });
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, "utf-8");
+  } catch {
+    return { rows: [], status: "no-ledger" };
+  }
+  const acc = new Map<string, { tokensIn: number; read: number; write: number }>();
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    let entry: LedgerEntry;
+    try {
+      entry = JSON.parse(line) as LedgerEntry;
+    } catch {
+      continue;
+    }
+    if (entry.kind !== "step") continue;
+    const payload = entry.payload ?? {};
+    // A row without usage counters is not a watched step — it carries no
+    // cache evidence and must not create an empty phase row.
+    if (payload.tokensIn === undefined && payload.cacheRead === undefined && payload.cacheCreation === undefined) continue;
+    const cur = acc.get(entry.phaseId) ?? { tokensIn: 0, read: 0, write: 0 };
+    cur.tokensIn += num(payload.tokensIn);
+    cur.read += num(payload.cacheRead);
+    cur.write += num(payload.cacheCreation);
+    acc.set(entry.phaseId, cur);
+  }
+  return {
+    status: "ok",
+    rows: [...acc.entries()].map(([phaseId, v]) => ({
+      phaseId,
+      scope: "main" as const,
+      tokensIn: v.tokensIn,
+      tokensCacheRead: v.read,
+      tokensCacheCreation: v.write,
+      cacheHitRate: hitRate(v.tokensIn, v.read, v.write),
+    })),
+  };
+}
+
+/** The delegated-scope rows: the children of the run. */
+function delegatedScopeRows(steps: RunReportStep[]): RunReportPhase[] {
+  const acc = new Map<string, { tokensIn: number; read: number; write: number }>();
+  for (const step of steps) {
+    const cur = acc.get(step.phaseId) ?? { tokensIn: 0, read: 0, write: 0 };
+    cur.tokensIn += num(step.tokensIn);
+    cur.read += num(step.tokensCacheRead);
+    cur.write += num(step.tokensCacheCreation);
+    acc.set(step.phaseId, cur);
+  }
+  return [...acc.entries()].map(([phaseId, v]) => ({
+    phaseId,
+    scope: "delegated" as const,
+    tokensIn: v.tokensIn,
+    tokensCacheRead: v.read,
+    tokensCacheCreation: v.write,
+    cacheHitRate: hitRate(v.tokensIn, v.read, v.write),
+  }));
+}
+
 /**
  * Persist the accumulated report under <cwd>/.kstack/runs/. Never throws:
  * returns the written path on success, null on any failure.
+ *
+ * `runId` makes the MAIN-scope rows computable: they are read from the run's
+ * ledger file, which dies with the run — so the report must be written
+ * BEFORE the run's ephemerals are cleaned up (both call sites do).
  */
-export function writeRunReport(cwd: string, workflowId: string): string | null {
+export function writeRunReport(cwd: string, workflowId: string, runId?: string): string | null {
   try {
     if (!current || current.workflowId !== workflowId) return null;
     const report = buildRunReport(workflowId);
+    const main = mainScopeRows(cwd, workflowId, runId);
+    report.phases = [...main.rows, ...delegatedScopeRows(report.steps)];
+    report.mainScopeStatus = main.status;
     const dir = path.join(cwd, ".kstack", "runs");
     fs.mkdirSync(dir, { recursive: true });
     ensureOperationalDirsIgnored(cwd);

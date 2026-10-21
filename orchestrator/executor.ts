@@ -260,7 +260,7 @@ export function advanceBlockReason(state: WorkflowState): string | null {
 }
 
 /**
- * S5a/TASK_02 — apply the phase's TOOL PROFILE to the MAIN session.
+ * S5a/TASK_10 — apply the phase's TOOL PROFILE to the MAIN session.
  *
  * The mask is CONTEXT ECONOMY, not a security boundary (ADR-28): every
  * failure is swallowed and the session continues UNMASKED. The change is
@@ -313,7 +313,7 @@ export function finalizeRun(pi: ExtensionAPI, ctx: ExtensionContext, state: Work
   };
   // The run report is written FIRST: it is the durable record of the run and
   // must not depend on the files deleted below.
-  writeRunReport(ctx.cwd, state.workflowId);
+  writeRunReport(ctx.cwd, state.workflowId, state.runId);
   // S5a/TASK_02: the terminal restore — the browser tools come back before
   // the run's ephemerals die. The mask ledger is cleared only after the
   // restore SUCCEEDED (INV-28).
@@ -781,6 +781,10 @@ export async function executeCurrentPhase(
     // trips ⇒ quota-parked. Never a phase-verdict, never an attempt burn.
     if (stepGuard?.trip || interruption.kind) {
       const reason = stepGuard?.trip ?? `quota-parked:${phase.id}${step ? `.${step.id}` : ""}`;
+      // S5a/TASK_10: a budget trip is an INTERRUPTION, never a quota —
+      // `quota-parked` is reserved for the wall-clock / run-token
+      // exhaustion, and the two true quota sites set `interruption.kind`
+      // themselves (they are unchanged).
       const kind =
         interruption.kind ?? (stepGuard!.trip!.startsWith("stuck:") ? "run-interrupted" : "quota-parked");
       const parked = { ...state, status: "paused" as const, pausedReason: reason, resumeMode: true };
@@ -879,6 +883,8 @@ export async function executeCurrentPhase(
         turns: result.turns,
         tokensIn: result.usage?.input,
         tokensCacheRead: result.usage?.cacheRead,
+        tokensCacheCreation: result.usage?.cacheWrite,
+        tokensCacheWrite1h: result.usage?.cacheWrite1h,
         tokensOut: result.usage?.output,
         timeoutClass: timeoutClassFor(phase.id) ?? "default",
       });

@@ -136,7 +136,7 @@ export function abortWorkflow(pi: ExtensionAPI, ctx: ExtensionCommandContext, st
   // The run is over: its ledger file and step records die with it. The run
   // report is written FIRST — it is the durable record and must not depend
   // on the files deleted below.
-  writeRunReport(ctx.cwd, state.workflowId);
+  writeRunReport(ctx.cwd, state.workflowId, state.runId);
   cleanupRunArtifacts(ctx.cwd, state, (m) => {
     try { ctx.ui.notify(m, "warning"); } catch { /* stale ctx */ }
   });

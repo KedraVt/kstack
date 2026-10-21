@@ -66,8 +66,44 @@ export interface LedgerEntry {
     artifacts?: string[];
     /** Watched-step usage accumulated while the step ran (D28). */
     tokens?: number;
+    /**
+     * The FRESH PROMPT count of the watched step (Σ `usage.input`). The
+     * cache-hit-rate formula needs the input-only number on the main side
+     * too — without it a main-step row has no defined hit-rate
+     * (ADR-47, INV-9).
+     */
+    tokensIn?: number;
     cacheRead?: number;
     cacheCreation?: number;
+  };
+}
+
+/** The usage counters a watched main step contributes to the ledger row. */
+export interface MainStepUsage {
+  /** The watch's turn count — carried for context, not part of the payload. */
+  turns?: number;
+  tokens: number;
+  tokensIn: number;
+  cacheRead: number;
+  cacheCreation: number;
+}
+
+/**
+ * The ledger payload of a completed MAIN step: the verbatim summary plus the
+ * watched step's usage counters. The counters are omitted entirely when no
+ * watch ran (an implicit phase) — the row then carries the summary alone.
+ */
+export function mainStepPayload(
+  summary: string,
+  usage?: MainStepUsage | null,
+): LedgerEntry["payload"] {
+  if (!usage) return { summary };
+  return {
+    summary,
+    tokens: usage.tokens,
+    tokensIn: usage.tokensIn,
+    cacheRead: usage.cacheRead,
+    cacheCreation: usage.cacheCreation,
   };
 }
 

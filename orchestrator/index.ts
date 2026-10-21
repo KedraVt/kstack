@@ -16,7 +16,7 @@ import { isValidatedStrategy } from "./skip.ts";
 import { existsSync } from "node:fs";
 import * as path from "node:path";
 import { phaseArtifactPaths, artifactSignalFiles, runStartMs } from "./artifacts.ts";
-import { appendLedger } from "./ledger.ts";
+import { appendLedger, mainStepPayload } from "./ledger.ts";
 import { feedWatchEvent, endStepWatch, stepWatchStats, type StepWatchEvent } from "./stuck.ts";
 import { SECURITY_SECTION } from "../lib/content-security.ts";
 import { EXTENSION_ROOT } from "./skills.ts";
@@ -431,10 +431,7 @@ export function initOrchestrator(pi: ExtensionAPI): void {
             kind: "step",
             phaseId: phase.id,
             stepId: recorded.step.id,
-            payload: {
-              summary: params.summary,
-              ...(watchStats ? { tokens: watchStats.tokens, cacheRead: watchStats.cacheRead, cacheCreation: watchStats.cacheCreation } : {}),
-            },
+            payload: mainStepPayload(params.summary, watchStats),
           },
           (m) => { try { ctx.ui.notify(m, "warning"); } catch { /* stale ctx */ } },
         );

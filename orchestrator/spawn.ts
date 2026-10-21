@@ -23,7 +23,7 @@ import { silentChildEnv, winPreloadArgs } from "../lib/silent-spawn.ts";
 // (harmless-looking fast failure), and `livenessThresholdMs` threw inside the
 // abort-poll TIMER callback 1s into the retry, which is an uncaughtException
 // that killed the whole pi process ("pi exiting due to uncaughtException").
-import { inactivityTimeoutMs, livenessThresholdMs, subagentTimeoutFor } from "./config.ts";
+import { inactivityTimeoutMs, livenessThresholdMs, subagentTimeoutFor, cacheLong } from "./config.ts";
 
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 const OUTPUT_CAP = 50 * 1024;
@@ -241,7 +241,32 @@ export interface SpawnResult {
     output: number;
     cacheRead: number;
     cacheWrite: number;
+    /**
+     * The 1h-TTL part of the cache write. PROVIDER-CONDITIONAL: `undefined`
+     * when the provider never reported the split (only some providers do) —
+     * an absent value is never read as "no 1h writes".
+     */
+    cacheWrite1h?: number;
   };
+}
+
+/**
+ * The environment of a delegated child.
+ *
+ * The child inherits the WHOLE parent env, so the cache-retention key is
+ * handled explicitly: it is set to `long` when the operator opted in and
+ * DELETED otherwise (ADR-56, INV-10) — merely not adding it would leak an
+ * operator-exported `PI_CACHE_RETENTION` into every child. Every other
+ * inherited variable is kept.
+ */
+export function childEnv(extra?: Record<string, string>): Record<string, string> {
+  const env: Record<string, string> = {
+    ...(silentChildEnv() as Record<string, string>),
+    ...(extra ?? {}),
+  };
+  if (cacheLong()) env.PI_CACHE_RETENTION = "long";
+  else delete env.PI_CACHE_RETENTION;
+  return env;
 }
 
 function parseFrontmatter(content: string): { frontmatter: Record<string, string>; body: string } {
@@ -467,7 +492,7 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
     let inactivityGapSec = 0;
     let spawnErrorMessage: string | null = null;
     let buffer = "";
-    const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: undefined as number | undefined };
     let turns = 0;
     // STEP 5b: observe-only liveness tracking.
     let lastEventAt = Date.now();
@@ -497,7 +522,7 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
           // which is the only way to stop pi's internal exec/grep/find spawns
           // — none pass the flag — from flashing a console window per call.
           windowsHide: true,
-          env: { ...silentChildEnv(), ...req.env },
+          env: childEnv(req.env),
         });
       } catch (err: any) {
         // Synchronous spawn failures (invalid args, permissions) are
@@ -541,6 +566,12 @@ export async function runSubagent(req: SpawnRequest): Promise<SpawnResult> {
               usage.output += Number(u.output ?? u.outputTokens ?? 0) || 0;
               usage.cacheRead += Number(u.cacheRead ?? u.cacheReadTokens ?? 0) || 0;
               usage.cacheWrite += Number(u.cacheWrite ?? u.cacheWriteTokens ?? 0) || 0;
+              // The 1h split is provider-conditional — an unreported value
+              // stays undefined (never 0), so the run report can omit it.
+              const oneHour = Number(u.cacheWrite1h);
+              if (Number.isFinite(oneHour) && oneHour > 0) {
+                usage.cacheWrite1h = (usage.cacheWrite1h ?? 0) + oneHour;
+              }
             }
           }
           if (event?.type === 'tool_execution_start') {
