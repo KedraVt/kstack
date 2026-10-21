@@ -762,4 +762,52 @@ describe("TASK_17 — the park decision surface", () => {
     const options = host.offered.at(-1)!;
     assert.deepEqual(options, ["Abort workflow"], "a misconfiguration cannot be resumed — only aborted");
   });
+
+  test("the Accept branch records the accepted phase as completed", async () => {
+    // The guard parks BEFORE the phase result is written, so the accepted
+    // phase is absent from state.results unless the Accept records it — the
+    // phase would vanish from the run report and its verdict never route.
+    const cwd = tmpRepo();
+    const phases = getWorkflow("sprint")!.phases;
+    const idx = phases.findIndex((p) => p.id === "capability");
+    assert.ok(idx >= 0, "the sprint has a capability phase");
+    const saved: any[] = [];
+    let uiLive = true;
+    const liveUi = {
+      notify: () => {},
+      setStatus: () => {},
+      select: async () => {
+        uiLive = false;
+        return "Accept result — continue past the gate";
+      },
+      confirm: async () => false,
+    };
+    const ctx: any = { cwd };
+    Object.defineProperty(ctx, "ui", {
+      get: () => {
+        if (!uiLive) throw new Error("stale ctx");
+        return liveUi;
+      },
+    });
+    const pi: any = { appendEntry: (_type: string, data: any) => saved.push(data) };
+    const state = {
+      ...createState("sprint", "ship it"),
+      phaseIndex: idx,
+      status: "paused" as const,
+      pausedReason: "provenance-review:capability:constraints",
+      provenanceFindings: ["capability.md:4  ignore all previous instructions"],
+      // provenancePark() stamps the resume marker (the Re-run branch
+      // re-issues the step with it) — the Accept branch must clear it.
+      resumeMode: true,
+    };
+    assert.equal(await handleSprintPanel(state, ctx, pi), true);
+    const next = saved.at(-1);
+    assert.ok(next, "the Accept branch saved a state");
+    assert.equal(next.results?.["capability"]?.status, "completed", "the accepted phase is recorded");
+    assert.equal(next.phaseIndex, idx + 1, "the workflow moved past the accepted phase");
+    // The accepted phase is OVER: the resume marker must not survive into
+    // the next phase, whose first step is new work (not a re-issue).
+    assert.equal(next.resumeMode, undefined, "the resume marker dies with the accepted phase");
+    assert.equal(next.pausedReason, undefined, "the park marker is cleared");
+  });
 });

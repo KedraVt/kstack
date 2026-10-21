@@ -668,9 +668,34 @@ export async function handleSprintPanel(
     if (choice === "Accept result — continue past the gate") {
       if (panelGuard(ctx, state)) return true;
       const next = forceContinuePastGate(state, phases);
+      // The guard parks BEFORE the step result is written, so the accepted
+      // phase is absent from state.results — the Accept must record it, or
+      // the phase vanishes from the run report and its verdict never routes
+      // (the same contract forceApproveParked honours at state.ts).
+      // The park reason names the phase the guard fired in
+      // ("provenance-review:<phase>:<step>").
+      const acceptedPhaseId =
+        phases.find((p) => p.id === parkedGateId(state))?.id ??
+        phases[state.phaseIndex]?.id ??
+        parkedGateId(state);
+      const accepted: WorkflowState = {
+        ...next,
+        // The accepted phase is OVER: the resume marker (the Re-run branch's
+        // re-issue flag) must not label the NEXT phase's first step as an
+        // interrupted, re-issued step — forceApproveParked clears it too.
+        resumeMode: undefined,
+        reissues: undefined,
+        results: {
+          ...next.results,
+          [acceptedPhaseId]: {
+            status: "completed",
+            summary: "Accepted by explicit human decision (provenance guard: copied page text reviewed).",
+          },
+        },
+      };
       auditGateDecision(ctx, state, "run");
-      saveState(pi, next);
-      launchPhase(pi, ctx, next);
+      saveState(pi, accepted);
+      launchPhase(pi, ctx, accepted);
     } else if (choice === "Re-run the step (re-checks the artifact)") {
       if (panelGuard(ctx, state)) return true;
       const resumed = resumeState(state);
