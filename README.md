@@ -34,7 +34,7 @@ One extension, two layers:
 - **Fixed**: phase instructions are now delivered with `followUp` streaming behavior — eliminates the "Agent is already processing" error that silently dropped phase handoffs.
 - **Unified skill catalog** — 28 skills in a flat `skills/kstack-*/` layout, all manually invocable via `/skill:kstack-*`.
 - **Centralized artifact names** — `orchestrator/artifacts.ts` is the single source for every sprint-stamped filename (`qa-artifact_XX.md`, `code-review-artifact_XX.md`, `software-architect-artifact_XX_N.md`, …); verdict verification, task templates and the freeze path all consume it, closing the stamping-drift bug class.
-- **D4 park causes** — an unreadable-verdict park now records *why* in `pausedReason` (`no-verdict` / `artifact-mismatch` / `unroutable`) and the panel names the cause for triage; no attempt is burned either way.
+- **D4 park causes** — an unreadable-verdict park now records *why* in `pausedReason` (`no-verdict` / `unroutable` / `no-expectation` / `foreign-verdict`) and the panel names the cause for triage; no attempt is burned either way. A gate that declares no verdict-flagged step is a registry mistake and parks as `verdict-config:<phase>` (Abort only).
 - **Runtime binaries untracked** — `runtime/` is gitignored and provisioned on demand (session-start download); ~197MB of browse daemon binaries were dropped from the git index.
 - **Delegation test harness** — `runDeterministicDelegation` accepts an injected `spawnFn`; `test/executor-delegation.test.ts` exercises the real chain engine (HANDOFF threading, retry, budgets, REFUTED reopen, circuit breakers) with fake spawns.
 

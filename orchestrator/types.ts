@@ -299,8 +299,6 @@ export interface PendingVerdict {
  * `pausedReason` ("verdict-unreadable:<phaseId>:<cause>"):
  * - "no-verdict": the subagent emitted nothing trustworthy (no verdict
  *   lines, hedged, or a contradiction across chain steps);
- * - "artifact-mismatch": the HANDOFF parsed but disagreed with the
- *   on-disk artifact (or the artifact was absent);
  * - "unroutable": the verdict parsed and whitelisted but is not on the
  *   phase's expectation map.
  * - "no-expectation": the (workflowId, phaseId) pair has no EXPECTATIONS
@@ -308,7 +306,7 @@ export interface PendingVerdict {
  * - "foreign-verdict": a NON verdict-flagged step's record emitted
  *   verdicts — only flagged records may carry gate variables.
  */
-export type VerdictParkCause = "no-verdict" | "artifact-mismatch" | "unroutable" | "no-expectation" | "foreign-verdict";
+export type VerdictParkCause = "no-verdict" | "unroutable" | "no-expectation" | "foreign-verdict";
 
 /** D3 freeze payload: security rejection parked for human review.
  * `severity` is the emitted severity value — legacy vocabulary

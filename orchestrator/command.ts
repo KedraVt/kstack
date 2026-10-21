@@ -590,13 +590,11 @@ export async function handleSprintPanel(
     // (state.ts); parks written before the cause existed fall back to no-verdict.
     const cause = state.pausedReason?.split(":")[2] ?? "no-verdict";
     const causeText =
-      cause === "artifact-mismatch"
-        ? "the parsed HANDOFF verdict disagrees with the on-disk artifact"
-        : cause === "unroutable"
-          ? "a whitelisted verdict value is off this phase's expectation map"
-          : state.pausedReason?.startsWith("park-on:") || state.pausedReason?.startsWith("feedback-spec:")
-            ? `a designed park fired (${state.pausedReason})`
-            : "the agent emitted no trustworthy verdict";
+      cause === "unroutable"
+        ? "a whitelisted verdict value is off this phase's expectation map"
+        : state.pausedReason?.startsWith("park-on:") || state.pausedReason?.startsWith("feedback-spec:")
+          ? `a designed park fired (${state.pausedReason})`
+          : "the agent emitted no trustworthy verdict";
     const excerpt = state.pendingVerdict?.excerpt?.trim() || "(no verdict-shaped lines found in the step records)";
     // A security verdict can NEVER be skipped: "Continue as approved" is not
     // offered for a phase whose verdict step is the security review.

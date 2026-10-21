@@ -99,6 +99,39 @@ export function isVerdictBearing(phase: Pick<WorkflowPhase, "loopBackTo" | "loop
   return !!phase.steps?.some((s) => s.signal?.kind === "verdict");
 }
 
+/**
+ * The registry validation of ADR-51 / INV-15: a verdict-bearing phase MUST
+ * declare a verdict-flagged step.
+ *
+ * A gate with no flagged step has NO record channel — under the step model
+ * the flagged record is the only channel allowed to produce a phase verdict
+ * (INV-9). Such a phase used to fall back to the `pendingVerdict` stash,
+ * which could route a verdict the registry never declared. The registry
+ * validation is the CI half of the fix (a mistake in the workflow
+ * definition fails the build); the runtime half is the
+ * `verdict-config:<phaseId>` park.
+ *
+ * Returns one problem string per offending phase — empty when the registry
+ * is sound.
+ */
+export function verdictGateProblems(
+  workflows: ReadonlyArray<{ id: string; phases: ReadonlyArray<WorkflowPhase> }>,
+): string[] {
+  const problems: string[] = [];
+  for (const workflow of workflows) {
+    for (const phase of workflow.phases) {
+      if (!isVerdictBearing(phase)) continue;
+      const flagged = phase.steps?.some((s) => s.signal?.kind === "verdict") ?? false;
+      if (!flagged) {
+        problems.push(
+          `${workflow.id}.${phase.id} is verdict-bearing but declares no verdict-flagged step — it has no record channel`,
+        );
+      }
+    }
+  }
+  return problems;
+}
+
 // --- Artifact resolution + loop-back feedback ---------------------------------
 
 /** Artifact tail window for the disk feedback reader (plan E2). */

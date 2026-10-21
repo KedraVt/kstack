@@ -1843,8 +1843,8 @@ describe("statusLineFor", () => {
       /FROZEN: critical security rejection/,
     );
     assert.match(
-      statusLineFor({ ...base, status: "paused" as const, verdictPark: "qa-verdict", pausedReason: "verdict-unreadable:qa-verdict:artifact-mismatch" }, sprint)!,
-      /verdict unreadable \(artifact-mismatch\)/,
+      statusLineFor({ ...base, status: "paused" as const, verdictPark: "qa-verdict", pausedReason: "verdict-unreadable:qa-verdict:unroutable" }, sprint)!,
+      /verdict unreadable \(unroutable\)/,
     );
     assert.match(
       statusLineFor({ ...base, status: "paused" as const, pausedReason: "loop-exhausted:implement after 4 runs" }, sprint)!,
@@ -2412,51 +2412,61 @@ describe("S3 step state machine — recordStepResult (TASK_03)", () => {
   test("loop-back clears the target phase's stale step results", () => {
     // The gate must be named "qa-browsing" — the id carries an EXPECTATIONS
     // entry under "sprint" (status:[green]); a `red` verdict is negative and
-    // routes the loopBackTo edge. pendingVerdict stash is the legacy channel.
-    const phases: WorkflowPhase[] = [
-      { id: "implement", name: "Impl", execution: "main", optional: false, steps: [{ id: "be", execution: "subagent" as const, agent: "backend-developer", task: "x" }] },
-      { id: "pad", name: "Pad", execution: "main", optional: false, steps: [{ id: "s1", execution: "main" as const, task: "x" }] },
-      { id: "qa-browsing", name: "QA Gate", execution: "subagent", optional: false, loopBackTo: "implement", maxAttempts: 5 },
-    ];
-    const state: import("../orchestrator/types.ts").WorkflowState = {
-      ...createState("sprint", "g"),
-      phaseIndex: 2,
-      sprintNumber: 1,
-      results: {
-        "implement.be": { status: "completed", summary: "attempt-1 code" },
-        implement: { status: "completed", summary: "phase summary" },
-        "pad.s1": { status: "completed", summary: "pad attempt-1" },
-      },
-      pendingVerdict: { phaseId: "qa-browsing", parsed: { verdicts: { status: "red" }, vars: {} } as any, excerpt: "" },
-      stepIndex: 0,
-    };
-    const next = advancePhase(state, "qa-browsing", { status: "completed", summary: "qa red" }, phases.length, { phases });
-    assert.equal(next.phaseIndex, 0, "red verdict loops back to implement");
-    assert.equal(next.results["implement.be"], undefined, "stale step results of the loop target must not leak into the retry");
-    assert.equal(next.stepIndex, undefined);
+    // routes the loopBackTo edge. The verdict comes from the RECORD channel
+    // (the kstack-report file of the flagged step) — the pendingVerdict
+    // stash is retired (ADR-33, AC-19).
+    const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-loopback-"));
+    try {
+      const phases: WorkflowPhase[] = [
+        { id: "implement", name: "Impl", execution: "main", optional: false, steps: [{ id: "be", execution: "subagent" as const, agent: "backend-developer", task: "x" }] },
+        { id: "pad", name: "Pad", execution: "main", optional: false, steps: [{ id: "s1", execution: "main" as const, task: "x" }] },
+        { id: "qa-browsing", name: "QA Gate", execution: "subagent", optional: false, loopBackTo: "implement", maxAttempts: 5, steps: [{ id: "test", execution: "main" as const, task: "x", signal: { kind: "verdict" as const, value: "status" } }] },
+      ];
+      const state: import("../orchestrator/types.ts").WorkflowState = {
+        ...createState("sprint", "g"),
+        phaseIndex: 2,
+        sprintNumber: 1,
+        runId: "2026-01-01T00-00-00.000Z-loop",
+        results: {
+          "implement.be": { status: "completed", summary: "attempt-1 code" },
+          implement: { status: "completed", summary: "phase summary" },
+          "pad.s1": { status: "completed", summary: "pad attempt-1" },
+        },
+        stepIndex: 0,
+      };
+      writeStepRecord(cwd, state, "qa-browsing", "test", { verdicts: { status: "red" } });
+      const next = advancePhase(state, "qa-browsing", { status: "completed", summary: "qa red" }, phases.length, { phases, cwd });
+      assert.equal(next.phaseIndex, 0, "red verdict loops back to implement");
+      assert.equal(next.results["implement.be"], undefined, "stale step results of the loop target must not leak into the retry");
+      assert.equal(next.stepIndex, undefined);
+    } finally { rmSync(cwd, { recursive: true, force: true }); }
   });
 
   test("loop-back clears stale step keys for EVERY re-run phase, not only the target", () => {
-    const phases: WorkflowPhase[] = [
-      { id: "p-a", name: "A", execution: "main", optional: false, steps: [{ id: "s1", execution: "main", task: "x" }] },
-      { id: "p-b", name: "B", execution: "main", optional: false, steps: [{ id: "s1", execution: "main", task: "x" }] },
-      { id: "qa-browsing", name: "Gate", execution: "subagent", optional: false, loopBackTo: "p-a", maxAttempts: 5 },
-    ];
-    const state: import("../orchestrator/types.ts").WorkflowState = {
-      ...createState("sprint", "g"),
-      phaseIndex: 2,
-      sprintNumber: 1,
-      results: {
-        "p-a.s1": { status: "completed", summary: "a attempt-1" },
-        "p-b.s1": { status: "completed", summary: "b attempt-1" },
-        "p-a": { status: "completed", summary: "phase a" },
-      },
-      pendingVerdict: { phaseId: "qa-browsing", parsed: { verdicts: { status: "red" }, vars: {} } as any, excerpt: "" },
-    };
-    const next = advancePhase(state, "qa-browsing", { status: "completed", summary: "qa red" }, phases.length, { phases });
-    assert.equal(next.phaseIndex, 0, "red verdict loops back to p-a");
-    assert.equal(next.results["p-a.s1"], undefined, "the loop target's step keys must clear");
-    assert.equal(next.results["p-b.s1"], undefined, "p-b re-runs too — its stale step keys must clear as well");
+    const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-loopback2-"));
+    try {
+      const phases: WorkflowPhase[] = [
+        { id: "p-a", name: "A", execution: "main", optional: false, steps: [{ id: "s1", execution: "main", task: "x" }] },
+        { id: "p-b", name: "B", execution: "main", optional: false, steps: [{ id: "s1", execution: "main", task: "x" }] },
+        { id: "qa-browsing", name: "Gate", execution: "subagent", optional: false, loopBackTo: "p-a", maxAttempts: 5, steps: [{ id: "test", execution: "main", task: "x", signal: { kind: "verdict" as const, value: "status" } }] },
+      ];
+      const state: import("../orchestrator/types.ts").WorkflowState = {
+        ...createState("sprint", "g"),
+        phaseIndex: 2,
+        sprintNumber: 1,
+        runId: "2026-01-01T00-00-00.000Z-loop2",
+        results: {
+          "p-a.s1": { status: "completed", summary: "a attempt-1" },
+          "p-b.s1": { status: "completed", summary: "b attempt-1" },
+          "p-a": { status: "completed", summary: "phase a" },
+        },
+      };
+      writeStepRecord(cwd, state, "qa-browsing", "test", { verdicts: { status: "red" } });
+      const next = advancePhase(state, "qa-browsing", { status: "completed", summary: "qa red" }, phases.length, { phases, cwd });
+      assert.equal(next.phaseIndex, 0, "red verdict loops back to p-a");
+      assert.equal(next.results["p-a.s1"], undefined, "the loop target's step keys must clear");
+      assert.equal(next.results["p-b.s1"], undefined, "p-b re-runs too — its stale step keys must clear as well");
+    } finally { rmSync(cwd, { recursive: true, force: true }); }
   });
 
   test("human-initiated returns purge stale step keys too (pass-6 review: INV-04)", () => {

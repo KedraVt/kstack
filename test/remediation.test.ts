@@ -1,6 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import {
   routeVerdict,
@@ -18,7 +20,42 @@ import { detectGitContext, type ExecFn } from "../orchestrator/git.ts";
 import { silentChildEnv, winPreloadArgs, WIN_HIDE_PRELOAD_PATH } from "../lib/silent-spawn.ts";
 import { escapeMarkers, UNTRUSTED_BEGIN, UNTRUSTED_END } from "../lib/content-security.ts";
 import { buildArgs, registerKstackTools } from "../tools.generated.ts";
+import { recordPathFor } from "../orchestrator/records.ts";
 import type { WorkflowContext, WorkflowPhase } from "../orchestrator/types.ts";
+
+/**
+ * Write the kstack-report record of a verdict-flagged step — the ONLY
+ * channel that may produce a phase verdict under the step model (INV-9).
+ * The retired `pendingVerdict` fallback (ADR-33, AC-19) means a test that
+ * wants a routed verdict must write the record the step would have written.
+ */
+function writeVerdictRecord(
+  cwd: string,
+  state: { workflowId: string; runId?: string },
+  phaseId: string,
+  stepId: string,
+  verdicts: Record<string, string>,
+) {
+  const file = recordPathFor(cwd, state.runId!, phaseId, stepId);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const safe = (v: string) => v.replace(/[^\w.-]/g, "-");
+  writeFileSync(
+    file,
+    JSON.stringify({
+      v: 1,
+      workflow: safe(state.workflowId),
+      runId: safe(state.runId!),
+      phase: safe(phaseId),
+      step: safe(stepId),
+      summary: "x",
+      verdicts,
+      vars: {},
+      evidence: [],
+      deliverables: [],
+      markers: [],
+    }),
+  );
+}
 
 // --- Fail-closed verdict routing ---------------------------------------------
 
@@ -73,7 +110,12 @@ describe("advancePhase gate integrity", () => {
     optional: false,
     loopBackTo: "implement",
   };
-  const ghostGate: WorkflowPhase = { ...gatePhase, id: "ghost-gate", loopBackTo: "no-such-phase" };
+  const ghostGate: WorkflowPhase = {
+    ...gatePhase,
+    id: "ghost-gate",
+    loopBackTo: "no-such-phase",
+    steps: [{ id: "v", execution: "main", task: "x", signal: { kind: "verdict", value: "status" } }],
+  };
   const phases = [
     { id: "implement", name: "Impl", execution: "subagent" as const, optional: false },
     gatePhase,
@@ -100,16 +142,23 @@ describe("advancePhase gate integrity", () => {
   });
 
   test("loopBackTo naming a missing phase parks instead of approving", () => {
-    const state = {
-      ...createState("sprint", "goal"),
-      phaseIndex: 2,
-      pendingVerdict: { phaseId: "ghost-gate", parsed: { verdicts: { status: "red" } }, excerpt: "" },
-    };
-    // A phase id with no EXPECTATIONS entry parks no-expectation; a mapped
-    // phase whose edge names a missing phase parks unroutable — both hold.
-    const next = advancePhase(state, "ghost-gate", { status: "completed", summary: "done" }, 3, { phases });
-    assert.equal(next.status, "paused");
-    assert.match(next.pausedReason ?? "", /no-expectation/);
+    // The verdict comes from the RECORD channel (a flagged step's
+    // kstack-report file) — the retired pendingVerdict fallback can no
+    // longer route a phase that declares no flagged step (ADR-33, AC-19).
+    const cwd = mkdtempSync(path.join(os.tmpdir(), "kstack-ghost-gate-"));
+    try {
+      const state = {
+        ...createState("sprint", "goal"),
+        phaseIndex: 2,
+        runId: "2026-01-01T00-00-00.000Z-ghost",
+      };
+      writeVerdictRecord(cwd, state, "ghost-gate", "v", { status: "red" });
+      // A phase id with no EXPECTATIONS entry parks no-expectation; a mapped
+      // phase whose edge names a missing phase parks unroutable — both hold.
+      const next = advancePhase(state, "ghost-gate", { status: "completed", summary: "done" }, 3, { phases, cwd });
+      assert.equal(next.status, "paused");
+      assert.match(next.pausedReason ?? "", /no-expectation/);
+    } finally { rmSync(cwd, { recursive: true, force: true }); }
   });
 });
 

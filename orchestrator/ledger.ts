@@ -46,7 +46,7 @@ export interface LedgerEntry {
    * S4: "report" = a kstack-report step record (the delegation completion
    * protocol — canonical source for verdicts and routing vars).
    */
-  kind: "step" | "phase" | "verdict" | "gate" | "report" | "run-interrupted" | "quota-parked";
+  kind: "step" | "phase" | "gate" | "report" | "run-interrupted" | "quota-parked";
   workflowId: string;
   phaseId: string;
   stepId?: string;
