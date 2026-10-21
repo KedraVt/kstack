@@ -11,7 +11,7 @@ import { gateInventory, configureGates } from "./gates.ts";
 import { collectAskAnswers } from "./enabled.ts";
 import { probeCapabilities } from "./capabilities.ts";
 import { cleanupEphemeralArtifacts, ephemeralArtifactsFor } from "./artifacts.ts";
-import { launchPhase, executeCurrentPhase, releasePhaseInFlight, isPhaseInFlight, invalidateRuntime, finalizeRun } from "./executor.ts";
+import { launchPhase, executeCurrentPhase, releasePhaseInFlight, isPhaseInFlight, invalidateRuntime, finalizeRun, budgetRaiseHint } from "./executor.ts";
 import { existsSync } from "node:fs";
 import * as path from "node:path";
 import { appendLedger } from "./ledger.ts";
@@ -63,6 +63,30 @@ export function decisionBlockedByInFlightChain(
  * first launch refused ("already running") — the exact racing class the guard
  * exists to prevent, turned against the user.
  */
+/**
+ * S5a/ADR-62 (INV-12) — the hint the PAINTER shows for a budget park: the env
+ * var that raises the tripped dimension and a value to try. The park notify
+ * is transient, so after a restart the persisted `pausedReason` (which carries
+ * the dimension) and the persisted `budgetRaiseEnv` are what the human has.
+ * Returns null for any other park.
+ */
+export function budgetPanelHint(state: Pick<WorkflowState, "pausedReason" | "budgetRaiseEnv">): string | null {
+  const fromReason = budgetRaiseHint(state.pausedReason ?? "");
+  if (fromReason) return fromReason;
+  if (state.budgetRaiseEnv) return `raise with ${state.budgetRaiseEnv} or off`;
+  return null;
+}
+
+/**
+ * S5a/ADR-62 — the panel title of a paused run, with the budget hint when
+ * the park is a budget trip.
+ */
+function pausedPanelTitle(state: WorkflowState): string {
+  const reason = state.pausedReason ? ` — ${state.pausedReason}` : "";
+  const hint = budgetPanelHint(state);
+  return `Workflow paused${reason}${hint ? ` — ${hint}` : ""}`;
+}
+
 /**
  * The phase whose park a human resolution releases: verdict parks name the
  * phase directly; kill-switch/exhaustion reasons encode it after the first
@@ -315,7 +339,7 @@ export async function handleKstackCommand(args: string, ctx: ExtensionCommandCon
     }
 
     const choice = await ctx.ui.select(
-      activeState.status === "paused" ? `Workflow paused${activeState.pausedReason ? ` — ${activeState.pausedReason}` : ""}` : "Workflow in progress",
+      activeState.status === "paused" ? pausedPanelTitle(activeState) : "Workflow in progress",
       [
         `Resume: ${activeState.workflowId} → ${phaseName} ${progress}`,
         "Advance manually…",
