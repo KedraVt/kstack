@@ -113,7 +113,7 @@ describe("verdict ownership", () => {
       "bash",
       [script, "--workflow", "sprint", "--run-id", "r1", "--phase", "implement", "--step", "backend",
         "--marker", "BACKEND-DONE", "--verdict", "be-walk==pass", "--verdict", "ui==Pass."],
-      { cwd, encoding: "utf-8", env: { ...process.env, KSTACK_VERDICT_KEYS: "ui" } },
+      { cwd, encoding: "utf-8", env: { ...process.env, KSTACK_VERDICT_KEYS: "ui", KSTACK_PROJECT_ROOT: cwd } },
     );
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stderr, /ignoring --verdict 'be-walk'/);
@@ -491,7 +491,7 @@ describe("2026-10 workflow audit fixes", () => {
     const cwd = fs.mkdtempSync(path.join(TMP, "cli-"));
     const runId = "2026-10-19T00:00:00.123Z-abcd";
     const script = new URL("../runtime/bin/kstack-report", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
-    const run = spawnSync("bash", [script, "--workflow", "develop", "--run-id", runId, "--phase", "implement", "--step", "build", "--marker", "BUILD-DONE"], { cwd, encoding: "utf-8" });
+    const run = spawnSync("bash", [script, "--workflow", "develop", "--run-id", runId, "--phase", "implement", "--step", "build", "--marker", "BUILD-DONE"], { cwd, encoding: "utf-8", env: { ...process.env, KSTACK_PROJECT_ROOT: cwd } });
     assert.equal(run.status, 0, run.stderr);
     assert.ok(readStepRecord(cwd, "develop", runId, "implement", "build"), "record still readable");
     assert.deepEqual(fs.readdirSync(path.join(cwd, ".kstack", "ledger")), [path.basename(ledgerPathFor(cwd, { workflowId: "develop", runId }))]);

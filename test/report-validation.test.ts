@@ -29,7 +29,12 @@ function envWith(overrides: Record<string, string | undefined>): Record<string, 
 /** Run kstack-report in a fresh cwd and return the spawn result + the cwd. */
 function report(args: string[], overrides: Record<string, string | undefined> = {}) {
   const cwd = fs.mkdtempSync(path.join(TMP, "cli-"));
-  const run = spawnSync("bash", [SCRIPT, ...args], { cwd, encoding: "utf-8", env: envWith(overrides) });
+  // The CLI resolves its project root from --root, then $KSTACK_PROJECT_ROOT,
+  // then the cwd. The host env may carry a KSTACK_PROJECT_ROOT of its own
+  // (the orchestrator exports it), which would drop the record OUTSIDE the
+  // fresh cwd this test reads back — so the test pins the root to its cwd.
+  const env = envWith({ KSTACK_PROJECT_ROOT: cwd, ...overrides });
+  const run = spawnSync("bash", [SCRIPT, ...args], { cwd, encoding: "utf-8", env });
   return { run, cwd };
 }
 

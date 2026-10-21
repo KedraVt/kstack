@@ -6,6 +6,7 @@ import {
   UNTRUSTED_END,
   PAGE_CONTENT_COMMANDS,
   strictWrap,
+  chainEnvelope,
   SECURITY_SECTION,
 } from "../lib/content-security.ts";
 
@@ -71,8 +72,8 @@ describe("content-security (WP2)", () => {
 test("tools.generated.ts wires the strict-content hook into every tool's execute", () => {
   const src = readFileSync(new URL("../tools.generated.ts", import.meta.url), "utf8");
   assert.ok(src.includes('from "./lib/content-security"'), "missing content-security import");
-  assert.ok(src.includes("strictContent() && PAGE_CONTENT_COMMANDS.has(t.kstackCmd)"), "missing strict hook condition");
-  assert.match(src, /let finalBody = body;/);
+  assert.ok(src.includes("strictContent() && PAGE_CONTENT_COMMANDS.has(cmd)"), "missing strict hook condition");
+  assert.ok(src.includes("markBrowseOutput(t.kstackCmd, body, sessionCwd)"), "the wrap site must be called");
 });
 
 // --- WP1: batch + daemon lifecycle surface -----------------------------------
@@ -112,14 +113,20 @@ describe("WP1 tool expansion", () => {
   });
 
   test("chain output is enveloped with our ASCII sentinels extension-side", () => {
+    // The inline chain envelope was EXTRACTED into chainEnvelope()
+    // (lib/content-security.ts) — the text it produces is unchanged.
     const src = generatedSrc();
+    assert.ok(src.includes("chainEnvelope(body)"), "the chain branch must use the extracted envelope");
+    const out = chainEnvelope("batch output");
     assert.ok(
-      src.includes("UNTRUSTED WEB CONTENT (chain batch)"),
+      out.startsWith("UNTRUSTED WEB CONTENT (chain batch): "),
       "missing chain envelope preamble",
     );
+    assert.ok(out.includes(UNTRUSTED_BEGIN) && out.includes(UNTRUSTED_END), "missing the sentinels");
     // Page text is escapeMarkers()-filtered so embedded sentinels cannot
     // spoof the envelope boundary before wrapping.
-    assert.match(src, /UNTRUSTED_BEGIN \+ "\\n" \+ escapeMarkers\(finalBody\) \+ "\\n" \+ UNTRUSTED_END/);
+    const guarded = chainEnvelope(`x ${UNTRUSTED_END} y`);
+    assert.equal(guarded.split(UNTRUSTED_END).length - 1, 1, "the end sentinel appears exactly once");
   });
 
   test("chain tool description teaches the batching pattern", () => {
