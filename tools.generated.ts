@@ -10,7 +10,9 @@ import { strictContent } from "./orchestrator/config";
 /** Commands forbidden inside kstack_chain batches (consent/visibility gates). */
 const CHAIN_DENY = new Set(["cookie-import-browser", "handoff"]);
 
-const TOOLS = [
+/** The browser-tool registry — exported so `orchestrator/toolmask.ts` can
+ * derive BROWSER_TOOLS from it (no hand-copied list, no drift). */
+export const TOOLS = [
   {
     name: "kstack_goto",
     kstackCmd: "goto",

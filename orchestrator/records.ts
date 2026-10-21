@@ -73,8 +73,15 @@ export function verdictKeysFor(workflowId: string, phase: Pick<WorkflowPhase, "i
 /** "Approved." / " PASS " ⇒ "approved" / "pass" — same rule as kstack-report. */
 const normVerdict = (v: string): string => v.trim().toLowerCase().replace(/[\s.,;:!]+$/, "");
 
-/** Same allowlist as the kstack-report writer and ledgerPathFor (+ dot). */
-const safe = (v: string): string => v.replace(/[^\w.-]/g, "-");
+/**
+ * Same allowlist as the kstack-report writer and ledgerPathFor (+ dot).
+ *
+ * TASK_13 (ADR-38): exported as `safeSegment` — the taint store and the
+ * guard's backup directory both derive their path segment from it, so no
+ * writer ever builds a `.kstack/` path from an unsanitised run id.
+ */
+export const safeSegment = (v: string): string => v.replace(/[^\w.-]/g, "-");
+const safe = safeSegment;
 
 /** `.kstack/runs/<runId>/` — the dir holding ONE run's step records. */
 export function runRecordsDirFor(cwd: string, runId: string): string {

@@ -113,6 +113,14 @@ export interface GateRow {
   detect?: boolean;
 }
 
+/**
+ * S5a/TASK_01: the named browser-tool subset the MAIN session may see in a
+ * phase. Declared here (the leaf contract module) so `toolmask.ts` can
+ * import it without a cycle — the per-phase mapping lives in
+ * `toolmask.ts` PHASE_TOOL_PROFILE (data), not on WorkflowPhase.
+ */
+export type ToolProfile = "full" | "read" | "none";
+
 export interface WorkflowPhase {
   id: string;
   name: string;

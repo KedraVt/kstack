@@ -1488,6 +1488,16 @@ const ALL_WORKFLOWS: Workflow[] = [
   audit,
 ];
 
+/**
+ * The STATIC workflow list — every workflow the registry knows, INCLUDING the
+ * sprint workflow even when the `KSTACK_PI_SPRINT=off` kill-switch hides it
+ * from the menu and the router. The tool-mask table is tested against this
+ * list, so a hidden workflow can never lose its profile key (INV-3).
+ */
+export function getStaticWorkflows(): Workflow[] {
+  return [sprint, develop, investigate, review, discover, audit];
+}
+
 export function getAllWorkflows(): Workflow[] {
   return ALL_WORKFLOWS;
 }
