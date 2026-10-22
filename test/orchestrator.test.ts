@@ -1362,14 +1362,16 @@ describe("timeout classes (STEP 5a)", () => {
     const keys = ["KSTACK_PI_TIMEOUT_EXPLORE", "KSTACK_PI_TIMEOUT_WORK", "KSTACK_PI_TIMEOUT_VERIFY", "KSTACK_PI_SUBAGENT_TIMEOUT"];
     for (const k of keys) { saved[k] = process.env[k]; delete process.env[k]; }
     try {
-      assert.equal(subagentTimeoutFor("explore"), 900 * 1000);
-      assert.equal(subagentTimeoutFor("implement"), 1500 * 1000);
-      assert.equal(subagentTimeoutFor("review"), 900 * 1000);
-      assert.equal(subagentTimeoutFor("totally-unknown-phase"), 1200 * 1000);
+      // ADR-64: the class timeouts are RUNAWAY BACKSTOPS, not work quotas —
+      // a legitimate implementation must not be cut in half any more.
+      assert.equal(subagentTimeoutFor("explore"), 3600 * 1000);
+      assert.equal(subagentTimeoutFor("implement"), 14400 * 1000);
+      assert.equal(subagentTimeoutFor("review"), 3600 * 1000);
+      assert.equal(subagentTimeoutFor("totally-unknown-phase"), 3600 * 1000);
       process.env.KSTACK_PI_TIMEOUT_WORK = "60";
       assert.equal(subagentTimeoutFor("implement"), 60 * 1000);
       process.env.KSTACK_PI_TIMEOUT_WORK = "garbage";
-      assert.equal(subagentTimeoutFor("implement"), 1500 * 1000, "invalid value falls back to default");
+      assert.equal(subagentTimeoutFor("implement"), 14400 * 1000, "invalid value falls back to default");
     } finally {
       for (const k of keys) {
         if (saved[k] === undefined) delete process.env[k];
@@ -1553,7 +1555,7 @@ describe("runSubagent real spawn path (crash regression)", () => {
   }
 
   test("resolveTimeoutMs maps phaseId to the class timeout and honors overrides", () => {
-    assert.equal(resolveTimeoutMs({ phaseId: "implement" }), 1500 * 1000);
+    assert.equal(resolveTimeoutMs({ phaseId: "implement" }), 14400 * 1000);
     assert.equal(resolveTimeoutMs({ timeoutMs: 1234 }), 1234);
   });
 
@@ -3343,12 +3345,15 @@ describe("S3 stuck detector (TASK_08)", () => {
     assert.equal(detectStuck(ok), null, "interleaved success breaks the error streak");
   });
 
-  test("rule 3 — three consecutive assistant messages with no tool call trip", () => {
+  test("rule 3 — five consecutive assistant messages with no tool call trip (ADR-64)", () => {
     const run = newStepRun();
     feedStepEvent(run, msgEnd("thinking 1"));
     feedStepEvent(run, msgEnd("thinking 2"));
-    assert.equal(detectStuck(run), null);
     feedStepEvent(run, msgEnd("thinking 3"));
+    assert.equal(detectStuck(run), null, "three messages in a row are working, not looping");
+    feedStepEvent(run, msgEnd("thinking 4"));
+    assert.equal(detectStuck(run), null, "four messages in a row are still working");
+    feedStepEvent(run, msgEnd("thinking 5"));
     assert.equal(detectStuck(run), "monologue");
 
     const active = newStepRun();
@@ -3387,6 +3392,9 @@ describe("S3 stuck detector (TASK_08)", () => {
     feedStepEvent(bare, msgEnd("1"));
     feedStepEvent(bare, msgEnd("2"));
     feedStepEvent(bare, msgEnd("3"));
+    feedStepEvent(bare, msgEnd("4"));
+    assert.equal(detectStuck(bare), null);
+    feedStepEvent(bare, msgEnd("5"));
     assert.equal(detectStuck(bare), "monologue");
   });
 
@@ -3476,12 +3484,13 @@ describe("S3 stuck detector (TASK_08)", () => {
     assert.equal(checkStepBudgets(run, limits).exceeded, null, "cached turns must not trip the spend budget");
   });
 
-  test("budgets — defaults follow the phase's timeout class; an env cap beats it", () => {
-    assert.equal(stepBudgetDefaults("explore").tokens, 400_000, "EXPLORE class");
-    assert.equal(stepBudgetDefaults("implement").tokens, 600_000, "WORK class");
-    assert.equal(stepBudgetDefaults("review").tokens, 300_000, "VERIFY class");
-    assert.equal(stepBudgetDefaults("no-such-phase").tokens, 250_000, "unmapped phase → generic default");
-    assert.equal(stepBudgetDefaults("explore").context, 180_000, "context cap is class-independent");
+  test("budgets — ADR-64: no quota by default; an explicit env cap bites", () => {
+    assert.equal(stepBudgetDefaults("explore").tokens, Number.POSITIVE_INFINITY, "no class cap any more");
+    assert.equal(stepBudgetDefaults("implement").tokens, Number.POSITIVE_INFINITY);
+    assert.equal(stepBudgetDefaults("review").tokens, Number.POSITIVE_INFINITY);
+    assert.equal(stepBudgetDefaults("no-such-phase").tokens, Number.POSITIVE_INFINITY);
+    assert.equal(stepBudgetDefaults("explore").context, Number.POSITIVE_INFINITY, "no context cap either");
+    assert.equal(stepBudgetDefaults("explore").turns, Number.POSITIVE_INFINITY, "no turn cap either");
 
     const TOKENS = "KSTACK_PI_STEP_MAX_TOKENS";
     const CONTEXT = "KSTACK_PI_STEP_MAX_CONTEXT";
@@ -3501,10 +3510,10 @@ describe("S3 stuck detector (TASK_08)", () => {
     }
   });
 
-  test("env defaults are conservative and 'off' disables a dimension", () => {
+  test("env defaults are unlimited and 'off' disables a dimension (ADR-64)", () => {
     const d = stepBudgetDefaults();
-    assert.ok(d.turns >= 20 && d.turns <= 200, `turns default sane (${d.turns})`);
-    assert.ok(d.ms >= 300_000, `ms default sane (${d.ms})`);
+    assert.equal(d.turns, Number.POSITIVE_INFINITY, "no turn quota by default");
+    assert.equal(d.ms, Number.POSITIVE_INFINITY, "no wall-clock quota by default");
   });
 });
 
@@ -3591,6 +3600,89 @@ describe("S3 stuck/budget wiring (TASK_08)", () => {
     } finally {
       const i = getAllWorkflows().indexOf(wf);
       if (i >= 0) getAllWorkflows().splice(i, 1);
+    }
+  });
+});
+
+// --- ADR-64: the pulse wiring (the sanity check on a delegated child) ---------
+
+describe("ADR-64 — the pulse: a child that leaves the task is stopped and recovered", () => {
+  test("a scope drift stops the child, one corrective retry runs, then the park carries the diagnosis", async () => {
+    const wf: import("../orchestrator/types.ts").Workflow = {
+      id: "pulse-test", name: "Pulse Test", description: "t",
+      phases: [{
+        id: "mix", name: "Mixed", execution: "main", optional: false,
+        steps: [
+          { id: "probe", execution: "subagent", agent: "scout", task: "## DELIVERABLE\nProbe." },
+        ],
+      }],
+    };
+    getAllWorkflows().push(wf);
+    const tasks: string[] = [];
+    try {
+      const state = { ...createState("pulse-test", "g"), phaseIndex: 0 };
+      const h = fakeHarness(state);
+      await executeCurrentPhase(h.pi, h.ctx, state as any, {
+        spawnFn: async (req: any) => {
+          tasks.push(req.task);
+          // The child writes OUTSIDE the repository it was given.
+          req.onEvent?.(toolStart("write", { path: path.join(os.homedir(), "off-task.ts") }));
+          return {
+            ok: false, output: "", error: "aborted: pulse", exitCode: null, durationMs: 5, incomplete: true,
+          } as any;
+        },
+      } as any);
+      const s = lastState(h);
+      assert.equal(s.status, "paused", "the pulse parks the run — never a silent kill");
+      assert.match(s.pausedReason ?? "", /^pulse:scope-drift:mix\.probe$/, `pausedReason was ${s.pausedReason}`);
+      // The park carries the DIAGNOSIS — a park the human cannot read is a
+      // park the human repeats.
+      assert.match(s.pulseDiagnosis ?? "", /scope-drift/, `pulseDiagnosis was ${s.pulseDiagnosis}`);
+      assert.equal(tasks.length, 2, "one corrective retry after the first trip");
+      // The recovery brief forbids a restart: the child continues from the
+      // repository, it does not start over.
+      assert.match(tasks[1], /RECOVERY/);
+      assert.match(tasks[1], /Do NOT start the work over/);
+    } finally {
+      const i = getAllWorkflows().indexOf(wf);
+      if (i >= 0) getAllWorkflows().splice(i, 1);
+      releasePhaseInFlight("pulse-test", 0);
+    }
+  });
+
+  test("a child that keeps working is never stopped", async () => {
+    const wf: import("../orchestrator/types.ts").Workflow = {
+      id: "pulse-ok-test", name: "Pulse OK Test", description: "t",
+      phases: [{
+        id: "mix", name: "Mixed", execution: "main", optional: false,
+        steps: [
+          { id: "probe", execution: "subagent", agent: "scout", task: "## DELIVERABLE\nProbe." },
+        ],
+      }],
+    };
+    getAllWorkflows().push(wf);
+    try {
+      const state = { ...createState("pulse-ok-test", "g"), phaseIndex: 0 };
+      const h = fakeHarness(state);
+      let calls = 0;
+      await executeCurrentPhase(h.pi, h.ctx, state as any, {
+        spawnFn: async (req: any) => {
+          calls++;
+          // Many turns, many tools — the OLD quota would have cut this off.
+          for (let i = 0; i < 40; i++) {
+            req.onEvent?.(toolStart("read", { path: `f${i}.ts` }));
+            req.onEvent?.(toolEnd("read", true, `content ${i}`));
+            req.onEvent?.(msgEnd(`working on task ${i}`));
+          }
+          return { ok: true, output: "done", rawOutput: "done", exitCode: 0, durationMs: 10 } as any;
+        },
+      } as any);
+      assert.equal(calls, 1, "a working child is never retried");
+      assert.notEqual(lastState(h).status, "paused", "a working child never parks the run");
+    } finally {
+      const i = getAllWorkflows().indexOf(wf);
+      if (i >= 0) getAllWorkflows().splice(i, 1);
+      releasePhaseInFlight("pulse-ok-test", 0);
     }
   });
 });

@@ -1,13 +1,14 @@
 /**
  * TASK_09 / TASK_10 — the step budgets (ADR-31, ADR-62, INV-11, INV-12).
  *
- * A delegated step gets a turn budget that matches the WORK it does: an
- * EXPLORE step reads a lot, a WORK step writes a lot, a VERIFY step reviews.
- * The flat 60-turn limit tripped the scout twice in this sprint's own run.
+ * S5a hotfix / ADR-64 SUPERSEDES the quota: the caps are OFF by default and
+ * the pulse (pulse.ts) guards the child instead — "is it still working?",
+ * not "how much has it done?". The caps stay available as an explicit
+ * operator choice: set the env and they bite again.
  *
- * A budget TRIP is a human decision, not a kill: the step parks, NO attempt
- * is burned, and the park names the env var that raises the dim — a name
- * that is PERSISTED, so it survives a restart (INV-12).
+ * A budget TRIP is still a human decision, not a kill: the step parks, NO
+ * attempt is burned, and the park names the env var that raises the dim — a
+ * name that is PERSISTED, so it survives a restart (INV-12).
  */
 import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
@@ -15,8 +16,6 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
-  CLASS_TURN_LIMITS,
-  DEFAULT_TURN_LIMIT,
   BUDGET_ENV,
   stepBudgetDefaults,
   beginStepWatch,
@@ -48,30 +47,30 @@ function withEnv(name: string, value: string | undefined, body: () => void): voi
 // --- TASK_09: the per-class turn budgets --------------------------------------
 
 describe("TASK_09 — the per-class turn budgets", () => {
-  test("the three classes have their own turn limits", () => {
-    assert.deepEqual(CLASS_TURN_LIMITS, { EXPLORE: 150, WORK: 200, VERIFY: 100 });
-  });
-
-  test("the fallback turn limit is 100", () => {
-    assert.equal(DEFAULT_TURN_LIMIT, 100);
-  });
-
-  test("each class resolves its own turn limit", () => {
+  test("ADR-64: there is NO quota by default — every dim is unlimited", () => {
     withEnv("KSTACK_PI_STEP_MAX_TURNS", undefined, () => {
-      assert.equal(stepBudgetDefaults("explore").turns, 150, "EXPLORE phase");
-      assert.equal(stepBudgetDefaults("implement").turns, 200, "WORK phase");
-      assert.equal(stepBudgetDefaults("plan").turns, 100, "VERIFY phase");
+      withEnv("KSTACK_PI_STEP_MAX_TOKENS", undefined, () => {
+        withEnv("KSTACK_PI_STEP_MAX_CONTEXT", undefined, () => {
+          withEnv("KSTACK_PI_STEP_MAX_MS", undefined, () => {
+            const limits = stepBudgetDefaults("implement");
+            assert.equal(limits.turns, Number.POSITIVE_INFINITY);
+            assert.equal(limits.tokens, Number.POSITIVE_INFINITY);
+            assert.equal(limits.context, Number.POSITIVE_INFINITY);
+            assert.equal(limits.ms, Number.POSITIVE_INFINITY);
+          });
+        });
+      });
     });
   });
 
-  test("an unmapped phase id falls back to 100 turns", () => {
+  test("the phase id no longer selects a limit", () => {
     withEnv("KSTACK_PI_STEP_MAX_TURNS", undefined, () => {
-      assert.equal(stepBudgetDefaults("not-a-registered-phase").turns, DEFAULT_TURN_LIMIT);
-      assert.equal(stepBudgetDefaults(undefined).turns, DEFAULT_TURN_LIMIT);
+      assert.equal(stepBudgetDefaults("explore").turns, stepBudgetDefaults("implement").turns);
+      assert.equal(stepBudgetDefaults("not-a-registered-phase").turns, Number.POSITIVE_INFINITY);
     });
   });
 
-  test("the env override wins over the class default", () => {
+  test("an explicit env still enables the cap (the operator's choice)", () => {
     withEnv("KSTACK_PI_STEP_MAX_TURNS", "42", () => {
       assert.equal(stepBudgetDefaults("explore").turns, 42);
       assert.equal(stepBudgetDefaults("implement").turns, 42);
@@ -84,21 +83,21 @@ describe("TASK_09 — the per-class turn budgets", () => {
     });
   });
 
-  test("an invalid env value falls back to the class default", () => {
+  test("an invalid env value falls back to unlimited", () => {
     withEnv("KSTACK_PI_STEP_MAX_TURNS", "not-a-number", () => {
-      assert.equal(stepBudgetDefaults("implement").turns, 200);
+      assert.equal(stepBudgetDefaults("implement").turns, Number.POSITIVE_INFINITY);
     });
   });
 
-  test("the other budget dims are unchanged", () => {
+  test("the other budget dims are unlimited too", () => {
     withEnv("KSTACK_PI_STEP_MAX_TOKENS", undefined, () => {
       withEnv("KSTACK_PI_STEP_MAX_CONTEXT", undefined, () => {
         withEnv("KSTACK_PI_STEP_MAX_MS", undefined, () => {
-          assert.equal(stepBudgetDefaults("explore").tokens, 400_000);
-          assert.equal(stepBudgetDefaults("implement").tokens, 600_000);
-          assert.equal(stepBudgetDefaults("plan").tokens, 300_000);
-          assert.equal(stepBudgetDefaults("implement").context, 180_000);
-          assert.equal(stepBudgetDefaults("implement").ms, 30 * 60 * 1000);
+          assert.equal(stepBudgetDefaults("explore").tokens, Number.POSITIVE_INFINITY);
+          assert.equal(stepBudgetDefaults("implement").tokens, Number.POSITIVE_INFINITY);
+          assert.equal(stepBudgetDefaults("plan").tokens, Number.POSITIVE_INFINITY);
+          assert.equal(stepBudgetDefaults("implement").context, Number.POSITIVE_INFINITY);
+          assert.equal(stepBudgetDefaults("implement").ms, Number.POSITIVE_INFINITY);
         });
       });
     });

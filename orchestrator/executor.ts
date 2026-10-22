@@ -8,8 +8,8 @@ import { buildPhaseInstructions, buildDeterministicPlan, mainContractFor, buildS
 import { detectGitContext, type ExecFn } from "./git.ts";
 import { runSubagent, type SpawnRequest, type SpawnResult, resolveTimeoutMs } from "./spawn.ts";
 import { computeNextSprintNumber } from "./sprint.ts";
-import { deterministicSubagents, skillsEnabled, optionalPhases, maxRunTokens, delegationBudgetMs, modelTierFor, timeoutClassFor, manualGates, numberEnv } from "./config.ts";
-import { ensureRun, recordDelegatedStep, writeRunReport, recordLiveness, recordTokens, totalTokensUsed } from "./telemetry.ts";
+import { deterministicSubagents, skillsEnabled, optionalPhases, maxRunTokens, delegationBudgetMs, modelTierFor, timeoutClassFor, manualGates, numberEnv, pulseLimits, pulseHeartbeatMs } from "./config.ts";
+import { ensureRun, recordDelegatedStep, writeRunReport, recordLiveness, recordTokens, recordPulseSummary, totalTokensUsed } from "./telemetry.ts";
 import { extractHandoff } from "./handoff.ts";
 import { isRefutedStrategy, isValidatedStrategy } from "./skip.ts";
 import { replaceExact } from "./text.ts";
@@ -21,6 +21,7 @@ import { newStepRun, feedStepEvent, detectStuck, checkStepBudgets, stepBudgetDef
 import { cleanupEphemeralArtifacts, sprintGateEphemerals, sprintLegacyEphemerals, artifactSignalFiles, runStartMs } from "./artifacts.ts";
 import { reconcileToolMask, restoreAllTools, profileForPhaseId, type ToolMaskHost } from "./toolmask.ts";
 import { agentMayBrowse, provenancePark, runProvenanceGuard } from "./provenance.ts";
+import { newPulse, feedPulseEvent, evaluatePulse, pulseDue, pulsePausedReason, pulseRecoveryBrief, pulseDiagnosis, type PulseTrip } from "./pulse.ts";
 
 // --- Sequential-chain resilience (STEP 2f) -----------------------------------
 
@@ -737,7 +738,7 @@ export async function executeCurrentPhase(
   if (delegatedStep || delegatedPhase) {
     // S3/D28: delegated steps carry a transient StepRun — the stuck detector
     // and budget caps poll the raw child event stream via SpawnRequest.onEvent.
-    const stepGuard: { stepId: string; trip?: string } | undefined = delegatedStep
+    const stepGuard: { stepId: string; trip?: string; pulseTrip?: PulseTrip } | undefined = delegatedStep
       ? { stepId: step.id }
       : undefined;
     // TASK_04: quota/interruption flag returned by the delegation loop —
@@ -828,6 +829,10 @@ export async function executeCurrentPhase(
       // themselves (they are unchanged).
       const kind = interruption.kind ?? "run-interrupted";
       const budget = stepGuard?.trip ? budgetTripDetails(stepGuard.trip) : null;
+      // ADR-64: a pulse trip parks with its DIAGNOSIS — what the child was
+      // doing and which signal fired. A park the human cannot read is a park
+      // the human repeats.
+      const pulseTrip = stepGuard?.trip?.startsWith("pulse:") ? (stepGuard.pulseTrip ?? null) : null;
       const parked = {
         ...state,
         status: "paused" as const,
@@ -836,6 +841,9 @@ export async function executeCurrentPhase(
         // The env var that raises the tripped dim is PERSISTED, so the panel
         // can name it after a restart (INV-12). A non-budget park clears it.
         budgetRaiseEnv: budget?.env,
+        // The pulse's diagnosis rides along, so the panel can show it after a
+        // restart too.
+        pulseDiagnosis: pulseTrip ? pulseDiagnosis(pulseTrip) : undefined,
       };
       saveState(pi, parked);
       setKstackStatus(ctx, parked, workflow);
@@ -853,7 +861,9 @@ export async function executeCurrentPhase(
             payload: {
               summary: raiseHint
                 ? `budget trip: ${stepGuard.trip} — ${raiseHint}`
-                : `detector trip: ${stepGuard.trip}`,
+                : pulseTrip
+                  ? `pulse trip: ${stepGuard.trip} — ${pulseDiagnosis(pulseTrip)}`
+                  : `detector trip: ${stepGuard.trip}`,
               ...(budget ? { raiseWith: budget.env } : {}),
             },
           },
@@ -861,8 +871,9 @@ export async function executeCurrentPhase(
         );
       }
       const raiseHint = stepGuard?.trip ? budgetRaiseHint(stepGuard.trip) : null;
+      const pulseHint = pulseTrip ? ` — ${pulseDiagnosis(pulseTrip)}` : "";
       notify(
-        `kstack: ${reason} — step paused for a human decision; resume via /kstack re-runs the step in resume mode.${raiseHint ? ` — ${raiseHint}` : ""}`,
+        `kstack: ${reason}${pulseHint} — step paused for a human decision; resume via /kstack re-runs the step in resume mode.${raiseHint ? ` — ${raiseHint}` : ""}`,
         "warning",
       );
       return;
@@ -1079,7 +1090,7 @@ export async function runDeterministicDelegation(
   planOverride?: Array<{ agent: string; task: string; interpolated?: boolean; env?: Record<string, string>; timeoutMs?: number; budget?: { tokens?: number; context?: number } }>,
   // S3/D28 out-param: when set (delegated-step runs only) a StepRun watches the
   // child event stream; a detector trip lands in .trip and aborts the spawn.
-  stepGuard?: { stepId: string; trip?: string },
+  stepGuard?: { stepId: string; trip?: string; pulseTrip?: PulseTrip },
   // TASK_04 out-param: set when the delegation stopped early on a quota
   // (wall-clock budget) — the caller parks cleanly instead of completing the
   // phase on partial results. The quota-parked ledger event is appended at
@@ -1177,8 +1188,13 @@ export async function runDeterministicDelegation(
       // attempt with a fresh run (the failed attempt's counters must not
       // count twice against the step budgets).
       let stepRun = stepGuard ? newStepRun() : null;
-      // The SPEND/context caps default to the phase's timeout class; a
-      // step-declared budget overrides them.
+      // S5a hotfix / ADR-64: the PULSE — the orchestrator's periodic sanity
+      // check on the child. It asks "is it still working?", NOT "how much has
+      // it done?" — the quota (ADR-31) is gone.
+      let pulse = stepGuard ? newPulse(task, { repoRoot: wfCtx.cwd }) : null;
+      const pulseCfg = pulseLimits();
+      // The SPEND/context caps default to NO LIMIT (ADR-64); a step-declared
+      // budget overrides them.
       const stepLimits = stepRun ? { ...stepBudgetDefaults(phase.id), ...(step.budget ?? {}) } : null;
 
       const req: SpawnRequest = {
@@ -1200,6 +1216,7 @@ export async function runDeterministicDelegation(
               const run = stepRun;
               if (!stepGuard || stepGuard.trip || !run) return;
               feedStepEvent(run, event);
+              if (pulse) feedPulseEvent(pulse, event);
               const rule = detectStuck(run);
               if (rule) {
                 stepGuard.trip = `stuck:${rule}:${phase.id}.${stepGuard.stepId}`;
@@ -1214,6 +1231,18 @@ export async function runDeterministicDelegation(
                 }
               }
               if (budget.exceeded) stepGuard.trip = `budget-exceeded:${budget.exceeded}:${phase.id}.${stepGuard.stepId}`;
+              // ADR-64: the periodic pulse — the drift measure runs every N
+              // events; the stall is the heartbeat's job (it needs a silent
+              // child, which this path never sees). A scope drift is a HARD
+              // signal (the child wrote outside the repository): it acts at
+              // once, not at the next pulse point.
+              if (pulse && !stepGuard.trip) {
+                const trip = pulse.trip ?? (pulseDue(pulse, pulseCfg) ? evaluatePulse(pulse, pulseCfg) : null);
+                if (trip) {
+                  stepGuard.pulseTrip = trip;
+                  stepGuard.trip = pulsePausedReason(trip, phase.id, stepGuard.stepId);
+                }
+              }
             }
           : undefined,
         // STEP 5b: observe-only liveness — dual sink (notify + run report).
@@ -1230,45 +1259,106 @@ export async function runDeterministicDelegation(
         },
       };
       delegationEvent(pi, { phaseId: phase.id, step: index, agent: step.agent, event: "started" });
-      // STEP 2f/4d: at most one retry for transient failures; the cooldown
-      // depends on the failure class (timeout → long, fast blip → short).
-      let result = await spawnFn(req);
-      const decision = retryDecision(result, 1);
-      // A detector trip is NOT a transient failure — retrying would re-run the
-      // same looping/budget-blown step, so the single-retry path is skipped.
-      if (decision.retry && alive() && !stepGuard?.trip) {
-        // The failed attempt burned real tokens — account for them NOW: the
-        // retry overwrites `result`, so the post-step accounting below never
-        // sees attempt #1's usage.
-        recordTokens((result.usage?.input ?? 0) + (result.usage?.output ?? 0));
-        delegationEvent(pi, {
-          phaseId: phase.id,
-          step: index,
-          agent: step.agent,
-          event: "retrying",
-          reason: result.timedOut ? "timeout" : `exit ${result.exitCode}`,
-          delaySec: Math.round(decision.delayMs / 1000),
-        });
+      // ADR-64: the HEARTBEAT — the pulse must also fire when the child goes
+      // SILENT (no events at all). The event path cannot see that case; this
+      // timer can. It only SETS the trip; the spawn's abort poll does the
+      // killing.
+      const heartbeat = setInterval(() => {
         try {
-          ctx.ui.notify(
-            `kstack: subagent "${step.agent}" failed transiently (${result.timedOut ? "timeout" : `exit ${result.exitCode}`}) — retrying once in ${Math.round(decision.delayMs / 1000)}s with a raised limit…`,
-            "warning",
-          );
+          if (!pulse || stepGuard?.trip) return;
+          const trip = evaluatePulse(pulse, pulseCfg);
+          if (trip) {
+            stepGuard.pulseTrip = trip;
+            stepGuard.trip = pulsePausedReason(trip, phase.id, stepGuard.stepId);
+          }
         } catch {
-          /* stale ctx */
+          /* a timer callback must never throw — it would kill the host */
         }
-        await delay(decision.delayMs);
-        if (alive()) {
-          // A retry is a FRESH attempt: the transient StepRun's counters
-          // (turns/spend/context) restart — otherwise the failed attempt's
-          // usage would count twice against the step budgets.
-          if (stepRun) stepRun = newStepRun();
-          result = await spawnFn({
-            ...req,
-            timeoutMs: retryTimeoutMs(req, decision.timeoutScale),
+      }, pulseHeartbeatMs());
+      heartbeat.unref?.();
+      // ADR-64: one CORRECTIVE retry per step. The old cycle was trip → park
+      // → re-dispatch from zero → trip again; the recovery brief tells the
+      // next attempt to CONTINUE from the repository, not to start over.
+      let correctiveUsed = false;
+      let result: SpawnResult;
+      try {
+        result = await spawnFn(req);
+        const decision = retryDecision(result, 1);
+        // A detector trip is NOT a transient failure — retrying would re-run the
+        // same looping/budget-blown step, so the single-retry path is skipped.
+        if (decision.retry && alive() && !stepGuard?.trip) {
+          // The failed attempt burned real tokens — account for them NOW: the
+          // retry overwrites `result`, so the post-step accounting below never
+          // sees attempt #1's usage.
+          recordTokens((result.usage?.input ?? 0) + (result.usage?.output ?? 0));
+          delegationEvent(pi, {
+            phaseId: phase.id,
+            step: index,
+            agent: step.agent,
+            event: "retrying",
+            reason: result.timedOut ? "timeout" : `exit ${result.exitCode}`,
+            delaySec: Math.round(decision.delayMs / 1000),
           });
+          try {
+            ctx.ui.notify(
+              `kstack: subagent "${step.agent}" failed transiently (${result.timedOut ? "timeout" : `exit ${result.exitCode}`}) — retrying once in ${Math.round(decision.delayMs / 1000)}s with a raised limit…`,
+              "warning",
+            );
+          } catch {
+            /* stale ctx */
+          }
+          await delay(decision.delayMs);
+          if (alive()) {
+            // A retry is a FRESH attempt: the transient StepRun's counters
+            // (turns/spend/context) restart — otherwise the failed attempt's
+            // usage would count twice against the step budgets.
+            if (stepRun) stepRun = newStepRun();
+            result = await spawnFn({
+              ...req,
+              timeoutMs: retryTimeoutMs(req, decision.timeoutScale),
+            });
+          }
         }
+        // ADR-64: the corrective retry. The pulse stopped the child (it went
+        // quiet, drifted off the brief, or left the repository); ONE more
+        // attempt runs with a recovery brief that forbids a restart.
+        if (stepGuard?.trip?.startsWith("pulse:") && pulse?.trip && !correctiveUsed && alive()) {
+          correctiveUsed = true;
+          const recovery = pulseRecoveryBrief(pulse.trip, phase.id, stepGuard?.stepId ?? "step");
+          try {
+            ctx.ui.notify(
+              `kstack: the pulse stopped "${stepGuard.stepId}" (${pulse.trip.signal}) — one corrective retry with a recovery brief.`,
+              "warning",
+            );
+          } catch {
+            /* stale ctx */
+          }
+          delegationEvent(pi, {
+            phaseId: phase.id,
+            step: index,
+            agent: step.agent,
+            event: "retrying",
+            reason: `pulse:${pulse.trip.signal}`,
+          });
+          // the aborted attempt burned tokens — account for them now
+          recordTokens((result.usage?.input ?? 0) + (result.usage?.output ?? 0));
+          // a fresh attempt: the counters and the pulse restart
+          if (stepRun) stepRun = newStepRun();
+          pulse = newPulse(`${task}\n\n${recovery}`, { repoRoot: wfCtx.cwd });
+          stepGuard.trip = undefined;
+          result = await spawnFn({ ...req, task: `${task}\n\n${recovery}` });
+        }
+      } finally {
+        clearInterval(heartbeat);
       }
+      // ADR-64: the pulse's verdict on this step — the run report carries it.
+      recordPulseSummary(`${phase.id}.${stepGuard?.stepId ?? "step"}`, {
+        pulses: pulse?.pulses ?? 0,
+        maxGapSec: Math.round((pulse?.maxGapMs ?? 0) / 1000),
+        turns: pulse?.turns,
+        trip: pulse?.trip?.signal,
+        lastActions: pulse?.lastActions,
+      });
       out.push({ agent: step.agent, result });
       delegationEvent(pi, {
         phaseId: phase.id,
