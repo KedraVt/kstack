@@ -109,6 +109,9 @@ export function loadActiveState(ctx: ExtensionContext): WorkflowState | null {
         // channel too — only a plain string may name an env var (it is
         // printed back to the human, never executed).
         if (typeof normalized.budgetRaiseEnv !== "string") delete normalized.budgetRaiseEnv;
+        // S5a hotfix / ADR-64: the pulse's diagnosis rides the untrusted
+        // entry channel too — only a plain string may be shown to the human.
+        if (typeof normalized.pulseDiagnosis !== "string") delete normalized.pulseDiagnosis;
         // S5a/TASK_16: the provenance park list rides the same untrusted
         // entry channel — only plain strings may name a file and a line.
         if (Array.isArray(normalized.provenanceFindings)) {
@@ -636,6 +639,8 @@ export function forceApproveParked(state: WorkflowState, phases?: WorkflowPhase[
     verdictPark: undefined,
     pendingVerdict: undefined,
     pausedReason: undefined,
+    // ADR-64: the park is over — its diagnosis must not haunt the next park.
+    pulseDiagnosis: undefined,
     frozenUntilHuman: false,
     freezeInfo: undefined,
     resumeMode: undefined,
@@ -677,6 +682,8 @@ export function returnParkedWithContext(state: WorkflowState, phases: WorkflowPh
     frozenUntilHuman: false,
     freezeInfo: undefined,
     pausedReason: undefined,
+    // ADR-64: the park is over — its diagnosis must not haunt the next park.
+    pulseDiagnosis: undefined,
     // The park is over — the re-run gets a fresh repair budget.
     verdictRepairTried: undefined,
     retryContext: {

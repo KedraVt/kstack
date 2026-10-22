@@ -964,9 +964,11 @@ describe("code-review pass-1 fixes", () => {
     const saved = process.env.KSTACK_PI_SUBAGENT_TIMEOUT;
     try {
       process.env.KSTACK_PI_SUBAGENT_TIMEOUT = "300";
-      // "verify" class = 900s per TIMEOUT_CLASS_MAP — the retry must scale
-      // 900s, not the 300s global default (which would LOWER the limit).
-      assert.equal(retryTimeoutMs({ phaseId: "verify" }, 1.5), 900 * 1000 * 1.5);
+      // "verify" class = 3600s per TIMEOUT_CLASS_MAP (ADR-64 raised the
+      // class timeouts: they are runaway backstops, not work quotas) — the
+      // retry must scale the CLASS timeout, not the 300s global default
+      // (which would LOWER the limit).
+      assert.equal(retryTimeoutMs({ phaseId: "verify" }, 1.5), 3600 * 1000 * 1.5);
       // Explicit per-request override still wins.
       assert.equal(retryTimeoutMs({ timeoutMs: 1000 }, 1.5), 1500);
       // No phaseId, no override → global default (here 300s via the env set

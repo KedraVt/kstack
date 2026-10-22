@@ -369,7 +369,35 @@ CONFIRMED ROOT CAUSE: <one-line cause> | files: <comma-separated file paths>
 the root-cause scout->planner chain collapses to ONE validate-only planner step. Anti-spoofing guards (ALL mandatory, see skip.ts): (a) the marker only counts inside the `## HANDOFF` section, (b) every cited file must exist on disk relative to cwd, (c) the validate step itself is never skippable and the workflow never collapses directly to fix. A leading `REFUTED:` line rebuilds and re-runs the full original chain prefixed with an explicit NOTE. The QA fix phase is structurally skipped when the test phase falsifiably reports zero failures (`allTestsPassed`).
 
 ### Per-class timeouts
-`KSTACK_PI_TIMEOUT_EXPLORE` (default 900s), `KSTACK_PI_TIMEOUT_WORK` (default 1500s), `KSTACK_PI_TIMEOUT_VERIFY` (default 900s); unknown ids fall back to `KSTACK_PI_SUBAGENT_TIMEOUT` (default 1200s). Values are seconds. Every registered phase id maps to exactly one class (`timeoutClassFor`), enforced by test.
+`KSTACK_PI_TIMEOUT_EXPLORE` (default 3600s), `KSTACK_PI_TIMEOUT_WORK` (default 14400s), `KSTACK_PI_TIMEOUT_VERIFY` (default 3600s); unknown ids fall back to `KSTACK_PI_SUBAGENT_TIMEOUT` (default 3600s). Values are seconds. Every registered phase id maps to exactly one class (`timeoutClassFor`), enforced by test.
+
+These are **runaway backstops**, not work quotas: they catch a child that never stops, and they no longer cut a working one in half. What actually guards a delegated child is the **pulse** (below).
+
+### The pulse — the sanity check on a delegated child
+There is **no budget**: no turn cap, no token cap, no context cap, no phase
+wall-clock cap (ADR-64). The orchestrator instead checks **periodically**
+whether the child is still working:
+
+| signal | meaning | default |
+|---|---|---|
+| `stalled` | no progress for a while — a progress tick is a tool call with a new `(tool, args)` key or an assistant message whose text differs from the previous one | `KSTACK_PI_NO_PROGRESS_SEC` = 900 (15 min) |
+| `lexical-drift` | the child's recent words stopped sharing the brief's words **while the previous window still did** (the collapse is the signal) | window 8 messages, ≥3 shared terms, ≥120 words, every `KSTACK_PI_DRIFT_EVERY_EVENTS` = 20 events |
+| `scope-drift` | the child wrote a file outside the repository it was given (the OS temp dir is allowed) | acts at once |
+
+A pulse trip does **not** park immediately: the step is re-dispatched **once**
+with a recovery brief that names what went wrong and forbids a restart ("the
+repository already holds what the previous attempt completed"). Only the second
+trip parks — and the park carries the diagnosis, so the panel says *what the
+child was doing* instead of "raise a budget". The run report carries the
+pulse row per step (the evaluations, the longest gap without progress, the
+signal). The loop rules of `stuck.ts` (identical action, alternating, error
+streak, monologue, context errors) stay as they are — they are the "is it
+going mad" check.
+
+The old caps still work when an operator asks for them explicitly:
+`KSTACK_PI_STEP_MAX_TURNS` / `_TOKENS` / `_CONTEXT` / `_MS` / `_USD` /
+`_USD_PER_MIN` (a number enables that cap, `off` is unlimited). The phase
+wall-clock budget `KSTACK_PI_DELEGATION_BUDGET_SEC` is **off** by default.
 
 ### Environment variables
 
@@ -383,17 +411,20 @@ the root-cause scout->planner chain collapses to ONE validate-only planner step.
 | `KSTACK_PI_SPRINT` | on | registers the sprint workflow; `off` hides it from menu and router entirely |
 | `KSTACK_PI_LOOPBACKS` | on | sprint loop-back engine; `off` ⇒ negative gate verdicts park in a `/kstack` panel (Accept / Re-run / Abort) instead of retrying |
 | `KSTACK_PI_VERDICTS` | on | deterministic verdict parsing; `off` ⇒ no auto-routing; gates park in a `/kstack` panel (Accept / Re-run / Abort) |
-| `KSTACK_PI_DELEGATION_BUDGET_SEC` | 2700 | wall-clock budget for one phase's whole delegation chain; `off` disables |
+| `KSTACK_PI_DELEGATION_BUDGET_SEC` | off | wall-clock budget for one phase's whole delegation chain; `off` (the default) disables it — the pulse guards the child instead (ADR-64) |
 | `KSTACK_PI_SPRINT_MAX_ATTEMPTS` | 4 | consecutive implement-rerun ceiling per review gate (counter resets on gate approval or on "Accept result — continue past the gate") |
 | `KSTACK_PI_SPRINT_ARCH_MAX_ATTEMPTS` | 5 | system-design rerun ceiling after architect rejections |
 | `KSTACK_PI_MODEL_FAST` / `_STRONG` | unset | model tiers for mechanical vs judgment-heavy phases; unset keeps each agent's own default (inert) |
 | `KSTACK_PI_STRICT_CONTENT` | off | heuristic scan + ASCII-sentinel enveloping of page-content tool output (WP2 defense-in-depth) |
-| `KSTACK_PI_SUBAGENT_TIMEOUT` | 1200 | fallback timeout, seconds |
-| `KSTACK_PI_TIMEOUT_EXPLORE` / `_WORK` / `_VERIFY` | 900 / 1500 / 900 | per-class timeouts, seconds |
+| `KSTACK_PI_SUBAGENT_TIMEOUT` | 3600 | fallback timeout, seconds |
+| `KSTACK_PI_TIMEOUT_EXPLORE` / `_WORK` / `_VERIFY` | 3600 / 14400 / 3600 | per-class runaway backstops, seconds (ADR-64 raised them: they are not work quotas) |
+| `KSTACK_PI_NO_PROGRESS_SEC` | 900 | the pulse's stall threshold: no progress for this long stops the child, seconds |
+| `KSTACK_PI_DRIFT_WINDOW` / `_TERMS` / `_MIN_WORDS` / `_EVERY_EVENTS` | 8 / 3 / 120 / 20 | the pulse's lexical-drift measure: the window size, the shared terms that must collapse, the minimum words, the evaluation cadence |
+| `KSTACK_PI_PULSE_HEARTBEAT_SEC` | 30 | how often the orchestrator wakes up to evaluate the pulse, seconds |
 | `KSTACK_PI_LIVENESS_SEC` | 240 | observe-only silence threshold, seconds; `off` disables |
 | `KSTACK_PI_MAX_RUN_TOKENS` | disabled | orderly chain stop after cumulative token usage exceeds it |
 
-Run reports land in `.kstack/runs/<ISO-timestamp>-<workflowId>.json` (per-step durations, tool calls, turns, token usage, handoff levels, incompleteness, timeout class, liveness observations).
+Run reports land in `.kstack/runs/<ISO-timestamp>-<workflowId>.json` (per-step durations, tool calls, turns, token usage, handoff levels, incompleteness, timeout class, liveness observations, and the pulse row: the evaluations, the longest gap without progress, the signal that stopped the child).
 
 ## Security & trust boundaries
 

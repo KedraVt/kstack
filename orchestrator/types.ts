@@ -406,6 +406,14 @@ export interface WorkflowState {
    */
   budgetRaiseEnv?: string;
   /**
+   * S5a hotfix / ADR-64: the pulse's diagnosis of a parked step — what the
+   * child was doing and which signal fired ("stalled — no progress for 900s
+   * (last action: read)"). Persisted with the state so the /kstack panel can
+   * show it after a restart: a park the human cannot read is a park the
+   * human repeats. Absent when the park was not a pulse trip.
+   */
+  pulseDiagnosis?: string;
+  /**
    * S5a/TASK_16 (ADR-40, INV-23): the park list of a provenance park —
    * `file:line  <excerpt>` per copied passage, at most 10 entries. It rides
    * the state so the /kstack panel can show the human exactly what was

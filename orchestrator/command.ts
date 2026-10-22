@@ -79,12 +79,14 @@ export function budgetPanelHint(state: Pick<WorkflowState, "pausedReason" | "bud
 
 /**
  * S5a/ADR-62 — the panel title of a paused run, with the budget hint when
- * the park is a budget trip.
+ * the park is a budget trip and the pulse's diagnosis when the park is a
+ * pulse trip (ADR-64).
  */
 function pausedPanelTitle(state: WorkflowState): string {
   const reason = state.pausedReason ? ` — ${state.pausedReason}` : "";
   const hint = budgetPanelHint(state);
-  return `Workflow paused${reason}${hint ? ` — ${hint}` : ""}`;
+  const diagnosis = state.pulseDiagnosis ? ` — ${state.pulseDiagnosis}` : "";
+  return `Workflow paused${reason}${hint ? ` — ${hint}` : ""}${diagnosis}`;
 }
 
 /**
@@ -973,6 +975,8 @@ export async function manualAdvancePanel(state: WorkflowState, ctx: ExtensionCom
   endStepWatch();
   const base: WorkflowState = {
     ...state, status: "active", pausedReason: undefined, verdictPark: undefined, pendingVerdict: undefined,
+    // ADR-64: the park is over — its diagnosis must not haunt the next park.
+    pulseDiagnosis: undefined,
     resumeMode: undefined, reissues: undefined, stepGate: undefined,
   };
   const rec = recordStepResult(base, phase, { status: "completed", summary: "Completed manually by the user via /kstack." });

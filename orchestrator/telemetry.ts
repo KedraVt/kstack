@@ -41,6 +41,27 @@ export interface RunReportStep {
   timedOut?: boolean;
   /** Timeout class resolved for the phase (STEP 5); "default" until then. */
   timeoutClass?: string;
+  /** The pulse's verdict on the step (ADR-64) — the calibration evidence. */
+  pulse?: PulseSummary;
+}
+
+/**
+ * The pulse's verdict on one delegated step (ADR-64): how often the child
+ * was checked, how long it went without making progress, and — when it
+ * stopped — which signal fired. This is what the retro calibrates the
+ * thresholds on, instead of the guesswork the quota needed.
+ */
+export interface PulseSummary {
+  /** The number of pulse evaluations. */
+  pulses: number;
+  /** The longest gap without progress, in seconds. */
+  maxGapSec: number;
+  /** The turns the child made. */
+  turns?: number;
+  /** The signal that stopped the child (absent when it was fine). */
+  trip?: string;
+  /** The last actions of the child. */
+  lastActions?: string[];
 }
 
 /**
@@ -85,6 +106,8 @@ interface Accumulator {
   startedAt: string;
   steps: RunReportStep[];
   liveness: LivenessObservation[];
+  /** The pulse's verdict per step key ("<phaseId>.<stepId>") — ADR-64. */
+  pulses: Map<string, PulseSummary>;
 }
 
 let current: Accumulator | null = null;
@@ -96,6 +119,7 @@ export function beginRun(workflowId: string): void {
     startedAt: new Date().toISOString(),
     steps: [],
     liveness: [],
+    pulses: new Map(),
   };
   tokensUsedTotal = 0;
 }
@@ -126,7 +150,17 @@ export function recordDelegatedStep(step: RunReportStep): void {
     incomplete: step.incomplete ?? false,
     timedOut: step.timedOut ?? false,
     timeoutClass: step.timeoutClass ?? "default",
+    pulse: current.pulses.get(`${step.phaseId}.${step.stepId ?? ""}`),
   });
+}
+
+/**
+ * Record the pulse's verdict on a step (ADR-64). The key is
+ * "<phaseId>.<stepId>" — the row is merged into the step's report entry.
+ */
+export function recordPulseSummary(key: string, summary: PulseSummary): void {
+  if (!current) return;
+  current.pulses.set(key, summary);
 }
 
 /** Record an observe-only liveness event (STEP 5 wiring). */
@@ -139,7 +173,7 @@ export function recordLiveness(observation: LivenessObservation): void {
 export function buildRunReport(workflowId: string): RunReport {
   const acc = current && current.workflowId === workflowId
     ? current
-    : { workflowId, startedAt: new Date().toISOString(), steps: [], liveness: [] };
+    : { workflowId, startedAt: new Date().toISOString(), steps: [], liveness: [], pulses: new Map<string, PulseSummary>() };
   return {
     workflowId: acc.workflowId,
     startedAt: acc.startedAt,

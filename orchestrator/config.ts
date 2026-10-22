@@ -5,6 +5,8 @@
  * model-discretionary advancement).
  */
 
+import type { PulseLimits } from "./pulse.ts";
+
 function parse(v: string | undefined): boolean | undefined {
   if (v === undefined || v === "") return undefined;
   return v === "1" || v.toLowerCase() === "on" || v.toLowerCase() === "true";
@@ -179,14 +181,21 @@ export function timeoutClassFor(phaseId: string): TimeoutClass | null {
   return TIMEOUT_CLASS_MAP[phaseId] ?? null;
 }
 
-/** Per-phase subagent timeout in milliseconds, resolved from the class envs. */
+/**
+ * Per-phase subagent timeout in milliseconds, resolved from the class envs.
+ *
+ * S5a hotfix / ADR-64: these are RUNAWAY BACKSTOPS, not work quotas. The old
+ * values (15/25/15 min) cut a legitimate implementation in half and lost the
+ * work; the pulse (pulse.ts) is what decides whether the child is still
+ * going. The absolute cap only catches a child that never stops.
+ */
 export function subagentTimeoutFor(phaseId: string): number {
   const cls = TIMEOUT_CLASS_MAP[phaseId];
   let sec: number;
-  if (cls === "EXPLORE") sec = numberEnv("KSTACK_PI_TIMEOUT_EXPLORE", 900) as number;
-  else if (cls === "WORK") sec = numberEnv("KSTACK_PI_TIMEOUT_WORK", 1500) as number;
-  else if (cls === "VERIFY") sec = numberEnv("KSTACK_PI_TIMEOUT_VERIFY", 900) as number;
-  else sec = numberEnv("KSTACK_PI_SUBAGENT_TIMEOUT", 1200) as number;
+  if (cls === "EXPLORE") sec = numberEnv("KSTACK_PI_TIMEOUT_EXPLORE", 3600) as number;
+  else if (cls === "WORK") sec = numberEnv("KSTACK_PI_TIMEOUT_WORK", 14400) as number;
+  else if (cls === "VERIFY") sec = numberEnv("KSTACK_PI_TIMEOUT_VERIFY", 3600) as number;
+  else sec = numberEnv("KSTACK_PI_SUBAGENT_TIMEOUT", 3600) as number;
   return sec * 1000;
 }
 
@@ -263,13 +272,42 @@ export function maxRunTokens(): number {
 
 /**
  * Wall-clock budget for ONE phase's whole deterministic delegation (all steps
- * + retries). Guards against pathological hangs: past the budget the chain
- * stops orderly with an explicit outcome instead of hanging forever. Default
- * 45 min; "off" disables.
+ * + retries).
+ *
+ * S5a hotfix / ADR-64: OFF by default. It was a QUOTA — it cut the phase by
+ * the clock regardless of the work being done, and a long implementation hit
+ * it. The pulse (no progress for N seconds) is the liveness guard now; the
+ * per-step runaway backstop (subagentTimeoutFor) catches a child that never
+ * stops. The env stays for an operator who wants a ceiling.
  */
 export function delegationBudgetMs(): number | "off" {
+  const raw = process.env.KSTACK_PI_DELEGATION_BUDGET_SEC;
+  if (raw === undefined || raw.trim() === "") return "off";
+  if (raw.trim().toLowerCase() === "off") return "off";
   // min: 1 — a sub-second budget is below the spawn floor and trips the
   // budget before the first step could ever run.
-  const sec = numberEnv("KSTACK_PI_DELEGATION_BUDGET_SEC", 2700, { allowOff: true, min: 1 });
-  return sec === "off" ? "off" : sec * 1000;
+  const sec = numberEnv("KSTACK_PI_DELEGATION_BUDGET_SEC", 2700, { min: 1 }) as number;
+  return sec * 1000;
+}
+
+// --- The pulse (S5a hotfix / ADR-64) -----------------------------------------
+
+/**
+ * The pulse's limits: the orchestrator's periodic sanity check on a
+ * delegated child. Every knob is env-overridable; the defaults are the ones
+ * the human approved (15 minutes without progress = stalled).
+ */
+export function pulseLimits(): PulseLimits {
+  return {
+    noProgressMs: (numberEnv("KSTACK_PI_NO_PROGRESS_SEC", 900, { min: 1 }) as number) * 1000,
+    driftWindow: numberEnv("KSTACK_PI_DRIFT_WINDOW", 8, { min: 1 }) as number,
+    driftTerms: numberEnv("KSTACK_PI_DRIFT_TERMS", 3, { min: 1 }) as number,
+    driftMinWords: numberEnv("KSTACK_PI_DRIFT_MIN_WORDS", 120, { min: 1 }) as number,
+    driftEveryEvents: numberEnv("KSTACK_PI_DRIFT_EVERY_EVENTS", 20, { min: 1 }) as number,
+  };
+}
+
+/** How often the executor wakes up to evaluate the pulse (ms). */
+export function pulseHeartbeatMs(): number {
+  return (numberEnv("KSTACK_PI_PULSE_HEARTBEAT_SEC", 30, { min: 1 }) as number) * 1000;
 }

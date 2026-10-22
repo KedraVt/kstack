@@ -28,7 +28,7 @@
  *             (input + cacheRead + cacheWrite) — the real context pressure.
  */
 
-import { numberEnv, timeoutClassFor, type TimeoutClass } from "./config.ts";
+import { numberEnv } from "./config.ts";
 
 export type StuckRule =
   | "identical-action"
@@ -254,7 +254,9 @@ export function feedStepEvent(run: StepRun, event: StepWatchEvent): void {
 export function detectStuck(run: StepRun): StuckRule | null {
   if (run.samePairStreak >= 4) return "identical-action";
   if (run.consecutiveErrors >= 3) return "action-errors";
-  if (run.monologueStreak >= 3) return "monologue";
+  // S5a hotfix / ADR-64: the monologue threshold is 5, not 3 — a child that
+  // writes three long messages in a row is working, not looping.
+  if (run.monologueStreak >= 5) return "monologue";
   const w = run.actionWindow;
   if (w.length >= 6) {
     const t = w.slice(-6);
@@ -284,37 +286,34 @@ function limit(v: number | "off"): number {
 }
 
 /**
- * Per-timeout-class SPEND caps. A class's steps do more work than a generic
- * one (WORK implements, VERIFY reviews), so the generic 250k cap tripped
- * healthy steps. An unmapped phase id falls back to the generic default.
- */
-const CLASS_TOKEN_LIMITS: Record<TimeoutClass, number> = {
-  EXPLORE: 400_000,
-  WORK: 600_000,
-  VERIFY: 300_000,
-};
-
-const DEFAULT_TOKEN_LIMIT = 250_000;
-/** Peak-prompt cap — the same for every class (context pressure is uniform). */
-const DEFAULT_CONTEXT_LIMIT = 180_000;
-
-/**
- * Per-timeout-class TURN caps (S5a/TASK_09, ADR-31).
+ * S5a hotfix / ADR-64 — NO QUOTA BY DEFAULT.
  *
- * The flat 60-turn limit tripped the scout twice in this sprint's own run:
- * an EXPLORE step legitimately reads far more than 60 turns, and a WORK step
- * that implements a feature needs more than that too. The limits are
- * PROVISIONAL — they are calibrated on a single run and are re-checked by
- * the retro phase (AC-15, AC-23). Every one of them stays env-overridable.
+ * The per-class turn/token caps (ADR-31, TASK_09) were a QUOTA: they counted
+ * the work and cut the step off when the count crossed a line. The line was
+ * calibrated on ONE run, and the cycle it produced never converged — a trip
+ * parked the run, the resume re-dispatched the same step from zero, and the
+ * fresh attempt burned the same quota again (the human repeated the
+ * implementation phase ~20 times).
+ *
+ * The pulse (pulse.ts) replaces the quota: it asks whether the child is
+ * still WORKING, not how much it has done. The caps stay available as an
+ * explicit operator choice — set the env and they bite again.
  */
-export const CLASS_TURN_LIMITS: Record<TimeoutClass, number> = {
-  EXPLORE: 150,
-  WORK: 200,
-  VERIFY: 100,
-};
-
-/** The turn cap of a phase whose timeout class is unmapped. */
-export const DEFAULT_TURN_LIMIT = 100;
+export function stepBudgetDefaults(phaseId?: string): StepBudgets {
+  // The phase id no longer selects a limit (there is no class limit any
+  // more) — the parameter is kept so the callers and the tests keep working.
+  void phaseId;
+  return {
+    turns: limit(numberEnv("KSTACK_PI_STEP_MAX_TURNS", Number.POSITIVE_INFINITY, { allowOff: true })),
+    tokens: limit(numberEnv("KSTACK_PI_STEP_MAX_TOKENS", Number.POSITIVE_INFINITY, { allowOff: true })),
+    context: limit(numberEnv("KSTACK_PI_STEP_MAX_CONTEXT", Number.POSITIVE_INFINITY, { allowOff: true })),
+    // No pricing feed exists in-repo — the USD dims are off too. They trip
+    // only when an env cap is set.
+    usd: limit(numberEnv("KSTACK_PI_STEP_MAX_USD", Number.POSITIVE_INFINITY, { allowOff: true })),
+    ms: limit(numberEnv("KSTACK_PI_STEP_MAX_MS", Number.POSITIVE_INFINITY, { allowOff: true })),
+    usdPerMin: limit(numberEnv("KSTACK_PI_STEP_MAX_USD_PER_MIN", Number.POSITIVE_INFINITY, { allowOff: true })),
+  };
+}
 
 /** The env var that raises each budget dim — the park message names it. */
 export const BUDGET_ENV: Record<BudgetDim, string> = {
@@ -327,26 +326,10 @@ export const BUDGET_ENV: Record<BudgetDim, string> = {
 };
 
 /**
- * Env-resolved per-step budget limits. Unset envs → conservative defaults
- * ("off" disables a dim). The SPEND cap defaults to the phase's timeout
- * class (timeoutClassFor); an explicit KSTACK_PI_STEP_MAX_TOKENS /
- * KSTACK_PI_STEP_MAX_CONTEXT always wins over the class default.
+ * Env-resolved per-step budget limits. Unset envs → NO LIMIT (ADR-64: the
+ * quota is gone; the pulse guards the child instead). The literal "off"
+ * disables a dim, an explicit number enables that cap.
  */
-export function stepBudgetDefaults(phaseId?: string): StepBudgets {
-  const cls = phaseId ? timeoutClassFor(phaseId) : null;
-  const tokenDefault = cls ? CLASS_TOKEN_LIMITS[cls] : DEFAULT_TOKEN_LIMIT;
-  const turnDefault = cls ? CLASS_TURN_LIMITS[cls] : DEFAULT_TURN_LIMIT;
-  return {
-    turns: limit(numberEnv("KSTACK_PI_STEP_MAX_TURNS", turnDefault, { allowOff: true })),
-    tokens: limit(numberEnv("KSTACK_PI_STEP_MAX_TOKENS", tokenDefault, { allowOff: true })),
-    context: limit(numberEnv("KSTACK_PI_STEP_MAX_CONTEXT", DEFAULT_CONTEXT_LIMIT, { allowOff: true })),
-    // No pricing feed exists in-repo — the USD dims default to off (Infinity,
-    // same convention as maxRunTokens). They trip only when an env cap is set.
-    usd: limit(numberEnv("KSTACK_PI_STEP_MAX_USD", Number.POSITIVE_INFINITY, { allowOff: true })),
-    ms: limit(numberEnv("KSTACK_PI_STEP_MAX_MS", 30 * 60 * 1000, { allowOff: true })),
-    usdPerMin: limit(numberEnv("KSTACK_PI_STEP_MAX_USD_PER_MIN", Number.POSITIVE_INFINITY, { allowOff: true })),
-  };
-}
 
 const BUDGET_DIMS = ["turns", "tokens", "context", "usd", "ms", "usdPerMin"] as const;
 export type BudgetDim = (typeof BUDGET_DIMS)[number];
