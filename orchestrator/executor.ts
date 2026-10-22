@@ -1246,11 +1246,13 @@ export async function runDeterministicDelegation(
             }
           : undefined,
         // STEP 5b: observe-only liveness — dual sink (notify + run report).
+        // ADR-64: the pulse is what STOPS a silent child (after the no-progress
+        // window); this observation stays a notice + a telemetry row.
         onLiveness: (obs) => {
           recordLiveness(obs);
           try {
             ctx.ui.notify(
-              `[liveness-observe] would abort '${obs.agent}' after ${obs.gapSec}s of silence (last event: ${obs.lastEvent}, tool: ${obs.lastTool ?? "n/a"})`,
+              `[liveness-observe] '${obs.agent}' has been silent for ${obs.gapSec}s (last event: ${obs.lastEvent}, tool: ${obs.lastTool ?? "n/a"}) — the pulse stops it if the silence continues.`,
               "warning",
             );
           } catch {
